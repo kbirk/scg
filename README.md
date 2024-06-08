@@ -1,6 +1,8 @@
 # scg - Simple Code Generator
 
-This is a toy code generator for generating messages and RPC client / server boilerplate. Similar to protobuf + gRPC, but worse in every conceivable way.
+This is a toy code generator for generating messages and RPC client / server boilerplate.
+
+Similar to protobuf + gRPC, but worse in every conceivable way.
 
 Message code is generated for both golang and C++ with JSON and binary serialization.
 
