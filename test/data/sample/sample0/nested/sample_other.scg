@@ -1,0 +1,26 @@
+package sample.other;
+
+service AuthOther {
+	rpc Authenticate (AuthRequestAuthOther) returns (AuthResponseAuthOther);
+	rpc RenewSession (TokenAuthOther) returns (TokenAuthOther);
+}
+
+message TokenAuthOther {
+	[]byte bytes = 0;
+	map[string]string claims = 1;
+}
+
+message AccountAuthOther {
+	string id = 0;
+	string email = 1;
+}
+
+message AuthRequestAuthOther {
+	string email = 0;
+	string password = 1;
+}
+
+message AuthResponseAuthOther {
+	AccountAuthOther account = 0;
+	TokenAuthOther token = 1;
+}

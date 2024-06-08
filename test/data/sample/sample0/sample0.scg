@@ -1,0 +1,26 @@
+package sample.name;
+
+service Auth {
+	rpc Authenticate (AuthRequest) returns (AuthResponse);
+	rpc RenewSession (Token) returns (Token);
+}
+
+message Token {
+	[]byte bytes = 0;
+	map[string]string claims = 1;
+}
+
+message Account {
+	string id = 0;
+	string email = 1;
+}
+
+message AuthRequest {
+	string email = 0;
+	string password = 1;
+}
+
+message AuthResponse {
+	Account account = 0;
+	Token token = 1;
+}

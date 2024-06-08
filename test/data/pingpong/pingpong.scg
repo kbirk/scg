@@ -1,0 +1,21 @@
+package pingpong;
+
+service PingPong {
+	rpc Ping (PingRequest) returns (PongResponse);
+}
+
+message Ping {
+	int32 count = 0;
+}
+
+message Pong {
+	int32 count = 0;
+}
+
+message PingRequest {
+	Ping ping = 0;
+}
+
+message PongResponse {
+	Pong pong = 0;
+}

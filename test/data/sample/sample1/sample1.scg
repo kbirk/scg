@@ -1,0 +1,5 @@
+package another.sample;
+
+service SomethingElse {
+	rpc AuthenticateAgain (sample.name.AuthRequest) returns (sample.name.AuthResponse);
+}

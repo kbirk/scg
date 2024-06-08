@@ -1,0 +1,9 @@
+package a.circular;
+
+message MessageA1 {
+	int32 b = 0;
+}
+
+message MessageA2 {
+	b.circular.MessageB1 b = 0;
+}

@@ -1,0 +1,33 @@
+package basic;
+
+message BasicStruct {
+	uint8 val_uint_8 = 0;
+	int8 val_int_8 = 1;
+	uint16 val_uint_16  = 2;
+	int16 val_int_16  = 3;
+	uint32 val_uint_32  = 4;
+	int32 val_int_32  = 5;
+	uint64 val_uint_64  = 6;
+	int64 val_int_64  = 7;
+	string val_string = 8;
+	[]string val_array_string = 9;
+	map[string]float32 val_map_string_float_32 = 10;
+}
+
+message StructA {
+	int8 val_int_8 = 0;
+	float32 val_float_32 = 1;
+	bool val_bool = 2;
+	map[uint8]string val_map_uint8_string = 3;
+}
+
+message StructB {
+	[]int32 val_array_int = 0;
+	map[string]int32 val_map_string_int = 1;
+	map[int8]map[int16]string val_map_uint8_map_uint16_string = 2;
+}
+
+message ComplicatedStruct {
+	map[string]StructA struct_a_map = 0;
+	[]StructB struct_b_array = 1;
+}

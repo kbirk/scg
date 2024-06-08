@@ -1,0 +1,75 @@
+package rpc
+
+import (
+	"context"
+
+	"github.com/kbirk/scg/pkg/serialize"
+)
+
+type metadataKey struct{}
+
+func NewContextWithMetadata(ctx context.Context, metadata map[string]string) context.Context {
+	existing := ctx.Value(metadataKey{}).(map[string]string)
+	if existing == nil {
+		existing = make(map[string]string)
+	}
+	for k, v := range metadata {
+		existing[k] = v
+	}
+	return context.WithValue(ctx, metadataKey{}, existing)
+}
+
+func GetMetadataFromContext(ctx context.Context) map[string]string {
+	v := ctx.Value(metadataKey{})
+	if v != nil {
+		md, ok := v.(map[string]string)
+		if ok {
+			return md
+		}
+	}
+	return nil
+}
+
+func CalcByteSizeContext(ctx context.Context) int {
+	md := GetMetadataFromContext(ctx)
+	size := serialize.CalcByteSizeUInt32(uint32(len(md)))
+	for k, v := range md {
+		size += serialize.CalcByteSizeString(k)
+		size += serialize.CalcByteSizeString(v)
+	}
+	return size
+}
+
+func SerializeContext(writer *serialize.FixedSizeWriter, ctx context.Context) {
+	md := GetMetadataFromContext(ctx)
+	serialize.SerializeUInt32(writer, uint32(len(md)))
+	for k, v := range md {
+		serialize.SerializeString(writer, k)
+		serialize.SerializeString(writer, v)
+	}
+}
+
+func DeserializeContext(ctx *context.Context, reader *serialize.Reader) error {
+
+	var size uint32
+	err := serialize.DeserializeUInt32(&size, reader)
+	if err != nil {
+		return err
+	}
+	if size > 0 {
+		md := make(map[string]string, size)
+		for i := 0; i < int(size); i++ {
+			var k, v string
+			err = serialize.DeserializeString(&k, reader)
+			if err != nil {
+				return err
+			}
+			err = serialize.DeserializeString(&v, reader)
+			if err != nil {
+				return err
+			}
+			md[k] = v
+		}
+	}
+	return nil
+}

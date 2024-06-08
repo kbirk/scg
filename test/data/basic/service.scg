@@ -1,0 +1,5 @@
+package basic;
+
+service BenchMarker {
+	rpc Benchy(BasicStruct) returns (ComplicatedStruct);
+}

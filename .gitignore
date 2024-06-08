@@ -1,0 +1,10 @@
+.DS_Store
+
+.vscode
+.vscode-cpp-build
+
+third_party
+.build
+
+test/*.crt
+test/*.key
