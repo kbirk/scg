@@ -11,7 +11,7 @@ import (
 
 func TestGenerateClientGo(t *testing.T) {
 
-	parse, err := parse.NewParse("../../../test/data/sample/sample0")
+	parse, err := parse.NewParse("../../../test/files/input/sample/sample0")
 	require.Nil(t, err)
 
 	for _, pkg := range parse.Packages {

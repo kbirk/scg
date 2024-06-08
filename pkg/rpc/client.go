@@ -98,18 +98,21 @@ func (c *Client) connectUnsafe() error {
 	}
 
 	// set up the WebSocket URL
-	u := url.URL{Scheme: "ws", Host: fmt.Sprintf("%s:%d", c.conf.Host, c.conf.Port), Path: "/rpc"}
 
-	c.logDebug("Connecting to " + u.String())
+	scheme := "ws"
 
 	// create dialer
 	dialer := websocket.Dialer{}
 	if c.conf.TLSConfig != nil {
 		// Configure the Dialer to use SSL/TLS
 		dialer.TLSClientConfig = c.conf.TLSConfig
+		scheme = "wss"
 	}
 
+	u := url.URL{Scheme: scheme, Host: fmt.Sprintf("%s:%d", c.conf.Host, c.conf.Port), Path: "/rpc"}
+
 	// connect to the WebSocket server
+	c.logDebug("Connecting to " + u.String())
 	conn, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		return err

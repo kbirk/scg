@@ -2,12 +2,13 @@ package test
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
-	"github.com/kbirk/scg/test/generated/pingpong"
+	"github.com/kbirk/scg/test/files/output/pingpong"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,7 @@ func (s *pingpongServerFail) Ping(ctx context.Context, req *pingpong.PingRequest
 }
 
 func TestPingPong(t *testing.T) {
+
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
@@ -78,9 +80,59 @@ func TestPingPong(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPingPongTLS(t *testing.T) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Port: 8080,
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+
+	go func() {
+		server.ListenAndServeTLS("../server.crt", "../server.key")
+	}()
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Host: "localhost",
+		Port: 8080,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true, // self signed
+		},
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+
+	c := pingpong.NewPingPongClient(client)
+
+	count := int32(0)
+
+	for {
+		resp, err := c.Ping(context.Background(), &pingpong.PingRequest{
+			Ping: pingpong.Ping{
+				Count: count,
+			},
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, count+1, resp.Pong.Count)
+		count = resp.Pong.Count
+
+		if count > 10 {
+			break
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	err := server.Shutdown(context.Background())
+	require.NoError(t, err)
+}
+
 func TestPingPongFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8081,
+		Port: 8080,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -93,7 +145,7 @@ func TestPingPongFail(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8081,
+		Port: 8080,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},

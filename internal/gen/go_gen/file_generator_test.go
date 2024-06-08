@@ -10,7 +10,7 @@ import (
 
 func TestGenerateFileGo(t *testing.T) {
 
-	parse, err := parse.NewParse("../../../test/data/sample/sample0")
+	parse, err := parse.NewParse("../../../test/files/input/sample/sample0")
 	require.Nil(t, err)
 
 	pkg, ok := parse.Packages["sample.name"]
@@ -28,7 +28,7 @@ func TestGenerateFileGo(t *testing.T) {
 
 func TestGenerateMultipleFileWithImportGo(t *testing.T) {
 
-	parse, err := parse.NewParse("../../../test/data/sample")
+	parse, err := parse.NewParse("../../../test/files/input/sample")
 	require.Nil(t, err)
 
 	pkg0, ok := parse.Packages["sample.name"]

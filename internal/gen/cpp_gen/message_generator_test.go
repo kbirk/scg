@@ -11,7 +11,7 @@ import (
 
 func TestGenerateMessagesCpp(t *testing.T) {
 
-	p, err := parse.NewParse("../../../test/data/sample/sample0")
+	p, err := parse.NewParse("../../../test/files/input/sample/sample0")
 	require.Nil(t, err)
 
 	for _, pkg := range p.Packages {

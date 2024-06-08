@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kbirk/scg/pkg/rpc"
-	"github.com/kbirk/scg/test/generated/pingpong"
+	"github.com/kbirk/scg/test/files/output/pingpong"
 )
 
 const (

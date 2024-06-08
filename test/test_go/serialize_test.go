@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/kbirk/scg/pkg/serialize"
-	"github.com/kbirk/scg/test/generated/basic"
+	"github.com/kbirk/scg/test/files/output/basic"
 	"github.com/stretchr/testify/assert"
 )
 

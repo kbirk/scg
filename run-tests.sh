@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # go tests
-go test ./...
+go test -count=1 ./...
 
 # build cpp tests
-mkdir -p .build && cd .build && cmake ../test/cpp && make
+mkdir -p .build && cd .build && cmake ../test/test_cpp && make
 
 # ~~~~~~~~~~~~~~~~~~
 

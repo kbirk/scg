@@ -25,7 +25,7 @@ find_package(OpenSSL REQUIRED)
 
 # Source include dirs
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../include")
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../test/generated")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../test/files/output")
 include_directories(SYSTEM "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/include")
 
 # Executables

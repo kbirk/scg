@@ -9,7 +9,7 @@ import (
 
 func TestProcessInputPattern(t *testing.T) {
 
-	parse, err := NewParse("../../test/data/sample/sample0")
+	parse, err := NewParse("../../test/files/input/sample/sample0")
 	require.Nil(t, err)
 
 	assert.Equal(t, 2, len(parse.Packages))
@@ -19,6 +19,6 @@ func TestProcessInputPattern(t *testing.T) {
 
 func TestProcessCircularDeps(t *testing.T) {
 
-	_, err := NewParse("../../test/data/circular")
+	_, err := NewParse("../../test/files/input/circular")
 	require.NotNil(t, err)
 }
