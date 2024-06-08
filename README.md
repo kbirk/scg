@@ -2,9 +2,9 @@
 
 This is a toy code generator for generating messages and RPC endpoints.
 
-Message code is generated for both golang and C++ with JSON and binary serialization logic.
+Message code is generated for both golang and C++ with JSON and binary serialization.
 
-RPCs are implemented using websockets. Client and server code is generated for golang. Client code is generated for Cpp.
+RPCs are implemented using websockets. Client and server code is generated for golang. Client code is generated for C++.
 
 ## Dependencies:
 
@@ -213,3 +213,5 @@ Run the tests:
 ## TODO:
 
 - Implement context cancellations and deadlines.
+- Add stream support
+- Add [vscode syntax highlighting](https://code.visualstudio.com/api/language-extensions/syntax-highlight-guide)
