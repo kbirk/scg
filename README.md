@@ -1,26 +1,26 @@
 # scg - Simple Code Generator
 
-This is a toy code generator for generating messages and RPC endpoints.
+This is a toy code generator for generating messages and RPC client / server boilerplate. Similar to protobuf + gRPC, but worse in every conceivable way.
 
 Message code is generated for both golang and C++ with JSON and binary serialization.
 
-RPCs are implemented using websockets. Client and server code is generated for golang. Client code is generated for C++.
+RPCs are implemented over websockets. Client and server code is generated for golang. Only client code is generated for C++.
 
 ## Dependencies:
 
 ### Golang:
 
-Golang uses [gorilla/websocket](https://github.com/gorilla/websocket) for the websocket implementation.
+- Websockets: [gorilla/websocket](https://github.com/gorilla/websocket)
 
 ### C++:
 
-JSON serialization: [nlohmann/json](https://github.com/nlohmann/json)
-Websockets: [websocketpp](https://github.com/zaphoyd/websocketpp) and [Asio](https://think-async.com/Asio/AsioStandalone)
-SSL: [openssl](https://github.com/openssl/openssl)
+- JSON serialization: [nlohmann/json](https://github.com/nlohmann/json)
+- Websockets: [websocketpp](https://github.com/zaphoyd/websocketpp) and [Asio](https://think-async.com/Asio/AsioStandalone)
+- SSL: [openssl](https://github.com/openssl/openssl)
 
 ## Syntax:
 
-Blatant rip-off of protobuf / grpc.
+Shameless rip-off of protobuf / gRPC, minus the braces on rpc method declarations.
 
 ```proto
 package pingpong;
@@ -44,7 +44,16 @@ message PingRequest {
 message PongResponse {
 	Pong pong = 0;
 }
+```
 
+Containers such as maps and lists use golang syntax and can be nested:
+
+```proto
+message OtherStuff {
+	map[string]float64 map_field = 0;
+	[]uint64 list_field = 1;
+	map[int32][]map[string][]uint8 what_have_i_done = 2;
+}
 ```
 
 ## Generating Go Code:
@@ -74,7 +83,7 @@ auto err = dst.fromJSON(bs);
 assert(!err && "deserialization failed");
 ```
 
-JSON serialization for go uses `encoding/json`.
+JSON serialization for golang uses `encoding/json`.
 
 ```go
 src := pingpong.PingRequest{
@@ -128,7 +137,7 @@ if err != nil {
 
 ## RPCs
 
-Client and server code is generated for go:
+Both client and server code is generated for golang:
 
 ```go
 // server
@@ -198,7 +207,7 @@ Generate SSL keys for test server:
 ./gen-ssl-keys.sh
 ```
 
-Generate the third party header files:
+Download and vendor the third party header files:
 
 ```sh
 cd ./third_party && ./install-deps.sh &&  cd ..
@@ -215,3 +224,4 @@ Run the tests:
 - Implement context cancellations and deadlines.
 - Add stream support
 - Add [vscode syntax highlighting](https://code.visualstudio.com/api/language-extensions/syntax-highlight-guide)
+- Add C++ server code?
