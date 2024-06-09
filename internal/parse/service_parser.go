@@ -9,7 +9,7 @@ import (
 
 var (
 	serviceRegex       = regexp.MustCompile(`(?s)service\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
-	serviceMethodRegex = regexp.MustCompile(`^rpc\s+([a-zA-Z][a-zA-Z_0-9]*)\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*returns\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\);$`)
+	serviceMethodRegex = regexp.MustCompile(`^rpc\s+([a-zA-Z][a-zA-Z_0-9]*)\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*returns\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*;\s*$`)
 )
 
 type ServiceMethodDefinition struct {

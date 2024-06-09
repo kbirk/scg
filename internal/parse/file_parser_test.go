@@ -199,6 +199,15 @@ func TestMessageParsingFailures(t *testing.T) {
 		package test;
 
 		message ValidMessage {
+			int32 .invalidField = 0;
+		}
+	`)
+	assert.NotNil(t, err)
+
+	_, err = parseFileContent(path, relativeDir, `
+		package test;
+
+		message ValidMessage {
 			0InvalidType ValidField = 0;
 		}
 	`)
@@ -218,6 +227,15 @@ func TestMessageParsingFailures(t *testing.T) {
 
 		message ValidMessage {
 			invalid-type ValidField = 0;
+		}
+	`)
+	assert.NotNil(t, err)
+
+	_, err = parseFileContent(path, relativeDir, `
+		package test;
+
+		message ValidMessage {
+			.invalidType ValidField = wer0;
 		}
 	`)
 	assert.NotNil(t, err)
@@ -287,6 +305,24 @@ func TestServiceParsingFailures(t *testing.T) {
 
 		service ValidService {
 			rpc InvalidReturnType (SomeType) returns (int32);
+		}
+	`)
+	assert.NotNil(t, err)
+
+	_, err = parseFileContent(path, relativeDir, `
+		package test;
+
+		service ValidService {
+			rpc ValidName (.InvalidType) returns (SomeType);
+		}
+	`)
+	assert.NotNil(t, err)
+
+	_, err = parseFileContent(path, relativeDir, `
+		package test;
+
+		service ValidService {
+			rpc ValidName (ValidType) returns (.InvalidType);
 		}
 	`)
 	assert.NotNil(t, err)

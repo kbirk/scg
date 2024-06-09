@@ -10,7 +10,7 @@ import (
 
 var (
 	messageRegex           = regexp.MustCompile(`(?s)message\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
-	fieldRegex             = regexp.MustCompile(`^(.+?)\s+(.+?)\s*=\s*(.+?);$`)
+	fieldRegex             = regexp.MustCompile(`^(.+?)\s+(.+?)\s*=\s*(.+?);\s*$`)
 	plainDataTypeRegex     = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*$`)
 	customDataTypeRegex    = regexp.MustCompile(`^((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)$`)
 	containerDataTypeRegex = regexp.MustCompile(`^(\[\s*\]|map\s*\[\s*(byte|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*\])\s*(.+)$`)
