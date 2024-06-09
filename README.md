@@ -10,7 +10,7 @@ RPCs are implemented over websockets. Client and server code is generated for go
 
 ## Installation:
 
-```bh
+```sh
 go install github.com/kbirk/scg/cmd/scg-go@latest
 go install github.com/kbirk/scg/cmd/scg-cpp@latest
 ```
