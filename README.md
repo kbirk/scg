@@ -8,6 +8,13 @@ Message code is generated for both golang and C++ with JSON and binary serializa
 
 RPCs are implemented over websockets. Client and server code is generated for golang. Only client code is generated for C++.
 
+## Installation:
+
+```bh
+go install github.com/kbirk/scg/cmd/scg-go@latest
+go install github.com/kbirk/scg/cmd/scg-cpp@latest
+```
+
 ## Dependencies:
 
 ### Golang:
@@ -223,7 +230,8 @@ Run the tests:
 
 ## TODO:
 
-- Implement context cancellations and deadlines.
-- Add stream support
 - Add [vscode syntax highlighting](https://code.visualstudio.com/api/language-extensions/syntax-highlight-guide)
+- Implement context cancellations and deadlines
+- Opentracing hooks and context serialization
+- Add stream support
 - Add C++ server code?

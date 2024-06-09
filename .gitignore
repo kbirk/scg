@@ -3,7 +3,7 @@
 .vscode
 .vscode-cpp-build
 
-third_party
+third_party/include
 .build
 
 test/*.crt
