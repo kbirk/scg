@@ -19,11 +19,11 @@ func TestResolver(t *testing.T) {
 		}
 
 		message OtherType {
-			[]string m = 0;
-			map[string]string n = 1;
-			[]map[string][]string o = 2;
+			list<string> m = 0;
+			map<string, string> n = 1;
+			list<map<string,list<string>>> o = 2;
 			CustomType p = 3;
-			[]test.custom.CustomType q = 4;
+			list<test.custom.CustomType> q = 4;
 		}
 
 		service Test {

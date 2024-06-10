@@ -24,11 +24,12 @@ func TestMessageFieldTokenizer(t *testing.T) {
 		}
 
 		message TestMessageC {
-			[]string #comment
+			list< string
+			> #comment
 			 m #across
 			 = 1; # lines
-			map[string]string n = 2;
-			map[string]some.other_package.CustomType r = 3;
+			map<string, string> n = 2;
+			map< string, some.other_package.CustomType > r = 3;
 			another.nested.CustomArg = 4;
 		}
 	`
@@ -69,13 +70,13 @@ func TestMessageParser(t *testing.T) {
 			float32 j = 10;
 			float64 k = 11;
 			string l = 12;
-			[]string m = 13;
-			map[string]string n = 14;
-			[]map[string][]string o = 15;
+			list<string> m = 13;
+			map<string, string> n = 14;
+			list<map<string, list<string>>> o = 15;
 			CustomType p = 16;
-			[]custom.CustomType q = 17;
+			list<custom.CustomType> q = 17;
 			# commment here
-			map[string]some.other_package.CustomType r = 18;
+			map<string, some.other_package.CustomType> r = 18;
 		}
 	`)
 	require.Nil(t, err)
@@ -180,6 +181,49 @@ func TestMessageParser(t *testing.T) {
 	assert.Equal(t, DataTypeCustom, message.Fields["r"].DataTypeDefinition.SubType.Type)
 	assert.Equal(t, "CustomType", message.Fields["r"].DataTypeDefinition.SubType.CustomType)
 	assert.Equal(t, "some.other_package", message.Fields["r"].DataTypeDefinition.SubType.CustomTypePackage)
+}
+
+func TestMessageListParser(t *testing.T) {
+
+	tokens, err := tokenizeFile(`
+		# commment the message
+		message TestMessage {
+			list<string> list_field = 0;
+		}
+	`)
+	require.Nil(t, err)
+
+	_, err = parseMessageDefinitions(tokens)
+	require.Nil(t, err)
+}
+
+func TestMessageMapParser(t *testing.T) {
+
+	tokens, err := tokenizeFile(`
+		# commment the message
+		message TestMessage {
+			map<string, string> map_field = 0;
+		}
+	`)
+	require.Nil(t, err)
+
+	_, err = parseMessageDefinitions(tokens)
+	require.Nil(t, err)
+}
+
+func TestMessageNestedParser(t *testing.T) {
+
+	tokens, err := tokenizeFile(`
+		# commment the message
+		message TestMessage {
+			list<map<string, string>> list_of_maps_field = 0;
+			map<string, map<string, string>> map_of_maps_field = 1;
+		}
+	`)
+	require.Nil(t, err)
+
+	_, err = parseMessageDefinitions(tokens)
+	require.Nil(t, err)
 }
 
 func TestMultipleMessages(t *testing.T) {

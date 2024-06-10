@@ -10,24 +10,24 @@ message BasicStruct {
 	uint64 val_uint_64  = 6;
 	int64 val_int_64  = 7;
 	string val_string = 8;
-	[]string val_array_string = 9;
-	map[string]float32 val_map_string_float_32 = 10;
+	list<string> val_array_string = 9;
+	map<string, float32> val_map_string_float_32 = 10;
 }
 
 message StructA {
 	int8 val_int_8 = 0;
 	float32 val_float_32 = 1;
 	bool val_bool = 2;
-	map[uint8]string val_map_uint8_string = 3;
+	map<uint8,string> val_map_uint8_string = 3;
 }
 
 message StructB {
-	[]int32 val_array_int = 0;
-	map[string]int32 val_map_string_int = 1;
-	map[int8]map[int16]string val_map_uint8_map_uint16_string = 2;
+	list<int32> val_array_int = 0;
+	map<string, int32> val_map_string_int = 1;
+	map<int8, map<int16, string>> val_map_uint8_map_uint16_string = 2;
 }
 
 message ComplicatedStruct {
-	map[string]StructA struct_a_map = 0;
-	[]StructB struct_b_array = 1;
+	map<string, StructA> struct_a_map = 0;
+	list<StructB> struct_b_array = 1;
 }

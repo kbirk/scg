@@ -6,8 +6,8 @@ service AuthOther {
 }
 
 message TokenAuthOther {
-	[]byte bytes = 0;
-	map[string]string claims = 1;
+	list<byte> bytes = 0;
+	map<string, string> claims = 1;
 }
 
 message AccountAuthOther {

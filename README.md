@@ -29,9 +29,9 @@ go install github.com/kbirk/scg/cmd/scg-cpp@latest
 
 ## Syntax:
 
-Shameless rip-off of protobuf / gRPC, minus the braces on rpc method declarations.
+Shameless rip-off of protobuf / gRPC with a few simplifications and modifications.
 
-```proto
+```
 package pingpong;
 
 service PingPong {
@@ -57,11 +57,11 @@ message PongResponse {
 
 Containers such as maps and lists use golang syntax and can be nested:
 
-```proto
+```
 message OtherStuff {
-	map[string]float64 map_field = 0;
-	[]uint64 list_field = 1;
-	map[int32][]map[string][]uint8 what_have_i_done = 2;
+	map<string, float64> map_field = 0;
+	list<uint64> list_field = 1;
+	map<int32, list<map<string, list<uint8>>>> what_have_i_done = 2;
 }
 ```
 
@@ -81,6 +81,8 @@ scg-cpp --input="./src/dir"  --output="./output/dir"
 JSON serialization for C++ uses [nlohmann/json](https://github.com/nlohmann/json).
 
 ```cpp
+#include "pingpong.h"
+
 pingpong::PingRequest src;
 src.ping.count = 42;
 
@@ -116,6 +118,8 @@ if err != nil {
 Binary serialization encodes the data in a portable payload using a single allocation for the destination buffer.
 
 ```cpp
+#include "pingpong.h"
+
 pingpong::PingRequest src;
 src.ping.count = 42;
 
@@ -186,6 +190,10 @@ fmt.Println(resp.Pong.Count)
 Only client code is generated for C++:
 
 ```cpp
+#include <scg/client_no_tls.h>
+
+#include "pingpong.h"
+
 scg::rpc::ClientConfig config;
 config.uri = "localhost:8080";
 
@@ -230,7 +238,6 @@ Run the tests:
 
 ## TODO:
 
-- Add [vscode syntax highlighting](https://code.visualstudio.com/api/language-extensions/syntax-highlight-guide)
 - Implement context cancellations and deadlines
 - Opentracing hooks and context serialization
 - Add stream support

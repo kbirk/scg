@@ -9,13 +9,13 @@ import (
 )
 
 var (
-	messageRegex           = regexp.MustCompile(`(?s)message\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
-	fieldRegex             = regexp.MustCompile(`^(.+?)\s+(.+?)\s*=\s*(.+?);\s*$`)
-	plainDataTypeRegex     = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*$`)
-	customDataTypeRegex    = regexp.MustCompile(`^((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)$`)
-	containerDataTypeRegex = regexp.MustCompile(`^(\[\s*\]|map\s*\[\s*(byte|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*\])\s*(.+)$`)
-	listRegex              = regexp.MustCompile(`^\[\s*\]`)
-	validIndexRegex        = regexp.MustCompile(`^\d+$`)
+	messageRegex        = regexp.MustCompile(`(?s)message\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
+	fieldRegex          = regexp.MustCompile(`^((?:list\s*\<\s*(?:.*)\s*\>)|(?:map\s*\<\s*(?:.*)\s*\>)|(?:.+?))\s+(.+?)\s*=\s*(.+?)\s*;\s*$`)
+	plainDataTypeRegex  = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*$`)
+	customDataTypeRegex = regexp.MustCompile(`^((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)$`)
+	mapDataTypeRegex    = regexp.MustCompile(`^map\s*\<\s*(uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*,\s*(.+?)\s*\>$`)
+	listDataTypeRegex   = regexp.MustCompile(`^list\s*\<\s*(.+)\s*\>$`)
+	validIndexRegex     = regexp.MustCompile(`^\d+$`)
 )
 
 type DataType int
@@ -129,11 +129,11 @@ func (d *DataTypeDefinition) ToString() string {
 	}
 
 	if d.Type == DataTypeMap {
-		return fmt.Sprintf("map[%s]%s", mapComparableTypeEnumToString(d.Key), d.SubType.ToString())
+		return fmt.Sprintf("map<%s, %s>", mapComparableTypeEnumToString(d.Key), d.SubType.ToString())
 	}
 
 	if d.Type == DataTypeList {
-		return fmt.Sprintf("[]%s", d.SubType.ToString())
+		return fmt.Sprintf("list<%s>", d.SubType.ToString())
 	}
 
 	return mapTypeEnumToString(d.Type)
@@ -288,7 +288,7 @@ func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) 
 
 	// container type, parse the outer type
 
-	match, perr = FindOneMatch(containerDataTypeRegex, input)
+	match, perr = FindOneOrNoMatch(mapDataTypeRegex, input)
 	if perr != nil {
 		return nil, &ParsingError{
 			Message: fmt.Sprintf("invalid field definition: `%s", input.Content),
@@ -296,7 +296,45 @@ func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) 
 		}
 	}
 
-	if len(match.Captures) != 3 {
+	if match != nil {
+		if len(match.Captures) != 2 {
+			return nil, &ParsingError{
+				Message: "invalid field definition, invalid number of matches found",
+				Token:   input,
+			}
+		}
+
+		key, err := mapComparableDataTypeStringToEnum(match.Captures[0].Content)
+		if err != nil {
+			return nil, &ParsingError{
+				Message: err.Error(),
+				Token:   match.Captures[0],
+			}
+		}
+
+		dt := DataTypeDefinition{}
+		dt.Type = DataTypeMap
+		dt.Key = key
+
+		// recurse to parse nested type
+		nestedDataType, perr := parseDataTypeDefinition(match.Captures[1])
+		if perr != nil {
+			return nil, perr
+		}
+		dt.SubType = nestedDataType
+
+		return &dt, nil
+	}
+
+	match, perr = FindOneMatch(listDataTypeRegex, input)
+	if perr != nil {
+		return nil, &ParsingError{
+			Message: fmt.Sprintf("invalid field definition: `%s", input.Content),
+			Token:   input,
+		}
+	}
+
+	if len(match.Captures) != 1 {
 		return nil, &ParsingError{
 			Message: "invalid field definition, invalid number of matches found",
 			Token:   input,
@@ -304,32 +342,10 @@ func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) 
 	}
 
 	dt := DataTypeDefinition{}
-	typ := match.Captures[0].Content
-	var nested *Token
-
-	if listRegex.MatchString(typ) {
-		// list
-
-		dt.Type = DataTypeList
-		nested = match.Captures[2]
-	} else {
-		// map
-
-		key, err := mapComparableDataTypeStringToEnum(match.Captures[1].Content)
-		if err != nil {
-			return nil, &ParsingError{
-				Message: err.Error(),
-				Token:   match.Captures[1],
-			}
-		}
-
-		dt.Type = DataTypeMap
-		dt.Key = key
-		nested = match.Captures[2]
-	}
+	dt.Type = DataTypeList
 
 	// recurse to parse nested type
-	nestedDataType, perr := parseDataTypeDefinition(nested)
+	nestedDataType, perr := parseDataTypeDefinition(match.Captures[0])
 	if perr != nil {
 		return nil, perr
 	}
