@@ -16,7 +16,6 @@ type Parse struct {
 }
 
 type PackageDependency struct {
-	// Package *PackageDeclaration
 	PackageName string
 	Token       *Token
 }
