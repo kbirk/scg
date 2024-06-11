@@ -12,6 +12,7 @@ type FileArgs struct {
 	Header     string
 	Namespaces []string
 	Imports    string
+	Typedefs   string
 	Messages   string
 	// Servers  string
 	Clients string
@@ -21,6 +22,7 @@ const fileTemplateStr = `
 {{.Header}}
 {{.Imports}}{{ range .Namespaces }}
 namespace {{.}} { {{end}}
+{{.Typedefs}}
 {{.Messages}}
 {{.Clients}}{{ range .Namespaces }}
 } {{end}}
@@ -39,9 +41,18 @@ func generateFileCppCode(pkg *parse.Package, file *parse.File) (string, error) {
 
 	namespaces := convertPackageNameToCppNamespaces(pkg.Name)
 
-	importCode, err := generateImportsCppCode(file.GetFileDependencies(), len(file.ServiceDefinitions) > 0, len(file.MessageDefinitions) > 0)
+	importCode, err := generateImportsCppCode(file.GetFileDependencies(), len(file.ServiceDefinitions) > 0, len(file.MessageDefinitions) > 0, len(file.Typedefs) > 0)
 	if err != nil {
 		return "", err
+	}
+
+	var typedefCode []string
+	for _, msg := range file.TypedefsSortedByKey() {
+		typdef, err := generateTypedefCppCode(msg)
+		if err != nil {
+			return "", err
+		}
+		typedefCode = append(typedefCode, typdef)
 	}
 
 	var messageCode []string
@@ -75,6 +86,7 @@ func generateFileCppCode(pkg *parse.Package, file *parse.File) (string, error) {
 		Header:     headerCode,
 		Namespaces: namespaces,
 		Imports:    importCode,
+		Typedefs:   strings.Join(typedefCode, "\n"),
 		Messages:   strings.Join(messageCode, "\n"),
 		// Servers:    strings.Join(serverCode, "\n"),
 		Clients: strings.Join(clientCode, "\n"),

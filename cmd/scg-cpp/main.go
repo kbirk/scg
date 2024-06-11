@@ -65,6 +65,9 @@ func main() {
 
 	for _, pkg := range p.Packages {
 		os.Stdout.WriteString(fmt.Sprintf("%s: %s\n", magenta("[package]"), white(pkg.Name)))
+		for _, typedef := range pkg.Typedefs {
+			os.Stdout.WriteString(fmt.Sprintf("    %s %s = %s\n", green("[typedef]"), white(typedef.Name), cyan(typedef.DataTypeDefinition.ToString())))
+		}
 		for _, msg := range pkg.MessageDefinitions {
 			os.Stdout.WriteString(fmt.Sprintf("    %s %s {\n", blue("[message]"), white(msg.Name)))
 			for _, field := range msg.FieldsByIndex() {

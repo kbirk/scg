@@ -1,5 +1,13 @@
 package basic;
 
+typedef BasicString = string;
+
+typedef BasicUInt8 = uint8;
+
+typedef BasicFloat32 = float32;
+
+typedef AnotherID = uint32;
+
 message BasicStruct {
 	uint8 val_uint_8 = 0;
 	int8 val_int_8 = 1;
@@ -27,7 +35,14 @@ message StructB {
 	map<int8, map<int16, string>> val_map_uint8_map_uint16_string = 2;
 }
 
+message StructC {
+	BasicString str = 0;
+	list<BasicString> strs = 1;
+	map<BasicString, BasicString> str_map = 2;
+}
+
 message ComplicatedStruct {
 	map<string, StructA> struct_a_map = 0;
 	list<StructB> struct_b_array = 1;
+	StructC struct_c = 2;
 }

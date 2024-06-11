@@ -46,11 +46,11 @@ var (
 	importTemplate = template.Must(template.New("importTemplateGo").Parse(importTemplateStr))
 )
 
-func generateImportsGoCode(goBasePackage string, deps []parse.PackageDependency, hasServices bool, hasMessages bool) (string, error) {
+func generateImportsGoCode(goBasePackage string, deps []parse.PackageDependency, hasServices bool, hasMessages bool, hasTypedefs bool) (string, error) {
 
 	args := ImportArgs{}
 
-	if hasMessages {
+	if hasMessages || hasTypedefs {
 		args.STDPackages = append(args.STDPackages, messageImportsSTD...)
 		args.SCGPackages = append(args.SCGPackages, messageImportsSCG...)
 	}
@@ -64,8 +64,8 @@ func generateImportsGoCode(goBasePackage string, deps []parse.PackageDependency,
 	args.SCGPackages = util.RemoveDuplicates(args.SCGPackages)
 
 	for _, dep := range deps {
-		fmt.Printf("Adding dependincy: %s\n", dep.Package.Name)
-		args.CustomPackages = append(args.CustomPackages, fmt.Sprintf("%s/%s", goBasePackage, convertPackageNameToGoPackage(dep.Package.Name)))
+		fmt.Printf("Adding dependincy: %s\n", dep.PackageName)
+		args.CustomPackages = append(args.CustomPackages, fmt.Sprintf("%s/%s", goBasePackage, convertPackageNameToGoPackage(dep.PackageName)))
 	}
 
 	buf := &bytes.Buffer{}

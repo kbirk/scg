@@ -32,12 +32,20 @@ func TestGetContainerTypesRecursively(t *testing.T) {
 	// map[string][]map[uint64][]custom.CustomType
 	dt := &parse.DataTypeDefinition{
 		Type: parse.DataTypeMap,
-		Key:  parse.DataComparableTypeString,
+		Key: &parse.DataTypeComparableDefinition{
+			Type:                     parse.DataTypeComparableCustom,
+			CustomType:               "TypedefType",
+			CustomTypePackage:        "other",
+			UnderlyingType:           parse.DataTypeComparableString,
+			ImportedFromOtherPackage: true,
+		},
 		SubType: &parse.DataTypeDefinition{
 			Type: parse.DataTypeList,
 			SubType: &parse.DataTypeDefinition{
 				Type: parse.DataTypeMap,
-				Key:  parse.DataComparableTypeUInt64,
+				Key: &parse.DataTypeComparableDefinition{
+					Type: parse.DataTypeComparableUInt64,
+				},
 				SubType: &parse.DataTypeDefinition{
 					Type: parse.DataTypeList,
 					SubType: &parse.DataTypeDefinition{
@@ -54,7 +62,7 @@ func TestGetContainerTypesRecursively(t *testing.T) {
 	fullName, err := getContainerTypesRecursively(dt)
 	require.Nil(t, err)
 
-	assert.Equal(t, "MapStringListMapUInt64ListCustomPkgCustomType", fullName)
+	assert.Equal(t, "MapOtherPkgTypedefTypeListMapUInt64ListCustomPkgCustomType", fullName)
 }
 
 func TestGenerateSerializeContainerMethod(t *testing.T) {
@@ -62,12 +70,20 @@ func TestGenerateSerializeContainerMethod(t *testing.T) {
 	// map[string][]map[uint64][]custom.CustomType
 	dt := &parse.DataTypeDefinition{
 		Type: parse.DataTypeMap,
-		Key:  parse.DataComparableTypeString,
+		Key: &parse.DataTypeComparableDefinition{
+			Type:                     parse.DataTypeComparableCustom,
+			CustomType:               "TypedefType",
+			CustomTypePackage:        "other",
+			UnderlyingType:           parse.DataTypeComparableString,
+			ImportedFromOtherPackage: true,
+		},
 		SubType: &parse.DataTypeDefinition{
 			Type: parse.DataTypeList,
 			SubType: &parse.DataTypeDefinition{
 				Type: parse.DataTypeMap,
-				Key:  parse.DataComparableTypeUInt64,
+				Key: &parse.DataTypeComparableDefinition{
+					Type: parse.DataTypeComparableUInt64,
+				},
 				SubType: &parse.DataTypeDefinition{
 					Type: parse.DataTypeList,
 					SubType: &parse.DataTypeDefinition{
@@ -101,12 +117,20 @@ func TestGenerateMessageSerializeMethod(t *testing.T) {
 				Index: 0,
 				DataTypeDefinition: &parse.DataTypeDefinition{
 					Type: parse.DataTypeMap,
-					Key:  parse.DataComparableTypeString,
+					Key: &parse.DataTypeComparableDefinition{
+						Type:                     parse.DataTypeComparableCustom,
+						CustomType:               "TypedefType",
+						CustomTypePackage:        "other",
+						UnderlyingType:           parse.DataTypeComparableString,
+						ImportedFromOtherPackage: true,
+					},
 					SubType: &parse.DataTypeDefinition{
 						Type: parse.DataTypeList,
 						SubType: &parse.DataTypeDefinition{
 							Type: parse.DataTypeMap,
-							Key:  parse.DataComparableTypeUInt64,
+							Key: &parse.DataTypeComparableDefinition{
+								Type: parse.DataTypeComparableUInt64,
+							},
 							SubType: &parse.DataTypeDefinition{
 								Type: parse.DataTypeList,
 								SubType: &parse.DataTypeDefinition{
@@ -139,7 +163,9 @@ func TestGenerateMessageSerializeMethod(t *testing.T) {
 					Type: parse.DataTypeList,
 					SubType: &parse.DataTypeDefinition{
 						Type: parse.DataTypeMap,
-						Key:  parse.DataComparableTypeString,
+						Key: &parse.DataTypeComparableDefinition{
+							Type: parse.DataTypeComparableString,
+						},
 						SubType: &parse.DataTypeDefinition{
 							Type: parse.DataTypeString,
 						},

@@ -101,30 +101,35 @@ func convertPackageNameToCppNamespacePrefix(name string) string {
 	return strings.Join(convertPackageNameToCppNamespaces(name), "::")
 }
 
-func mapComparableTypeToCppType(dataType parse.DataComparableType) (string, error) {
-	switch dataType {
-	case parse.DataComparableTypeUInt8:
+func mapComparableTypeToCppType(dataType *parse.DataTypeComparableDefinition) (string, error) {
+	switch dataType.Type {
+	case parse.DataTypeComparableUInt8:
 		return "uint8_t", nil
-	case parse.DataComparableTypeUInt16:
+	case parse.DataTypeComparableUInt16:
 		return "uint16_t", nil
-	case parse.DataComparableTypeUInt32:
+	case parse.DataTypeComparableUInt32:
 		return "uint32_t", nil
-	case parse.DataComparableTypeUInt64:
+	case parse.DataTypeComparableUInt64:
 		return "uint64_t", nil
-	case parse.DataComparableTypeInt8:
+	case parse.DataTypeComparableInt8:
 		return "int8_t", nil
-	case parse.DataComparableTypeInt16:
+	case parse.DataTypeComparableInt16:
 		return "int16_t", nil
-	case parse.DataComparableTypeInt32:
+	case parse.DataTypeComparableInt32:
 		return "int32_t", nil
-	case parse.DataComparableTypeInt64:
+	case parse.DataTypeComparableInt64:
 		return "int64_t", nil
-	case parse.DataComparableTypeString:
+	case parse.DataTypeComparableString:
 		return "std::string", nil
-	case parse.DataComparableTypeFloat32:
+	case parse.DataTypeComparableFloat32:
 		return "float32_t", nil
-	case parse.DataComparableTypeFloat64:
+	case parse.DataTypeComparableFloat64:
 		return "float64_t", nil
+	case parse.DataTypeComparableCustom:
+		if dataType.ImportedFromOtherPackage {
+			return fmt.Sprintf("%s::%s", convertPackageNameToCppNamespacePrefix(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
+		}
+		return util.EnsurePascalCase(dataType.CustomType), nil
 	}
 	return "", fmt.Errorf("unrecognized type: %v", dataType)
 }

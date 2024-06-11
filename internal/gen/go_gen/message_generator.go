@@ -227,30 +227,36 @@ var (
 	listDeserializeMethodTemplate  = template.Must(template.New("listDeserializeMethodTemplateGo").Parse(listDeserializeMethodTemplateStr))
 )
 
-func mapComparableTypeToGoType(dataType parse.DataComparableType) (string, error) {
-	switch dataType {
-	case parse.DataComparableTypeUInt8:
+func mapComparableTypeToGoType(dataType *parse.DataTypeComparableDefinition) (string, error) {
+	switch dataType.Type {
+	case parse.DataTypeComparableUInt8:
 		return "uint8", nil
-	case parse.DataComparableTypeUInt16:
+	case parse.DataTypeComparableUInt16:
 		return "uint16", nil
-	case parse.DataComparableTypeUInt32:
+	case parse.DataTypeComparableUInt32:
 		return "uint32", nil
-	case parse.DataComparableTypeUInt64:
+	case parse.DataTypeComparableUInt64:
 		return "uint64", nil
-	case parse.DataComparableTypeInt8:
+	case parse.DataTypeComparableInt8:
 		return "int8", nil
-	case parse.DataComparableTypeInt16:
+	case parse.DataTypeComparableInt16:
 		return "int16", nil
-	case parse.DataComparableTypeInt32:
+	case parse.DataTypeComparableInt32:
 		return "int32", nil
-	case parse.DataComparableTypeInt64:
+	case parse.DataTypeComparableInt64:
 		return "int64", nil
-	case parse.DataComparableTypeString:
+	case parse.DataTypeComparableString:
 		return "string", nil
-	case parse.DataComparableTypeFloat32:
+	case parse.DataTypeComparableFloat32:
 		return "float32", nil
-	case parse.DataComparableTypeFloat64:
+	case parse.DataTypeComparableFloat64:
 		return "float64", nil
+	case parse.DataTypeComparableCustom:
+		if dataType.ImportedFromOtherPackage {
+			return fmt.Sprintf("%s.%s", convertPackageNameToGoPackage(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
+		} else {
+			return util.EnsurePascalCase(dataType.CustomType), nil
+		}
 	}
 	return "", fmt.Errorf("unrecognized type: %v", dataType)
 }
@@ -412,30 +418,35 @@ var (
 	deserializeCustomTemplate  = template.Must(template.New("deserializeCustomTemplateGo").Parse(deserializeCustomTemplateStr))
 )
 
-func getMapKeyTypeName(dataType parse.DataComparableType) (string, error) {
-	switch dataType {
-	case parse.DataComparableTypeUInt8:
+func getComparableDataTypeName(dataType *parse.DataTypeComparableDefinition) (string, error) {
+	switch dataType.Type {
+	case parse.DataTypeComparableUInt8:
 		return "UInt8", nil
-	case parse.DataComparableTypeUInt16:
+	case parse.DataTypeComparableUInt16:
 		return "UInt16", nil
-	case parse.DataComparableTypeUInt32:
+	case parse.DataTypeComparableUInt32:
 		return "UInt32", nil
-	case parse.DataComparableTypeUInt64:
+	case parse.DataTypeComparableUInt64:
 		return "UInt64", nil
-	case parse.DataComparableTypeInt8:
+	case parse.DataTypeComparableInt8:
 		return "Int8", nil
-	case parse.DataComparableTypeInt16:
+	case parse.DataTypeComparableInt16:
 		return "Int16", nil
-	case parse.DataComparableTypeInt32:
+	case parse.DataTypeComparableInt32:
 		return "Int32", nil
-	case parse.DataComparableTypeInt64:
+	case parse.DataTypeComparableInt64:
 		return "Int64", nil
-	case parse.DataComparableTypeString:
+	case parse.DataTypeComparableString:
 		return "String", nil
-	case parse.DataComparableTypeFloat32:
+	case parse.DataTypeComparableFloat32:
 		return "Float32", nil
-	case parse.DataComparableTypeFloat64:
+	case parse.DataTypeComparableFloat64:
 		return "Float64", nil
+	case parse.DataTypeComparableCustom:
+		if dataType.ImportedFromOtherPackage {
+			return fmt.Sprintf("%sPkg%s", util.EnsurePascalCase(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
+		}
+		return util.EnsurePascalCase(dataType.CustomType), nil
 	}
 	return "", fmt.Errorf("unrecognized type: %v", dataType)
 }
@@ -470,7 +481,7 @@ func getContainerTypesRecursively(dataType *parse.DataTypeDefinition) (string, e
 	case parse.DataTypeFloat64:
 		return "Float64", nil
 	case parse.DataTypeMap:
-		key, err := getMapKeyTypeName(dataType.Key)
+		key, err := getComparableDataTypeName(dataType.Key)
 		if err != nil {
 			return "", err
 		}
@@ -540,7 +551,7 @@ func generateCalcByteSizeContainerMethod(messageName string, varName string, dat
 
 		// map
 
-		keyMethodCall, err := generateKeyFieldCalcByteSizeMethodCall("k", dataType.Key)
+		keyMethodCall, err := generateKeyFieldCalcByteSizeMethodCall("k", dataType.Key.Type)
 		if err != nil {
 			return "", nil, err
 		}
@@ -604,7 +615,7 @@ func generateSerializeContainerMethod(messageName string, varName string, dataTy
 
 		// map
 
-		keyMethodCall, err := generateKeyFieldSerializationMethodCall("k", dataType.Key)
+		keyMethodCall, err := generateKeyFieldSerializationMethodCall("k", dataType.Key.Type)
 		if err != nil {
 			return "", nil, err
 		}
@@ -679,7 +690,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 			return "", nil, err
 		}
 
-		keyMethodCall, err := generateKeyFieldDeserializationMethodCall("k", dataType.Key)
+		keyMethodCall, err := generateKeyFieldDeserializationMethodCall("k", dataType.Key.Type)
 		if err != nil {
 			return "", nil, err
 		}
@@ -703,7 +714,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 	return fullMethodCall, deserializationMethodCode, nil
 }
 
-func generateKeyFieldCalcByteSizeMethodCall(varName string, dataType parse.DataComparableType) (string, error) {
+func generateKeyFieldCalcByteSizeMethodCall(varName string, dataType parse.DataTypeComparable) (string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -712,28 +723,30 @@ func generateKeyFieldCalcByteSizeMethodCall(varName string, dataType parse.DataC
 	var tmpl *template.Template
 
 	switch dataType {
-	case parse.DataComparableTypeUInt8:
+	case parse.DataTypeComparableUInt8:
 		tmpl = calcByteSizeUInt8Template
-	case parse.DataComparableTypeUInt16:
+	case parse.DataTypeComparableUInt16:
 		tmpl = calcByteSizeUInt16Template
-	case parse.DataComparableTypeUInt32:
+	case parse.DataTypeComparableUInt32:
 		tmpl = calcByteSizeUInt32Template
-	case parse.DataComparableTypeUInt64:
+	case parse.DataTypeComparableUInt64:
 		tmpl = calcByteSizeUInt64Template
-	case parse.DataComparableTypeInt8:
+	case parse.DataTypeComparableInt8:
 		tmpl = calcByteSizeInt8Template
-	case parse.DataComparableTypeInt16:
+	case parse.DataTypeComparableInt16:
 		tmpl = calcByteSizeInt16Template
-	case parse.DataComparableTypeInt32:
+	case parse.DataTypeComparableInt32:
 		tmpl = calcByteSizeInt32Template
-	case parse.DataComparableTypeInt64:
+	case parse.DataTypeComparableInt64:
 		tmpl = calcByteSizeInt64Template
-	case parse.DataComparableTypeFloat32:
+	case parse.DataTypeComparableFloat32:
 		tmpl = calcByteSizeFloat32Template
-	case parse.DataComparableTypeFloat64:
+	case parse.DataTypeComparableFloat64:
 		tmpl = calcByteSizeFloat64Template
-	case parse.DataComparableTypeString:
+	case parse.DataTypeComparableString:
 		tmpl = calcByteSizeStringTemplate
+	case parse.DataTypeComparableCustom:
+		tmpl = calcByteSizeCustomTemplate
 	default:
 		return "", fmt.Errorf("unrecognized key type: %v", dataType)
 	}
@@ -747,7 +760,7 @@ func generateKeyFieldCalcByteSizeMethodCall(varName string, dataType parse.DataC
 	return buf.String(), nil
 }
 
-func generateKeyFieldSerializationMethodCall(varName string, dataType parse.DataComparableType) (string, error) {
+func generateKeyFieldSerializationMethodCall(varName string, dataType parse.DataTypeComparable) (string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -756,28 +769,30 @@ func generateKeyFieldSerializationMethodCall(varName string, dataType parse.Data
 	var tmpl *template.Template
 
 	switch dataType {
-	case parse.DataComparableTypeUInt8:
+	case parse.DataTypeComparableUInt8:
 		tmpl = serializeUInt8Template
-	case parse.DataComparableTypeUInt16:
+	case parse.DataTypeComparableUInt16:
 		tmpl = serializeUInt16Template
-	case parse.DataComparableTypeUInt32:
+	case parse.DataTypeComparableUInt32:
 		tmpl = serializeUInt32Template
-	case parse.DataComparableTypeUInt64:
+	case parse.DataTypeComparableUInt64:
 		tmpl = serializeUInt64Template
-	case parse.DataComparableTypeInt8:
+	case parse.DataTypeComparableInt8:
 		tmpl = serializeInt8Template
-	case parse.DataComparableTypeInt16:
+	case parse.DataTypeComparableInt16:
 		tmpl = serializeInt16Template
-	case parse.DataComparableTypeInt32:
+	case parse.DataTypeComparableInt32:
 		tmpl = serializeInt32Template
-	case parse.DataComparableTypeInt64:
+	case parse.DataTypeComparableInt64:
 		tmpl = serializeInt64Template
-	case parse.DataComparableTypeFloat32:
+	case parse.DataTypeComparableFloat32:
 		tmpl = serializeFloat32Template
-	case parse.DataComparableTypeFloat64:
+	case parse.DataTypeComparableFloat64:
 		tmpl = serializeFloat64Template
-	case parse.DataComparableTypeString:
+	case parse.DataTypeComparableString:
 		tmpl = serializeStringTemplate
+	case parse.DataTypeComparableCustom:
+		tmpl = serializeCustomTemplate
 	default:
 		return "", fmt.Errorf("unrecognized key type: %v", dataType)
 	}
@@ -791,7 +806,7 @@ func generateKeyFieldSerializationMethodCall(varName string, dataType parse.Data
 	return buf.String(), nil
 }
 
-func generateKeyFieldDeserializationMethodCall(varName string, dataType parse.DataComparableType) (string, error) {
+func generateKeyFieldDeserializationMethodCall(varName string, dataType parse.DataTypeComparable) (string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -800,28 +815,30 @@ func generateKeyFieldDeserializationMethodCall(varName string, dataType parse.Da
 	var tmpl *template.Template
 
 	switch dataType {
-	case parse.DataComparableTypeUInt8:
+	case parse.DataTypeComparableUInt8:
 		tmpl = deserializeUInt8Template
-	case parse.DataComparableTypeUInt16:
+	case parse.DataTypeComparableUInt16:
 		tmpl = deserializeUInt16Template
-	case parse.DataComparableTypeUInt32:
+	case parse.DataTypeComparableUInt32:
 		tmpl = deserializeUInt32Template
-	case parse.DataComparableTypeUInt64:
+	case parse.DataTypeComparableUInt64:
 		tmpl = deserializeUInt64Template
-	case parse.DataComparableTypeInt8:
+	case parse.DataTypeComparableInt8:
 		tmpl = deserializeInt8Template
-	case parse.DataComparableTypeInt16:
+	case parse.DataTypeComparableInt16:
 		tmpl = deserializeInt16Template
-	case parse.DataComparableTypeInt32:
+	case parse.DataTypeComparableInt32:
 		tmpl = deserializeInt32Template
-	case parse.DataComparableTypeInt64:
+	case parse.DataTypeComparableInt64:
 		tmpl = deserializeInt64Template
-	case parse.DataComparableTypeFloat32:
+	case parse.DataTypeComparableFloat32:
 		tmpl = deserializeFloat32Template
-	case parse.DataComparableTypeFloat64:
+	case parse.DataTypeComparableFloat64:
 		tmpl = deserializeFloat64Template
-	case parse.DataComparableTypeString:
+	case parse.DataTypeComparableString:
 		tmpl = deserializeStringTemplate
+	case parse.DataTypeComparableCustom:
+		tmpl = deserializeCustomTemplate
 	default:
 		return "", fmt.Errorf("unrecognized key type: %v", dataType)
 	}

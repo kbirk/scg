@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -81,7 +82,7 @@ func getContentForErrorBlock(content string, lineStart int, lineEnd int) string 
 	return res
 }
 
-func (p *ParsingError) Error() string {
+func (p *ParsingError) Error() error {
 
 	msg := p.Message
 
@@ -94,5 +95,5 @@ func (p *ParsingError) Error() string {
 		// msg += fmt.Sprintf("\n%s", getContentForErrorBlock(p.Content, p.Token.LineStart, p.Token.LineEnd))
 	}
 
-	return msg
+	return errors.New(msg)
 }

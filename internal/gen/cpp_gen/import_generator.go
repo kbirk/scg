@@ -21,6 +21,9 @@ const importTemplateStr = `
 `
 
 var (
+	typedefIncludes = []string{
+		"scg/typedef.h",
+	}
 	messageIncludes = []string{
 		"scg/serialize.h",
 		"nlohmann/json.hpp",
@@ -41,9 +44,13 @@ func getOutputFileName(path string) string {
 	return util.EnsureSnakeCase(filename) + ".h"
 }
 
-func generateImportsCppCode(deps []parse.FileDependency, hasServices bool, hasMessages bool) (string, error) {
+func generateImportsCppCode(deps []parse.FileDependency, hasServices bool, hasMessages bool, hasTypedefs bool) (string, error) {
 
 	args := IncludeArgs{}
+
+	if hasTypedefs {
+		args.LibIncludes = append(args.LibIncludes, typedefIncludes...)
+	}
 
 	if hasMessages {
 		args.LibIncludes = append(args.LibIncludes, messageIncludes...)

@@ -72,14 +72,14 @@ func TestFileParser(t *testing.T) {
 	assert.Equal(t, "n", type1.Fields["n"].Name)
 	assert.Equal(t, uint(1), type1.Fields["n"].Index)
 	assert.Equal(t, DataTypeMap, type1.Fields["n"].DataTypeDefinition.Type)
-	assert.Equal(t, DataComparableTypeString, type1.Fields["n"].DataTypeDefinition.Key)
+	assert.Equal(t, DataTypeComparableString, type1.Fields["n"].DataTypeDefinition.Key.Type)
 	assert.Equal(t, DataTypeString, type1.Fields["n"].DataTypeDefinition.SubType.Type)
 
 	assert.Equal(t, "o", type1.Fields["o"].Name)
 	assert.Equal(t, uint(2), type1.Fields["o"].Index)
 	assert.Equal(t, DataTypeList, type1.Fields["o"].DataTypeDefinition.Type)
 	assert.Equal(t, DataTypeMap, type1.Fields["o"].DataTypeDefinition.SubType.Type)
-	assert.Equal(t, DataComparableTypeString, type1.Fields["o"].DataTypeDefinition.SubType.Key)
+	assert.Equal(t, DataTypeComparableString, type1.Fields["o"].DataTypeDefinition.SubType.Key.Type)
 	assert.Equal(t, DataTypeList, type1.Fields["o"].DataTypeDefinition.SubType.SubType.Type)
 	assert.Equal(t, DataTypeString, type1.Fields["o"].DataTypeDefinition.SubType.SubType.SubType.Type)
 

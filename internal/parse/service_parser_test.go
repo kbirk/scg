@@ -31,6 +31,8 @@ func TestServiceMethodTokenizer(t *testing.T) {
 	tokens, err := tokenizeFile(content)
 	require.Nil(t, err)
 
+	require.Equal(t, 2, len(tokens))
+
 	for _, token := range tokens {
 		match, err := FindOneMatch(serviceRegex, token)
 		require.Nil(t, err)

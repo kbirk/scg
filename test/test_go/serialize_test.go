@@ -63,6 +63,14 @@ func TestSerializeComplicated(t *testing.T) {
 				},
 			},
 		},
+		StructC: basic.StructC{
+			Str:  "my-str",
+			Strs: []basic.BasicString{"a", "b"},
+			StrMap: map[basic.BasicString]basic.BasicString{
+				"key1": "val1",
+				"key2": "val2",
+			},
+		},
 	}
 	size := input.CalcByteSize()
 	writer := serialize.NewFixedSizeWriter(size)

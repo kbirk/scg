@@ -37,6 +37,8 @@ func TestMessageFieldTokenizer(t *testing.T) {
 	tokens, err := tokenizeFile(content)
 	require.Nil(t, err)
 
+	require.Equal(t, 3, len(tokens))
+
 	for _, token := range tokens {
 		match, err := FindOneMatch(messageRegex, token)
 		require.Nil(t, err)
@@ -151,14 +153,14 @@ func TestMessageParser(t *testing.T) {
 	assert.Equal(t, "n", message.Fields["n"].Name)
 	assert.Equal(t, uint(14), message.Fields["n"].Index)
 	assert.Equal(t, DataTypeMap, message.Fields["n"].DataTypeDefinition.Type)
-	assert.Equal(t, DataComparableTypeString, message.Fields["n"].DataTypeDefinition.Key)
+	assert.Equal(t, DataTypeComparableString, message.Fields["n"].DataTypeDefinition.Key.Type)
 	assert.Equal(t, DataTypeString, message.Fields["n"].DataTypeDefinition.SubType.Type)
 
 	assert.Equal(t, "o", message.Fields["o"].Name)
 	assert.Equal(t, uint(15), message.Fields["o"].Index)
 	assert.Equal(t, DataTypeList, message.Fields["o"].DataTypeDefinition.Type)
 	assert.Equal(t, DataTypeMap, message.Fields["o"].DataTypeDefinition.SubType.Type)
-	assert.Equal(t, DataComparableTypeString, message.Fields["o"].DataTypeDefinition.SubType.Key)
+	assert.Equal(t, DataTypeComparableString, message.Fields["o"].DataTypeDefinition.SubType.Key.Type)
 	assert.Equal(t, DataTypeList, message.Fields["o"].DataTypeDefinition.SubType.SubType.Type)
 	assert.Equal(t, DataTypeString, message.Fields["o"].DataTypeDefinition.SubType.SubType.SubType.Type)
 
@@ -177,7 +179,7 @@ func TestMessageParser(t *testing.T) {
 	assert.Equal(t, "r", message.Fields["r"].Name)
 	assert.Equal(t, uint(18), message.Fields["r"].Index)
 	assert.Equal(t, DataTypeMap, message.Fields["r"].DataTypeDefinition.Type)
-	assert.Equal(t, DataComparableTypeString, message.Fields["r"].DataTypeDefinition.Key)
+	assert.Equal(t, DataTypeComparableString, message.Fields["r"].DataTypeDefinition.Key.Type)
 	assert.Equal(t, DataTypeCustom, message.Fields["r"].DataTypeDefinition.SubType.Type)
 	assert.Equal(t, "CustomType", message.Fields["r"].DataTypeDefinition.SubType.CustomType)
 	assert.Equal(t, "some.other_package", message.Fields["r"].DataTypeDefinition.SubType.CustomTypePackage)
@@ -218,6 +220,43 @@ func TestMessageNestedParser(t *testing.T) {
 		message TestMessage {
 			list<map<string, string>> list_of_maps_field = 0;
 			map<string, map<string, string>> map_of_maps_field = 1;
+		}
+	`)
+	require.Nil(t, err)
+
+	_, err = parseMessageDefinitions(tokens)
+	require.Nil(t, err)
+}
+
+func TestMessageListTypedefs(t *testing.T) {
+
+	tokens, err := tokenizeFile(`
+		# commment the message
+		message TestMessageA {
+			list<MyTypeDef> list_of_maps_field = 0;
+		}
+		message TestMessageB {
+			list<some.package.MyTypeDef> list_of_maps_field = 0;
+		}
+	`)
+	require.Nil(t, err)
+
+	_, err = parseMessageDefinitions(tokens)
+	require.Nil(t, err)
+}
+
+func TestMessageMapTypedefs(t *testing.T) {
+
+	tokens, err := tokenizeFile(`
+		# commment the message
+		message TestMessageA {
+			map<MyTypDef, MyTypeDef> list_of_maps_field = 0;
+		}
+		message TestMessageB {
+			map<another.MyTypDef, MyTypeDef> list_of_maps_field = 0;
+		}
+		message TestMessageC {
+			map<nested.pkg.MyTypeDef, MyTypeDef> list_of_maps_field = 0;
 		}
 	`)
 	require.Nil(t, err)

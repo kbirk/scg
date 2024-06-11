@@ -10,13 +10,15 @@ const (
 )
 
 type CustomTypeDependency struct {
-	Package  *PackageDeclaration
-	DataType *DataTypeDefinition
-	File     *File
+	CustomTypePackage string
+	CustomTypeName    string
+	File              *File
+	Token             *Token
 }
 
 type FileDependency struct {
-	File *File
+	File  *File
+	Token *Token
 }
 
 type File struct {
@@ -27,6 +29,7 @@ type File struct {
 	FullPath               string
 	Package                *PackageDeclaration
 	CustomTypeDependencies map[string]*CustomTypeDependency
+	Typedefs               map[string]*TypedefDeclaration
 	ServiceDefinitions     map[string]*ServiceDefinition
 	MessageDefinitions     map[string]*MessageDefinition
 }
@@ -35,15 +38,16 @@ func (f *File) GetPackageDependencies() []PackageDependency {
 	seen := make(map[string]bool)
 	pkgs := []PackageDependency{}
 	for _, dep := range f.CustomTypeDependencies {
-		if dep.Package.Name == f.Package.Name {
+		if dep.CustomTypePackage == f.Package.Name {
 			// don't add package dependencies for the same package
 			continue
 		}
-		_, ok := seen[dep.Package.Name]
+		_, ok := seen[dep.CustomTypePackage]
 		if !ok {
-			seen[dep.Package.Name] = true
+			seen[dep.CustomTypePackage] = true
 			pkgs = append(pkgs, PackageDependency{
-				Package: dep.Package,
+				PackageName: dep.CustomTypePackage,
+				Token:       dep.Token,
 			})
 		}
 	}
@@ -58,11 +62,28 @@ func (f *File) GetFileDependencies() []FileDependency {
 		if !ok {
 			seen[dep.File.Name] = true
 			files = append(files, FileDependency{
-				File: dep.File,
+				File:  dep.File,
+				Token: dep.Token,
 			})
 		}
 	}
 	return files
+}
+
+func (f *File) TypedefsSortedByKey() []*TypedefDeclaration {
+	keys := make([]string, 0, len(f.Typedefs))
+	for k := range f.Typedefs {
+		keys = append(keys, k)
+	}
+
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	values := make([]*TypedefDeclaration, 0, len(f.Typedefs))
+	for _, k := range keys {
+		values = append(values, f.Typedefs[k])
+	}
+
+	return values
 }
 
 func (f *File) MessagesSortedByKey() []*MessageDefinition {
@@ -96,6 +117,21 @@ func (f *File) ServicesSortedByKey() []*ServiceDefinition {
 
 	return values
 }
+
+func populateDataTypeComparablePackageIfMissing(packageName string, dataType *DataTypeComparableDefinition) *ParsingError {
+	if dataType.Type == DataTypeComparableCustom {
+		if dataType.CustomTypePackage == "" {
+			dataType.CustomTypePackage = packageName
+		}
+		if dataType.CustomTypePackage != packageName {
+			dataType.ImportedFromOtherPackage = true
+		} else {
+			dataType.ImportedFromOtherPackage = false
+		}
+	}
+	return nil
+}
+
 func populateDataTypePackageIfMissing(packageName string, dataType *DataTypeDefinition) *ParsingError {
 	if dataType.Type == DataTypeCustom {
 		if dataType.CustomTypePackage == "" {
@@ -106,37 +142,94 @@ func populateDataTypePackageIfMissing(packageName string, dataType *DataTypeDefi
 		} else {
 			dataType.ImportedFromOtherPackage = false
 		}
+		return nil
 	}
-	if dataType.Type == DataTypeList || dataType.Type == DataTypeMap {
+
+	if dataType.Type == DataTypeList {
 		if dataType.SubType == nil {
 			return &ParsingError{
-				Message: "internal parsing error: list / map subtype not found",
-				Token:   nil,
+				Message: "internal parsing error: list subtype not found",
+				Token:   dataType.Token,
 			}
+		}
+		return populateDataTypePackageIfMissing(packageName, dataType.SubType)
+	}
+
+	if dataType.Type == DataTypeMap {
+		if dataType.Key == nil {
+			return &ParsingError{
+				Message: "internal parsing error: map key not found",
+				Token:   dataType.Token,
+			}
+		}
+		if dataType.SubType == nil {
+			return &ParsingError{
+				Message: "internal parsing error: map subtype not found",
+				Token:   dataType.Token,
+			}
+		}
+		err := populateDataTypeComparablePackageIfMissing(packageName, dataType.Key)
+		if err != nil {
+			return err
 		}
 		return populateDataTypePackageIfMissing(packageName, dataType.SubType)
 	}
 	return nil
 }
 
+func addCustomComparableTypeDependency(dependencies map[string]*CustomTypeDependency, dataType *DataTypeComparableDefinition) *ParsingError {
+	if dataType.Type == DataTypeComparableCustom {
+		if _, ok := dependencies[dataType.CustomTypePackage]; !ok {
+			dependencies[dataType.CustomTypePackage] = &CustomTypeDependency{
+				CustomTypePackage: dataType.CustomTypePackage,
+				CustomTypeName:    dataType.CustomType,
+				Token:             dataType.Token,
+			}
+		}
+	}
+	return nil
+}
+
 func addCustomTypeDependency(dependencies map[string]*CustomTypeDependency, dataType *DataTypeDefinition) *ParsingError {
 
-	if dataType.Type == DataTypeList || dataType.Type == DataTypeMap {
+	if dataType.Type == DataTypeList {
 		if dataType.SubType == nil {
 			return &ParsingError{
 				Message: "internal parsing error: list / map subtype not found",
-				Token:   nil,
+				Token:   dataType.Token,
 			}
 		}
 		return addCustomTypeDependency(dependencies, dataType.SubType)
 	}
+
+	if dataType.Type == DataTypeMap {
+		if dataType.Key == nil {
+			return &ParsingError{
+				Message: "internal parsing error: map key not found",
+				Token:   dataType.Token,
+			}
+		}
+
+		err := addCustomComparableTypeDependency(dependencies, dataType.Key)
+		if err != nil {
+			return err
+		}
+
+		if dataType.SubType == nil {
+			return &ParsingError{
+				Message: "internal parsing error: list / map subtype not found",
+				Token:   dataType.Token,
+			}
+		}
+		return addCustomTypeDependency(dependencies, dataType.SubType)
+	}
+
 	if dataType.Type == DataTypeCustom {
 		if _, ok := dependencies[dataType.CustomTypePackage]; !ok {
 			dependencies[dataType.CustomTypePackage] = &CustomTypeDependency{
-				Package: &PackageDeclaration{
-					Name: dataType.CustomTypePackage,
-				},
-				DataType: dataType,
+				CustomTypePackage: dataType.CustomTypePackage,
+				CustomTypeName:    dataType.CustomType,
+				Token:             dataType.Token,
 			}
 		}
 
@@ -162,12 +255,34 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 		return nil, perr
 	}
 
+	typedefs, perr := parseTypedefDeclaration(tokens)
+	if perr != nil {
+		return nil, perr
+	}
+
 	messageDefinitions, perr := parseMessageDefinitions(tokens)
 	if perr != nil {
 		return nil, perr
 	}
 
 	dependencies := make(map[string]*CustomTypeDependency)
+
+	for _, typdef := range typedefs {
+		// set the file
+		typdef.File = f
+
+		// if package is omitted, use the file's package name
+		perr := populateDataTypeComparablePackageIfMissing(pkg.Name, typdef.DataTypeDefinition)
+		if perr != nil {
+			return nil, perr
+		}
+
+		// TODO: add custom type dependencies
+		perr = addCustomComparableTypeDependency(dependencies, typdef.DataTypeDefinition)
+		if perr != nil {
+			return nil, perr
+		}
+	}
 
 	for _, msg := range messageDefinitions {
 
@@ -181,7 +296,7 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 				return nil, perr
 			}
 
-			// store package dependencies
+			// add custom type dependencies
 			perr = addCustomTypeDependency(dependencies, field.DataTypeDefinition)
 			if perr != nil {
 				return nil, perr
@@ -205,7 +320,7 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 			if perr != nil {
 				return nil, perr
 			}
-			// store package dependencies
+			// add custom type dependencies
 			perr = addCustomTypeDependency(dependencies, method.Argument)
 			if perr != nil {
 				return nil, perr
@@ -216,7 +331,7 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 			if perr != nil {
 				return nil, perr
 			}
-			// store package dependencies
+			// add custom type dependencies
 			perr = addCustomTypeDependency(dependencies, method.Return)
 			if perr != nil {
 				return nil, perr
@@ -227,16 +342,24 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 	externalCustomTypeDependencies := make(map[string]*CustomTypeDependency)
 	for _, dep := range dependencies {
 		// check if the custom type is defined in this file
-		_, ok := messageDefinitions[dep.DataType.CustomType]
-		if !ok {
-			// custom type depdenency is not defined in this file
-			externalCustomTypeDependencies[dep.DataType.CustomType] = dep
+		_, ok := messageDefinitions[dep.CustomTypeName]
+		if ok {
+			continue
 		}
+
+		_, ok = typedefs[dep.CustomTypeName]
+		if ok {
+			continue
+		}
+
+		// custom type depdenency is not defined in this file
+		externalCustomTypeDependencies[dep.CustomTypeName] = dep
 	}
 
 	f.Content = input
 	f.Package = pkg
 	f.CustomTypeDependencies = externalCustomTypeDependencies
+	f.Typedefs = typedefs
 	f.MessageDefinitions = messageDefinitions
 	f.ServiceDefinitions = serviceDefinitions
 

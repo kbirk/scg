@@ -238,6 +238,7 @@ Run the tests:
 
 ## TODO:
 
+- Add `enum` support
 - Implement context cancellations and deadlines
 - Opentracing hooks and context serialization
 - Add stream support

@@ -16,16 +16,18 @@ type Parse struct {
 }
 
 type PackageDependency struct {
-	Package *PackageDeclaration
+	// Package *PackageDeclaration
+	PackageName string
+	Token       *Token
 }
 
 type Package struct {
-	Name                string
-	Declaration         *PackageDeclaration
-	PackageDependencies map[string]*PackageDependency
-	ServiceDefinitions  map[string]*ServiceDefinition
-	MessageDefinitions  map[string]*MessageDefinition
-
+	Name                   string
+	Declaration            *PackageDeclaration
+	PackageDependencies    map[string]*PackageDependency
+	Typedefs               map[string]*TypedefDeclaration
+	ServiceDefinitions     map[string]*ServiceDefinition
+	MessageDefinitions     map[string]*MessageDefinition
 	serverIDCollisionCheck map[uint64]string
 	methodIDCollisionCheck map[uint64]map[uint64]string
 }
@@ -77,15 +79,15 @@ func (p *Package) HashStringToMethodID(serviceName string, methodName string) (u
 func NewParse(inputDir string) (*Parse, error) {
 	fileContents, err := searchInputPatternAndReadFiles(inputDir)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing input pattern: %s", err.Error())
+		return nil, fmt.Errorf("failed to parse input pattern: %s", err.Error())
 	}
 	files, perr := parseFileContents(inputDir, fileContents)
 	if perr != nil {
-		return nil, fmt.Errorf("error parsing input file contents: %s", perr.Error())
+		return nil, perr.Error()
 	}
 	p, perr := resolveFilesIntoParse(files)
 	if perr != nil {
-		return nil, fmt.Errorf("error resolving files into parse: %s", perr.Error())
+		return nil, perr.Error()
 	}
 	return p, nil
 }
@@ -93,11 +95,11 @@ func NewParse(inputDir string) (*Parse, error) {
 func NewParseFromFiles(inputDir string, fileContents map[string]string) (*Parse, error) {
 	files, perr := parseFileContents(inputDir, fileContents)
 	if perr != nil {
-		return nil, fmt.Errorf("error parsing input file contents: %s", perr.Error())
+		return nil, fmt.Errorf("failed to parse input pattern: %s", perr.Error())
 	}
 	p, perr := resolveFilesIntoParse(files)
 	if perr != nil {
-		return nil, fmt.Errorf("error resolving files into parse: %s", perr.Error())
+		return nil, perr.Error()
 	}
 	return p, nil
 }
@@ -211,17 +213,33 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 				Name:                f.Package.Name,
 				Declaration:         f.Package,
 				PackageDependencies: map[string]*PackageDependency{},
+				Typedefs:            map[string]*TypedefDeclaration{},
 				ServiceDefinitions:  map[string]*ServiceDefinition{},
 				MessageDefinitions:  map[string]*MessageDefinition{},
 			}
 		}
 		// append definitions from the file to the package
 		for _, v := range f.CustomTypeDependencies {
-			if f.Package.Name == v.Package.Name {
+			if f.Package.Name == v.CustomTypePackage {
 				// type exists in the same package, this is fine
 				continue
 			}
-			parse.Packages[f.Package.Name].PackageDependencies[v.Package.Name] = &PackageDependency{v.Package}
+			parse.Packages[f.Package.Name].PackageDependencies[v.CustomTypePackage] = &PackageDependency{
+				PackageName: v.CustomTypePackage,
+				Token:       v.Token,
+			}
+		}
+		for k, v := range f.Typedefs {
+			_, ok := parse.Packages[f.Package.Name].Typedefs[k]
+			if ok {
+				return nil, &ParsingError{
+					Message:  fmt.Sprintf("typedef %s defined multiple times", k),
+					Token:    v.Token,
+					Filename: f.Name,
+					Content:  f.Content,
+				}
+			}
+			parse.Packages[f.Package.Name].Typedefs[k] = v
 		}
 		for k, v := range f.ServiceDefinitions {
 			_, ok := parse.Packages[f.Package.Name].ServiceDefinitions[k]

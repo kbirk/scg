@@ -2,20 +2,20 @@ package parse
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode"
 )
 
 var (
-	validNameRegex              = regexp.MustCompile(`^[a-zA-Z][a-zA-Z_0-9]*$`)
-	validPackageRegex           = regexp.MustCompile(`^([a-zA-Z][a-zA-Z_0-9.]*)$`)
 	blockScopedNamedDeclaration = map[string]TokenType{
 		"service": ServiceTokenType,
 		"message": MessageTokenType,
 	}
 	packageDeclaration = map[string]TokenType{
 		"package": PackageTokenType,
+	}
+	typedefDeclaration = map[string]TokenType{
+		"typedef": TypedefTokenType,
 	}
 )
 
@@ -74,11 +74,8 @@ func (p *BlockScopedNamedDeclarationParser) Consume(c rune, state *ParseState) (
 				return nil, fmt.Errorf("unexpected opening bracket")
 			}
 
-			if p.expectingName && !validNameRegex.MatchString(state.word) {
-				if state.word == "" {
-					return nil, fmt.Errorf("missing name")
-				}
-				return nil, fmt.Errorf("invalid name `%s`", state.word)
+			if p.expectingName && state.word == "" {
+				return nil, fmt.Errorf("missing name")
 			}
 
 			p.expectingName = false
@@ -115,8 +112,8 @@ func (p *BlockScopedNamedDeclarationParser) Consume(c rune, state *ParseState) (
 
 	if breakWord && state.inWord {
 		if p.expectingName {
-			if !validNameRegex.MatchString(state.word) {
-				return nil, fmt.Errorf("invalid name `%s`", state.word)
+			if state.word == "" {
+				return nil, fmt.Errorf("missing name")
 			}
 			p.expectingName = false
 			p.expectingOpeningBracket = true
@@ -163,10 +160,6 @@ func (p *PackageDeclarationParser) Consume(c rune, state *ParseState) (TokenPars
 				return nil, fmt.Errorf("unexpected semi-colon")
 			}
 
-			if state.inWord && !validPackageRegex.MatchString(state.word) {
-				return nil, fmt.Errorf("invalid package name `%s`", state.word)
-			}
-
 			state.currentToken.LineEnd = state.line
 			state.currentToken.LineEndCharacterPosition = state.character
 
@@ -189,10 +182,93 @@ func (p *PackageDeclarationParser) Consume(c rune, state *ParseState) (TokenPars
 
 	if breakWord && state.inWord {
 		if p.expectingPackageName {
-			if !validPackageRegex.MatchString(state.word) {
-				return nil, fmt.Errorf("invalid package name `%s`", state.word)
-			}
 			p.expectingPackageName = false
+			p.expectingSemiColon = true
+			state.word = ""
+			state.inWord = false
+		} else {
+			return nil, fmt.Errorf("unexpected keyword `%s`", state.word)
+		}
+	}
+
+	return p, nil
+}
+
+type TypedefDeclarationParser struct {
+	expectingTypedefName bool
+	expectingAssignment  bool
+	expectingTypedefType bool
+	expectingSemiColon   bool
+}
+
+func (p *TypedefDeclarationParser) Consume(c rune, state *ParseState) (TokenParser, error) {
+	if c == '\n' {
+		state.line++
+		state.character = 0
+		state.inComment = false
+	} else {
+		state.character++
+	}
+	breakWord := false
+	if unicode.IsSpace(c) {
+		// whitespace
+		state.currentToken.Content += string(c)
+		breakWord = true
+
+	} else if c == commentDelimiter || state.inComment {
+		// comment
+		state.inComment = true
+		breakWord = true
+		state.currentToken.Content += " " // replace comment with whitespace
+
+	} else {
+		// character
+		state.currentToken.Content += string(c)
+
+		if c == '=' {
+			if !p.expectingAssignment && !state.inWord {
+				return nil, fmt.Errorf("unexpected '=' operator")
+			}
+
+			p.expectingAssignment = false
+			p.expectingTypedefType = true
+
+		} else if c == ';' {
+			if !p.expectingSemiColon && !state.inWord {
+				return nil, fmt.Errorf("unexpected semi-colon")
+			}
+
+			state.currentToken.LineEnd = state.line
+			state.currentToken.LineEndCharacterPosition = state.character
+
+			state.tokens = append(state.tokens, state.currentToken)
+			state.currentToken = nil
+
+			state.word = ""
+			state.inWord = false
+
+			// done
+			return &KeywordTokenParser{}, nil
+		} else {
+			if p.expectingAssignment {
+				return nil, fmt.Errorf("unexpected character `%s`", string(c))
+			}
+			if p.expectingSemiColon {
+				return nil, fmt.Errorf("unexpected character `%s`", string(c))
+			}
+			state.word += string(c)
+			state.inWord = true
+		}
+	}
+
+	if breakWord && state.inWord {
+		if p.expectingTypedefName {
+			p.expectingTypedefName = false
+			p.expectingAssignment = true
+			state.word = ""
+			state.inWord = false
+		} else if p.expectingTypedefType {
+			p.expectingTypedefType = false
 			p.expectingSemiColon = true
 			state.word = ""
 			state.inWord = false
@@ -269,6 +345,15 @@ func (p *KeywordTokenParser) Consume(c rune, state *ParseState) (TokenParser, er
 			state.currentToken.Type = tokenType
 			return &PackageDeclarationParser{
 				expectingPackageName: true,
+			}, nil
+		}
+
+		if tokenType, ok = typedefDeclaration[state.word]; ok {
+			state.word = ""
+			state.inWord = false
+			state.currentToken.Type = tokenType
+			return &TypedefDeclarationParser{
+				expectingTypedefName: true,
 			}, nil
 		}
 

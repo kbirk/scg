@@ -9,7 +9,7 @@ import (
 
 func TestGenerateImportsGo(t *testing.T) {
 
-	str, err := generateImportsGoCode("github.com/test", nil, true, true)
+	str, err := generateImportsGoCode("github.com/test", nil, true, true, true)
 	require.Nil(t, err)
 	fmt.Println(str)
 

@@ -13,6 +13,7 @@ type FileArgs struct {
 	Header   string
 	Package  string
 	Imports  string
+	Typedefs string
 	Messages string
 	Servers  string
 	Clients  string
@@ -22,6 +23,7 @@ const fileTemplateStr = `
 {{.Header}}
 {{.Package}}
 {{.Imports}}
+{{.Typedefs}}
 {{.Messages}}
 {{.Servers}}
 {{.Clients}}
@@ -43,9 +45,18 @@ func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.Fi
 		return "", err
 	}
 
-	importCode, err := generateImportsGoCode(goBasePackage, file.GetPackageDependencies(), len(file.ServiceDefinitions) > 0, len(file.MessageDefinitions) > 0)
+	importCode, err := generateImportsGoCode(goBasePackage, file.GetPackageDependencies(), len(file.ServiceDefinitions) > 0, len(file.MessageDefinitions) > 0, len(file.Typedefs) > 0)
 	if err != nil {
 		return "", err
+	}
+
+	var typedefCode []string
+	for _, msg := range file.TypedefsSortedByKey() {
+		typdef, err := generateTypedefGoCode(msg)
+		if err != nil {
+			return "", err
+		}
+		typedefCode = append(typedefCode, typdef)
 	}
 
 	var messageCode []string
@@ -79,6 +90,7 @@ func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.Fi
 		Header:   headerCode,
 		Package:  pkgCode,
 		Imports:  importCode,
+		Typedefs: strings.Join(typedefCode, "\n"),
 		Messages: strings.Join(messageCode, "\n"),
 		Servers:  strings.Join(serverCode, "\n"),
 		Clients:  strings.Join(clientCode, "\n"),

@@ -10,6 +10,7 @@ const (
 	ServiceMethodTokenType
 	ServiceMethodParamTokenType
 	PackageTokenType
+	TypedefTokenType
 )
 
 type Token struct {

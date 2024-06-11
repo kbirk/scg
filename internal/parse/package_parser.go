@@ -5,7 +5,7 @@ import (
 )
 
 var (
-	packageRegex = regexp.MustCompile(`package\s+([a-zA-Z][a-zA-Z_0-9.]*)\s*\;`)
+	packageRegex = regexp.MustCompile(`package\s+((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\;`)
 )
 
 type PackageDeclaration struct {

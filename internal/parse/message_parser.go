@@ -9,17 +9,19 @@ import (
 )
 
 var (
-	messageRegex        = regexp.MustCompile(`(?s)message\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
-	fieldRegex          = regexp.MustCompile(`^((?:list\s*\<\s*(?:.*)\s*\>)|(?:map\s*\<\s*(?:.*)\s*\>)|(?:.+?))\s+(.+?)\s*=\s*(.+?)\s*;\s*$`)
-	plainDataTypeRegex  = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*$`)
-	customDataTypeRegex = regexp.MustCompile(`^((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)$`)
-	mapDataTypeRegex    = regexp.MustCompile(`^map\s*\<\s*(uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*,\s*(.+?)\s*\>$`)
-	listDataTypeRegex   = regexp.MustCompile(`^list\s*\<\s*(.+)\s*\>$`)
-	validIndexRegex     = regexp.MustCompile(`^\d+$`)
+	messageRegex                 = regexp.MustCompile(`(?s)message\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
+	fieldRegex                   = regexp.MustCompile(`^((?:list\s*\<\s*(?:.*)\s*\>)|(?:map\s*\<\s*(?:.*)\s*\>)|(?:.+?))\s+(.+?)\s*=\s*(.+?)\s*;*$`)
+	fieldNameRegex               = regexp.MustCompile(`^[a-zA-Z][a-zA-Z_0-9]*$`)
+	plainDataTypeRegex           = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)$`)
+	plainDataTypeComparableRegex = regexp.MustCompile(`^(uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)$`)
+	customDataTypeRegex          = regexp.MustCompile(`^((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)$`)
+	mapDataTypeRegex             = regexp.MustCompile(`^map\s*\<\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*,\s*(.+?)\s*\>$`)
+	listDataTypeRegex            = regexp.MustCompile(`^list\s*\<\s*(.+)\s*\>$`)
+	validIndexRegex              = regexp.MustCompile(`^\d+$`)
 )
 
 type DataType int
-type DataComparableType int
+type DataTypeComparable int
 
 const (
 	DataTypeByte DataType = iota
@@ -41,26 +43,45 @@ const (
 )
 
 const (
-	DataComparableTypeUInt8 DataComparableType = iota
-	DataComparableTypeUInt16
-	DataComparableTypeUInt32
-	DataComparableTypeUInt64
-	DataComparableTypeInt8
-	DataComparableTypeInt16
-	DataComparableTypeInt32
-	DataComparableTypeInt64
-	DataComparableTypeFloat32
-	DataComparableTypeFloat64
-	DataComparableTypeString
+	DataTypeComparableUInt8 DataTypeComparable = iota
+	DataTypeComparableUInt16
+	DataTypeComparableUInt32
+	DataTypeComparableUInt64
+	DataTypeComparableInt8
+	DataTypeComparableInt16
+	DataTypeComparableInt32
+	DataTypeComparableInt64
+	DataTypeComparableFloat32
+	DataTypeComparableFloat64
+	DataTypeComparableString
+	DataTypeComparableCustom
 )
+
+type DataTypeComparableDefinition struct {
+	Type                     DataTypeComparable
+	CustomType               string
+	CustomTypePackage        string
+	UnderlyingType           DataTypeComparable
+	ImportedFromOtherPackage bool
+	Token                    *Token
+}
+
+func (d *DataTypeComparableDefinition) ToString() string {
+	if d.Type == DataTypeComparableCustom {
+		return fmt.Sprintf("%s.%s", d.CustomTypePackage, d.CustomType)
+	}
+
+	return mapComparableTypeEnumToString(d.Type)
+}
 
 type DataTypeDefinition struct {
 	Type                     DataType
-	Key                      DataComparableType
+	Key                      *DataTypeComparableDefinition
 	CustomType               string
 	CustomTypePackage        string
 	SubType                  *DataTypeDefinition
 	ImportedFromOtherPackage bool
+	Token                    *Token
 }
 
 func mapTypeEnumToString(typ DataType) string {
@@ -95,30 +116,31 @@ func mapTypeEnumToString(typ DataType) string {
 	panic("invalid data type")
 }
 
-func mapComparableTypeEnumToString(typ DataComparableType) string {
+func mapComparableTypeEnumToString(typ DataTypeComparable) string {
 	switch typ {
-	case DataComparableTypeUInt8:
+	case DataTypeComparableUInt8:
 		return "uint8"
-	case DataComparableTypeUInt16:
+	case DataTypeComparableUInt16:
 		return "uint16"
-	case DataComparableTypeUInt32:
+	case DataTypeComparableUInt32:
 		return "uint32"
-	case DataComparableTypeUInt64:
+	case DataTypeComparableUInt64:
 		return "uint64"
-	case DataComparableTypeInt8:
+	case DataTypeComparableInt8:
 		return "int8"
-	case DataComparableTypeInt16:
+	case DataTypeComparableInt16:
 		return "int16"
-	case DataComparableTypeInt32:
+	case DataTypeComparableInt32:
 		return "int32"
-	case DataComparableTypeInt64:
+	case DataTypeComparableInt64:
 		return "int64"
-	case DataComparableTypeFloat32:
+	case DataTypeComparableFloat32:
 		return "float32"
-	case DataComparableTypeFloat64:
+	case DataTypeComparableFloat64:
 		return "float64"
-	case DataComparableTypeString:
+	case DataTypeComparableString:
 		return "string"
+
 	}
 	panic("invalid data type")
 }
@@ -129,7 +151,7 @@ func (d *DataTypeDefinition) ToString() string {
 	}
 
 	if d.Type == DataTypeMap {
-		return fmt.Sprintf("map<%s, %s>", mapComparableTypeEnumToString(d.Key), d.SubType.ToString())
+		return fmt.Sprintf("map<%s, %s>", d.Key.ToString(), d.SubType.ToString())
 	}
 
 	if d.Type == DataTypeList {
@@ -193,36 +215,112 @@ func mapPlainDataTypeStringToEnum(typ string) (DataType, error) {
 	return 0, fmt.Errorf("invalid data type %s", typ)
 }
 
-func mapComparableDataTypeStringToEnum(typ string) (DataComparableType, error) {
+func mapPlainDataTypeComparableStringToEnum(typ string) (DataTypeComparable, error) {
 	switch typ {
 	case "uint8":
-		return DataComparableTypeUInt8, nil
+		return DataTypeComparableUInt8, nil
 	case "uint16":
-		return DataComparableTypeUInt16, nil
+		return DataTypeComparableUInt16, nil
 	case "uint32":
-		return DataComparableTypeUInt32, nil
+		return DataTypeComparableUInt32, nil
 	case "uint64":
-		return DataComparableTypeUInt64, nil
+		return DataTypeComparableUInt64, nil
 	case "int8":
-		return DataComparableTypeInt8, nil
+		return DataTypeComparableInt8, nil
 	case "int16":
-		return DataComparableTypeInt16, nil
+		return DataTypeComparableInt16, nil
 	case "int32":
-		return DataComparableTypeInt32, nil
+		return DataTypeComparableInt32, nil
 	case "int64":
-		return DataComparableTypeInt64, nil
+		return DataTypeComparableInt64, nil
 	case "float32":
-		return DataComparableTypeFloat32, nil
+		return DataTypeComparableFloat32, nil
 	case "float64":
-		return DataComparableTypeFloat64, nil
+		return DataTypeComparableFloat64, nil
 	case "string":
-		return DataComparableTypeString, nil
+		return DataTypeComparableString, nil
 	}
 
 	return 0, fmt.Errorf("invalid comparable data type %s", typ)
 }
 
+func parseDataTypeComparableDefinition(input *Token) (*DataTypeComparableDefinition, *ParsingError) {
+
+	dt := &DataTypeComparableDefinition{}
+	dt.Token = input
+
+	// check for plain data type
+	match, perr := FindOneOrNoMatch(plainDataTypeComparableRegex, input)
+	if perr != nil {
+		return nil, &ParsingError{
+			Message: fmt.Sprintf("invalid field definition: `%s", input.Content),
+			Token:   input,
+		}
+	}
+
+	// if one found, its a plain data type, parse it
+	if match != nil {
+		if len(match.Captures) != 1 {
+			return nil, &ParsingError{
+				Message: "invalid field definition, invalid number of matches found",
+				Token:   match.Match,
+			}
+		}
+
+		dataType, err := mapPlainDataTypeComparableStringToEnum(match.Captures[0].Content)
+		if err != nil {
+			return nil, &ParsingError{
+				Message: err.Error(),
+				Token:   match.Captures[0],
+			}
+		}
+
+		dt.Type = dataType
+		return dt, nil
+	}
+
+	// check for custom data type
+	match, perr = FindOneOrNoMatch(customDataTypeRegex, input)
+	if perr != nil {
+		return nil, &ParsingError{
+			Message: fmt.Sprintf("invalid field definition: `%s", input.Content),
+			Token:   input,
+		}
+	}
+
+	// if one found, its a typedef type, parse it
+	if match != nil {
+		if len(match.Captures) != 1 {
+			return nil, &ParsingError{
+				Message: "invalid field definition, invalid number of matches found",
+				Token:   match.Match,
+			}
+		}
+		parts := strings.Split(match.Captures[0].Content, ".")
+
+		typeName := parts[len(parts)-1]
+		packageName := ""
+		if len(parts) > 1 {
+			packageName = strings.Join(parts[:len(parts)-1], ".")
+		}
+
+		dt.Type = DataTypeComparableCustom
+		dt.CustomType = typeName
+		dt.CustomTypePackage = packageName
+		return dt, nil
+	}
+
+	return nil, &ParsingError{
+		Message: fmt.Sprintf("invalid field definition: `%s", input.Content),
+		Token:   input,
+	}
+}
+
 func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) {
+
+	dt := &DataTypeDefinition{}
+	dt.Token = input
+
 	// check for plain data type
 	match, perr := FindOneOrNoMatch(plainDataTypeRegex, input)
 	if perr != nil {
@@ -249,9 +347,8 @@ func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) 
 			}
 		}
 
-		return &DataTypeDefinition{
-			Type: dataType,
-		}, nil
+		dt.Type = dataType
+		return dt, nil
 	}
 
 	// check for custom data type
@@ -263,7 +360,7 @@ func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) 
 		}
 	}
 
-	// if one found, its a plain data type, parse it
+	// if one found, its a custom data type, parse it
 	if match != nil {
 		if len(match.Captures) != 1 {
 			return nil, &ParsingError{
@@ -279,11 +376,10 @@ func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) 
 			packageName = strings.Join(parts[:len(parts)-1], ".")
 		}
 
-		return &DataTypeDefinition{
-			Type:              DataTypeCustom,
-			CustomType:        typeName,
-			CustomTypePackage: packageName,
-		}, nil
+		dt.Type = DataTypeCustom
+		dt.CustomType = typeName
+		dt.CustomTypePackage = packageName
+		return dt, nil
 	}
 
 	// container type, parse the outer type
@@ -304,26 +400,23 @@ func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) 
 			}
 		}
 
-		key, err := mapComparableDataTypeStringToEnum(match.Captures[0].Content)
-		if err != nil {
-			return nil, &ParsingError{
-				Message: err.Error(),
-				Token:   match.Captures[0],
-			}
+		// parse the key type
+		key, perr := parseDataTypeComparableDefinition(match.Captures[0])
+		if perr != nil {
+			return nil, perr
 		}
-
-		dt := DataTypeDefinition{}
-		dt.Type = DataTypeMap
-		dt.Key = key
 
 		// recurse to parse nested type
 		nestedDataType, perr := parseDataTypeDefinition(match.Captures[1])
 		if perr != nil {
 			return nil, perr
 		}
+
+		dt.Type = DataTypeMap
+		dt.Key = key
 		dt.SubType = nestedDataType
 
-		return &dt, nil
+		return dt, nil
 	}
 
 	match, perr = FindOneMatch(listDataTypeRegex, input)
@@ -341,17 +434,15 @@ func parseDataTypeDefinition(input *Token) (*DataTypeDefinition, *ParsingError) 
 		}
 	}
 
-	dt := DataTypeDefinition{}
-	dt.Type = DataTypeList
-
 	// recurse to parse nested type
 	nestedDataType, perr := parseDataTypeDefinition(match.Captures[0])
 	if perr != nil {
 		return nil, perr
 	}
 
+	dt.Type = DataTypeList
 	dt.SubType = nestedDataType
-	return &dt, nil
+	return dt, nil
 }
 
 func parseFieldDefinition(input *Token) (*MessageFieldDefinition, *ParsingError) {
@@ -376,7 +467,7 @@ func parseFieldDefinition(input *Token) (*MessageFieldDefinition, *ParsingError)
 
 	nameMatch := match.Captures[1]
 	name := nameMatch.Content
-	if !validNameRegex.MatchString(name) {
+	if !fieldNameRegex.MatchString(name) {
 		return nil, &ParsingError{
 			Message: fmt.Sprintf("invalid field name: %s", name),
 			Token:   nameMatch,

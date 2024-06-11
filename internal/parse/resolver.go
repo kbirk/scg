@@ -77,21 +77,21 @@ func resolvePackageDependencies(traversed map[string]bool, parse *Parse, pkg *Pa
 
 	for _, dep := range pkg.PackageDependencies {
 
-		_, ok := traversed[dep.Package.Name]
+		_, ok := traversed[dep.PackageName]
 		if ok {
 			return &ParsingError{
-				Message: fmt.Sprintf("circular dependency detected between packages %s and %s", pkg.Name, dep.Package.Name),
-				Token:   nil,
+				Message: fmt.Sprintf("circular dependency detected between packages %s and %s", pkg.Name, dep.PackageName),
+				Token:   dep.Token,
 			}
 		}
 
-		traversed[dep.Package.Name] = true
+		traversed[dep.PackageName] = true
 
-		depPkg, ok := parse.Packages[dep.Package.Name]
+		depPkg, ok := parse.Packages[dep.PackageName]
 		if !ok {
 			return &ParsingError{
-				Message: fmt.Sprintf("package dependency %s not found", dep.Package.Name),
-				Token:   nil,
+				Message: fmt.Sprintf("package dependency %s not found", dep.PackageName),
+				Token:   dep.Token,
 			}
 		}
 
@@ -102,6 +102,54 @@ func resolvePackageDependencies(traversed map[string]bool, parse *Parse, pkg *Pa
 	}
 
 	return nil
+}
+
+func resolveCustomDataType(traversed map[string]bool, parse *Parse, dataType *DataTypeDefinition) *ParsingError {
+	pkg, ok := parse.Packages[dataType.CustomTypePackage]
+	if !ok {
+		return &ParsingError{
+			Message: fmt.Sprintf("package %s not found", dataType.CustomTypePackage),
+			Token:   dataType.Token,
+		}
+	}
+
+	// if referencing a message, continue resolving for circular dependencies
+	msg, ok := pkg.MessageDefinitions[dataType.CustomType]
+	if ok {
+		return resolveMessageTypes(cloneTraversed(traversed), parse, msg)
+	}
+
+	// if a typedef, we are done
+	_, ok = pkg.Typedefs[dataType.CustomType]
+	if ok {
+		return nil
+	}
+
+	// otherwise return an error
+	return &ParsingError{
+		Message: fmt.Sprintf("type %s not found", dataType.CustomType),
+		Token:   dataType.Token,
+	}
+}
+
+func resolveCustomDataTypeComparable(parse *Parse, dataType *DataTypeComparableDefinition) *ParsingError {
+
+	pkg, ok := parse.Packages[dataType.CustomTypePackage]
+	if !ok {
+		return &ParsingError{
+			Message: fmt.Sprintf("package %s not found", dataType.CustomTypePackage),
+			Token:   dataType.Token,
+		}
+	}
+	_, ok = pkg.Typedefs[dataType.CustomType]
+	if ok {
+		return nil
+	}
+
+	return &ParsingError{
+		Message: fmt.Sprintf("typedef %s not found", dataType.CustomType),
+		Token:   dataType.Token,
+	}
 }
 
 func resolveMessageTypes(traversed map[string]bool, parse *Parse, msg *MessageDefinition) *ParsingError {
@@ -119,9 +167,8 @@ func resolveMessageTypes(traversed map[string]bool, parse *Parse, msg *MessageDe
 	for _, field := range msg.Fields {
 
 		switch field.DataTypeDefinition.Type {
-		case DataTypeList, DataTypeMap:
-
-			// list / map
+		case DataTypeList:
+			// list
 			elem, perr := getElementType(field, field.DataTypeDefinition)
 			if perr != nil {
 				return perr
@@ -129,22 +176,32 @@ func resolveMessageTypes(traversed map[string]bool, parse *Parse, msg *MessageDe
 
 			if elem.Type == DataTypeCustom {
 				// custom
-				referencedPackage, ok := parse.Packages[elem.CustomTypePackage]
-				if !ok {
-					return &ParsingError{
-						Message: fmt.Sprintf("package %s not found", elem.CustomTypePackage),
-						Token:   field.Token,
-					}
+				perr := resolveCustomDataType(traversed, parse, elem)
+				if perr != nil {
+					return perr
 				}
-				referencedMessage, ok := referencedPackage.MessageDefinitions[elem.CustomType]
-				if !ok {
-					return &ParsingError{
-						Message: fmt.Sprintf("type %s not found", elem.CustomType),
-						Token:   field.Token,
-					}
-				}
+			}
 
-				perr := resolveMessageTypes(cloneTraversed(traversed), parse, referencedMessage)
+		case DataTypeMap:
+
+			// map
+			value, perr := getElementType(field, field.DataTypeDefinition)
+			if perr != nil {
+				return perr
+			}
+
+			key := field.DataTypeDefinition.Key
+			if key.Type == DataTypeComparableCustom {
+				// custom
+				perr := resolveCustomDataTypeComparable(parse, key)
+				if perr != nil {
+					return perr
+				}
+			}
+
+			if value.Type == DataTypeCustom {
+				// custom
+				perr := resolveCustomDataType(traversed, parse, value)
 				if perr != nil {
 					return perr
 				}
@@ -153,21 +210,7 @@ func resolveMessageTypes(traversed map[string]bool, parse *Parse, msg *MessageDe
 		case DataTypeCustom:
 
 			// custom
-			referencedPackage, ok := parse.Packages[field.DataTypeDefinition.CustomTypePackage]
-			if !ok {
-				return &ParsingError{
-					Message: fmt.Sprintf("package %s not found", field.DataTypeDefinition.CustomTypePackage),
-					Token:   field.Token,
-				}
-			}
-			referencedMessage, ok := referencedPackage.MessageDefinitions[field.DataTypeDefinition.CustomType]
-			if !ok {
-				return &ParsingError{
-					Message: fmt.Sprintf("type %s not found", field.DataTypeDefinition.CustomType),
-					Token:   field.Token,
-				}
-			}
-			perr := resolveMessageTypes(cloneTraversed(traversed), parse, referencedMessage)
+			perr := resolveCustomDataType(traversed, parse, field.DataTypeDefinition)
 			if perr != nil {
 				return perr
 			}
@@ -185,26 +228,34 @@ func resolveDefinitions(parse *Parse) *ParsingError {
 	// ensure all dependencies have the file set
 	for _, file := range parse.Files {
 		for _, dep := range file.CustomTypeDependencies {
-			pkg, ok := parse.Packages[dep.Package.Name]
+			pkg, ok := parse.Packages[dep.CustomTypePackage]
 			if !ok {
 				return &ParsingError{
-					Message:  fmt.Sprintf("package dependency %s referenced in %s not found", dep.Package.Name, file.Name),
-					Token:    nil,
+					Message:  fmt.Sprintf("package dependency %s referenced in %s not found", dep.CustomTypePackage, file.Name),
+					Token:    dep.Token,
 					Filename: file.Name,
 					Content:  file.Content,
 				}
 			}
-			msg, ok := pkg.MessageDefinitions[dep.DataType.CustomType]
-			if !ok {
-				return &ParsingError{
-					Message:  fmt.Sprintf("type %s referenced in %s not found in package %s", dep.DataType.CustomType, file.Name, pkg.Name),
-					Token:    nil,
-					Filename: file.Name,
-					Content:  file.Content,
-				}
+
+			msg, ok := pkg.MessageDefinitions[dep.CustomTypeName]
+			if ok {
+				dep.File = msg.File
+				continue
 			}
-			// set file
-			dep.File = msg.File
+
+			typdef, ok := pkg.Typedefs[dep.CustomTypeName]
+			if ok {
+				dep.File = typdef.File
+				continue
+			}
+
+			return &ParsingError{
+				Message:  fmt.Sprintf("type %s referenced in %s not found in package %s", dep.CustomTypeName, file.Name, pkg.Name),
+				Token:    dep.Token,
+				Filename: file.Name,
+				Content:  file.Content,
+			}
 		}
 	}
 

@@ -51,6 +51,8 @@ func TestFileTokenizerPretty(t *testing.T) {
 	content := `
 		package test.custom;
 
+		typedef MyID = uint64;
+
 		# my custom type
 		message CustomType {
 			byte a = 1;
@@ -80,12 +82,13 @@ func TestFileTokenizerPretty(t *testing.T) {
 	tokens, err := tokenizeFile(content)
 	require.Nil(t, err)
 
-	assert.Equal(t, 4, len(tokens))
+	assert.Equal(t, 5, len(tokens))
 
 	assert.Equal(t, PackageTokenType, tokens[0].Type)
-	assert.Equal(t, MessageTokenType, tokens[1].Type)
+	assert.Equal(t, TypedefTokenType, tokens[1].Type)
 	assert.Equal(t, MessageTokenType, tokens[2].Type)
-	assert.Equal(t, ServiceTokenType, tokens[3].Type)
+	assert.Equal(t, MessageTokenType, tokens[3].Type)
+	assert.Equal(t, ServiceTokenType, tokens[4].Type)
 
 	for _, token := range tokens {
 		match := getContentByTokenRange(content, token.LineStart, token.LineEnd, token.LineStartCharacterPosition, token.LineEndCharacterPosition)
@@ -178,25 +181,6 @@ func TestFileTokenizerPackageNoNameErr(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestFileTokenizerPackageInvalidNameErr(t *testing.T) {
-
-	content := `
-		package te-st.cus\tom;
-
-		message CustomType {
-			byte a = 1;
-		}
-
-		service Test {
-			rpc DoThingA ([]CustomType) returns (CustomType);
-		}
-	`
-	tokens, err := tokenizeFile(content)
-
-	assert.Nil(t, tokens)
-	assert.NotNil(t, err)
-}
-
 func TestFileTokenizerPackageDuplicateNameErr(t *testing.T) {
 
 	content := `
@@ -207,7 +191,7 @@ func TestFileTokenizerPackageDuplicateNameErr(t *testing.T) {
 		}
 
 		service Test {
-			rpc DoThingA ([]CustomType) returns (CustomType);
+			rpc DoThingA (CustomType) returns (CustomType);
 		}
 	`
 	tokens, err := tokenizeFile(content)
