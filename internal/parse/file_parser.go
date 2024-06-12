@@ -30,6 +30,7 @@ type File struct {
 	Package                *PackageDeclaration
 	CustomTypeDependencies map[string]*CustomTypeDependency
 	Typedefs               map[string]*TypedefDeclaration
+	Enums                  map[string]*EnumDefinition
 	ServiceDefinitions     map[string]*ServiceDefinition
 	MessageDefinitions     map[string]*MessageDefinition
 }
@@ -70,6 +71,21 @@ func (f *File) GetFileDependencies() []FileDependency {
 	return files
 }
 
+func (f *File) EnumsSortedByKey() []*EnumDefinition {
+	keys := make([]string, 0, len(f.Enums))
+	for k := range f.Enums {
+		keys = append(keys, k)
+	}
+
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	values := make([]*EnumDefinition, 0, len(f.Enums))
+	for _, k := range keys {
+		values = append(values, f.Enums[k])
+	}
+	return values
+}
+
 func (f *File) TypedefsSortedByKey() []*TypedefDeclaration {
 	keys := make([]string, 0, len(f.Typedefs))
 	for k := range f.Typedefs {
@@ -82,7 +98,6 @@ func (f *File) TypedefsSortedByKey() []*TypedefDeclaration {
 	for _, k := range keys {
 		values = append(values, f.Typedefs[k])
 	}
-
 	return values
 }
 
@@ -98,7 +113,6 @@ func (f *File) MessagesSortedByKey() []*MessageDefinition {
 	for _, k := range keys {
 		values = append(values, f.MessageDefinitions[k])
 	}
-
 	return values
 }
 
@@ -114,7 +128,6 @@ func (f *File) ServicesSortedByKey() []*ServiceDefinition {
 	for _, k := range keys {
 		values = append(values, f.ServiceDefinitions[k])
 	}
-
 	return values
 }
 
@@ -255,7 +268,12 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 		return nil, perr
 	}
 
-	typedefs, perr := parseTypedefDeclaration(tokens)
+	enums, perr := parseEnumDefinitions(tokens)
+	if perr != nil {
+		return nil, perr
+	}
+
+	typedefs, perr := parseTypedefDeclarations(tokens)
 	if perr != nil {
 		return nil, perr
 	}
@@ -267,21 +285,14 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 
 	dependencies := make(map[string]*CustomTypeDependency)
 
+	for _, enum := range enums {
+		// set the file
+		enum.File = f
+	}
+
 	for _, typdef := range typedefs {
 		// set the file
 		typdef.File = f
-
-		// if package is omitted, use the file's package name
-		perr := populateDataTypeComparablePackageIfMissing(pkg.Name, typdef.DataTypeDefinition)
-		if perr != nil {
-			return nil, perr
-		}
-
-		// TODO: add custom type dependencies
-		perr = addCustomComparableTypeDependency(dependencies, typdef.DataTypeDefinition)
-		if perr != nil {
-			return nil, perr
-		}
 	}
 
 	for _, msg := range messageDefinitions {
@@ -342,12 +353,17 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 	externalCustomTypeDependencies := make(map[string]*CustomTypeDependency)
 	for _, dep := range dependencies {
 		// check if the custom type is defined in this file
-		_, ok := messageDefinitions[dep.CustomTypeName]
+		_, ok := enums[dep.CustomTypeName]
 		if ok {
 			continue
 		}
 
 		_, ok = typedefs[dep.CustomTypeName]
+		if ok {
+			continue
+		}
+
+		_, ok = messageDefinitions[dep.CustomTypeName]
 		if ok {
 			continue
 		}
@@ -359,6 +375,7 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 	f.Content = input
 	f.Package = pkg
 	f.CustomTypeDependencies = externalCustomTypeDependencies
+	f.Enums = enums
 	f.Typedefs = typedefs
 	f.MessageDefinitions = messageDefinitions
 	f.ServiceDefinitions = serviceDefinitions

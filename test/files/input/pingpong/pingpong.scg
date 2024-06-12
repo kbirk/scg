@@ -6,10 +6,12 @@ service PingPong {
 
 message Ping {
 	int32 count = 0;
+	timestamp timestamp = 1;
 }
 
 message Pong {
 	int32 count = 0;
+	timestamp timestamp = 1;
 }
 
 message PingRequest {

@@ -8,6 +8,12 @@ typedef BasicFloat32 = float32;
 
 typedef AnotherID = uint32;
 
+enum SomeEnum {
+	ValueA = 0;
+	ValueB = 1;
+	ValueC = 2;
+}
+
 message BasicStruct {
 	uint8 val_uint_8 = 0;
 	int8 val_int_8 = 1;
@@ -20,6 +26,11 @@ message BasicStruct {
 	string val_string = 8;
 	list<string> val_array_string = 9;
 	map<string, float32> val_map_string_float_32 = 10;
+	timestamp val_timestamp = 11;
+	SomeEnum val_enum = 12;
+	list<SomeEnum> val_list_enum = 13;
+	map<SomeEnum, string> val_map_enum_string = 14;
+	map<string, SomeEnum> val_map_string_enum = 15;
 }
 
 message StructA {
@@ -27,6 +38,8 @@ message StructA {
 	float32 val_float_32 = 1;
 	bool val_bool = 2;
 	map<uint8,string> val_map_uint8_string = 3;
+	list<timestamp> val_timestamp = 4;
+	map<string, timestamp> val_map_string_timestamp = 5;
 }
 
 message StructB {

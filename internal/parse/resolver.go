@@ -125,6 +125,12 @@ func resolveCustomDataType(traversed map[string]bool, parse *Parse, dataType *Da
 		return nil
 	}
 
+	// if a enum, we are done
+	_, ok = pkg.Enums[dataType.CustomType]
+	if ok {
+		return nil
+	}
+
 	// otherwise return an error
 	return &ParsingError{
 		Message: fmt.Sprintf("type %s not found", dataType.CustomType),
@@ -142,6 +148,10 @@ func resolveCustomDataTypeComparable(parse *Parse, dataType *DataTypeComparableD
 		}
 	}
 	_, ok = pkg.Typedefs[dataType.CustomType]
+	if ok {
+		return nil
+	}
+	_, ok = pkg.Enums[dataType.CustomType]
 	if ok {
 		return nil
 	}
@@ -247,6 +257,12 @@ func resolveDefinitions(parse *Parse) *ParsingError {
 			typdef, ok := pkg.Typedefs[dep.CustomTypeName]
 			if ok {
 				dep.File = typdef.File
+				continue
+			}
+
+			enum, ok := pkg.Enums[dep.CustomTypeName]
+			if ok {
+				dep.File = enum.File
 				continue
 			}
 

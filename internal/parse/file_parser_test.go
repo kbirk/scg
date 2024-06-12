@@ -50,33 +50,33 @@ func TestFileParser(t *testing.T) {
 	assert.Equal(t, 3, len(type0.Fields))
 
 	assert.Equal(t, "a", type0.Fields["a"].Name)
-	assert.Equal(t, uint(0), type0.Fields["a"].Index)
+	assert.Equal(t, uint32(0), type0.Fields["a"].Index)
 	assert.Equal(t, DataTypeByte, type0.Fields["a"].DataTypeDefinition.Type)
 
 	assert.Equal(t, "b", type0.Fields["b"].Name)
-	assert.Equal(t, uint(1), type0.Fields["b"].Index)
+	assert.Equal(t, uint32(1), type0.Fields["b"].Index)
 	assert.Equal(t, DataTypeUInt8, type0.Fields["b"].DataTypeDefinition.Type)
 
 	assert.Equal(t, "c", type0.Fields["c"].Name)
-	assert.Equal(t, uint(2), type0.Fields["c"].Index)
+	assert.Equal(t, uint32(2), type0.Fields["c"].Index)
 	assert.Equal(t, DataTypeUInt16, type0.Fields["c"].DataTypeDefinition.Type)
 
 	assert.Equal(t, "OtherType", type1.Name)
 	assert.Equal(t, 5, len(type1.Fields))
 
 	assert.Equal(t, "m", type1.Fields["m"].Name)
-	assert.Equal(t, uint(0), type1.Fields["m"].Index)
+	assert.Equal(t, uint32(0), type1.Fields["m"].Index)
 	assert.Equal(t, DataTypeList, type1.Fields["m"].DataTypeDefinition.Type)
 	assert.Equal(t, DataTypeString, type1.Fields["m"].DataTypeDefinition.SubType.Type)
 
 	assert.Equal(t, "n", type1.Fields["n"].Name)
-	assert.Equal(t, uint(1), type1.Fields["n"].Index)
+	assert.Equal(t, uint32(1), type1.Fields["n"].Index)
 	assert.Equal(t, DataTypeMap, type1.Fields["n"].DataTypeDefinition.Type)
 	assert.Equal(t, DataTypeComparableString, type1.Fields["n"].DataTypeDefinition.Key.Type)
 	assert.Equal(t, DataTypeString, type1.Fields["n"].DataTypeDefinition.SubType.Type)
 
 	assert.Equal(t, "o", type1.Fields["o"].Name)
-	assert.Equal(t, uint(2), type1.Fields["o"].Index)
+	assert.Equal(t, uint32(2), type1.Fields["o"].Index)
 	assert.Equal(t, DataTypeList, type1.Fields["o"].DataTypeDefinition.Type)
 	assert.Equal(t, DataTypeMap, type1.Fields["o"].DataTypeDefinition.SubType.Type)
 	assert.Equal(t, DataTypeComparableString, type1.Fields["o"].DataTypeDefinition.SubType.Key.Type)
@@ -84,13 +84,13 @@ func TestFileParser(t *testing.T) {
 	assert.Equal(t, DataTypeString, type1.Fields["o"].DataTypeDefinition.SubType.SubType.SubType.Type)
 
 	assert.Equal(t, "p", type1.Fields["p"].Name)
-	assert.Equal(t, uint(3), type1.Fields["p"].Index)
+	assert.Equal(t, uint32(3), type1.Fields["p"].Index)
 	assert.Equal(t, DataTypeCustom, type1.Fields["p"].DataTypeDefinition.Type)
 	assert.Equal(t, "CustomType", type1.Fields["p"].DataTypeDefinition.CustomType)
 	assert.Equal(t, "test.custom", type1.Fields["p"].DataTypeDefinition.CustomTypePackage)
 
 	assert.Equal(t, "q", type1.Fields["q"].Name)
-	assert.Equal(t, uint(4), type1.Fields["q"].Index)
+	assert.Equal(t, uint32(4), type1.Fields["q"].Index)
 	assert.Equal(t, DataTypeList, type1.Fields["q"].DataTypeDefinition.Type)
 	assert.Equal(t, DataTypeCustom, type1.Fields["q"].DataTypeDefinition.SubType.Type)
 	assert.Equal(t, "CustomType", type1.Fields["q"].DataTypeDefinition.SubType.CustomType)

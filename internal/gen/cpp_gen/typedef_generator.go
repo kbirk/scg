@@ -22,7 +22,7 @@ var (
 
 func generateTypedefCppCode(typdef *parse.TypedefDeclaration) (string, error) {
 
-	typeName, err := mapComparableTypeToCppType(typdef.DataTypeDefinition)
+	typeName, err := mapDataTypeComparableDefinitionToCppType(typdef.DataTypeDefinition)
 	if err != nil {
 		return "", err
 	}

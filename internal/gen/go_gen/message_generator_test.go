@@ -27,7 +27,7 @@ func TestGenerateMessagesGo(t *testing.T) {
 	fmt.Println("done")
 }
 
-func TestGetContainerTypesRecursively(t *testing.T) {
+func TestGetDataTypeDefinitionMethodSuffix(t *testing.T) {
 
 	// map[string][]map[uint64][]custom.CustomType
 	dt := &parse.DataTypeDefinition{
@@ -59,7 +59,7 @@ func TestGetContainerTypesRecursively(t *testing.T) {
 		},
 	}
 
-	fullName, err := getContainerTypesRecursively(dt)
+	fullName, err := getDataTypeDefinitionMethodSuffix(dt)
 	require.Nil(t, err)
 
 	assert.Equal(t, "MapOtherPkgTypedefTypeListMapUInt64ListCustomPkgCustomType", fullName)

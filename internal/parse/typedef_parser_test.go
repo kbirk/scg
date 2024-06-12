@@ -39,7 +39,7 @@ func TestTypedefParser(t *testing.T) {
 	`)
 	require.Nil(t, err)
 
-	typdefs, err := parseTypedefDeclaration(tokens)
+	typdefs, err := parseTypedefDeclarations(tokens)
 	require.Nil(t, err)
 
 	require.Equal(t, 3, len(tokens))

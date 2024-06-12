@@ -16,7 +16,7 @@ type TypedefDeclaration struct {
 	Token              *Token
 }
 
-func parseTypedefDeclaration(tokens []*Token) (map[string]*TypedefDeclaration, *ParsingError) {
+func parseTypedefDeclarations(tokens []*Token) (map[string]*TypedefDeclaration, *ParsingError) {
 
 	typdefs := map[string]*TypedefDeclaration{}
 

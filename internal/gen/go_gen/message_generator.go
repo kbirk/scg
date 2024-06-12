@@ -20,7 +20,7 @@ type MessageArgs struct {
 	MessageNamePascalCase  string
 	MessageNameFirstLetter string
 	MessageFields          []MessageFieldArgs
-	CalcByteSizeCode       string
+	ByteSizeCode           string
 	SerializeCode          string
 	DeserializeCode        string
 }
@@ -47,7 +47,7 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromJSON(data []b
 }
 
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ToBytes() []byte {
-	size := {{.MessageNameFirstLetter}}.CalcByteSize()
+	size := {{.MessageNameFirstLetter}}.ByteSize()
 	writer := serialize.NewFixedSizeWriter(size)
 	{{.MessageNameFirstLetter}}.Serialize(writer)
 	return writer.Bytes()
@@ -57,18 +57,15 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromBytes(bs []by
 	return {{.MessageNameFirstLetter}}.Deserialize(serialize.NewReader(bs))
 }
 
-func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ByteSize() int {
-	return {{.MessageNameFirstLetter}}.CalcByteSize()
-}
-{{.CalcByteSizeCode}}
+{{.ByteSizeCode}}
 {{.SerializeCode}}
 {{.DeserializeCode}}
 `
 
-type CalcByteSizeMethodArgs struct {
-	MessageNameFirstLetter       string
-	MessageNamePascalCase        string
-	FieldCalcByteSizeMethodCalls []string
+type ByteSizeMethodArgs struct {
+	MessageNameFirstLetter   string
+	MessageNamePascalCase    string
+	FieldByteSizeMethodCalls []string
 }
 
 type SerializeMethodArgs struct {
@@ -83,9 +80,9 @@ type DeserializeMethodArgs struct {
 	FieldDeserializeMethodCalls []string
 }
 
-const messageCalcByteSizeMethodTemplateStr = `
-func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) CalcByteSize() int {
-	size := 0{{range .FieldCalcByteSizeMethodCalls}}
+const messageByteSizeMethodTemplateStr = `
+func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ByteSize() int {
+	size := 0{{range .FieldByteSizeMethodCalls}}
 	size += {{.}}{{end}}
 	return size
 }`
@@ -106,11 +103,11 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) Deserialize(reade
 	return nil
 }`
 
-type CalcByteSizeContainerMethodArgs struct {
-	FullMethodName                  string
-	ArgType                         string
-	KeyTypeCalcByteSizeMethodCall   string
-	ValueTypeCalcByteSizeMethodCall string
+type ByteSizeContainerMethodArgs struct {
+	FullMethodName              string
+	ArgType                     string
+	KeyTypeByteSizeMethodCall   string
+	ValueTypeByteSizeMethodCall string
 }
 
 type SerializeContainerMethodArgs struct {
@@ -129,11 +126,11 @@ type DeserializeContainerMethodArgs struct {
 	ValueType                      string
 }
 
-const mapCalcByteSizeMethodTemplateStr = `
+const mapByteSizeMethodTemplateStr = `
 func {{.FullMethodName}}(arg {{.ArgType}}) int {
 	size := 4
 	for k, v := range arg {
-		size += {{.KeyTypeCalcByteSizeMethodCall}} + {{.ValueTypeCalcByteSizeMethodCall}}
+		size += {{.KeyTypeByteSizeMethodCall}} + {{.ValueTypeByteSizeMethodCall}}
 	}
 	return size
 }`
@@ -174,11 +171,11 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 	return nil
 }`
 
-const listCalcByteSizeMethodTemplateStr = `
+const listByteSizeMethodTemplateStr = `
 func {{.FullMethodName}}(arg {{.ArgType}}) int {
 	size := 4
 	for _, v := range arg {
-		size += {{.ValueTypeCalcByteSizeMethodCall}}
+		size += {{.ValueTypeByteSizeMethodCall}}
 	}
 	return size
 }`
@@ -214,56 +211,21 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 }`
 
 var (
-	messageTemplate                   = template.Must(template.New("messageTemplateGo").Parse(messageTemplateStr))
-	messageCalcByteSizeMethodTemplate = template.Must(template.New("messageCalcByteSizeMethodTemplateGo").Parse(messageCalcByteSizeMethodTemplateStr))
-	messageSerializeMethodTemplate    = template.Must(template.New("messageSerializeMethodTemplateGo").Parse(messageSerializeMethodTemplateStr))
-	messageDeserializeMethodTemplate  = template.Must(template.New("messageDeserializeMethodTemplateGo").Parse(messageDeserializeMethodTemplateStr))
+	messageTemplate                  = template.Must(template.New("messageTemplateGo").Parse(messageTemplateStr))
+	messageByteSizeMethodTemplate    = template.Must(template.New("messageByteSizeMethodTemplateGo").Parse(messageByteSizeMethodTemplateStr))
+	messageSerializeMethodTemplate   = template.Must(template.New("messageSerializeMethodTemplateGo").Parse(messageSerializeMethodTemplateStr))
+	messageDeserializeMethodTemplate = template.Must(template.New("messageDeserializeMethodTemplateGo").Parse(messageDeserializeMethodTemplateStr))
 	// container methods
-	mapCalcByteSizeMethodTemplate  = template.Must(template.New("mapCalcByteSizeMethodTemplateGo").Parse(mapCalcByteSizeMethodTemplateStr))
-	listCalcByteSizeMethodTemplate = template.Must(template.New("listCalcByteSizeMethodTemplateGo").Parse(listCalcByteSizeMethodTemplateStr))
-	mapSerializeMethodTemplate     = template.Must(template.New("mapSerializeMethodTemplateGo").Parse(mapSerializeMethodTemplateStr))
-	listSerializeMethodTemplate    = template.Must(template.New("listSerializeMethodTemplateGo").Parse(listSerializeMethodTemplateStr))
-	mapDeserializeMethodTemplate   = template.Must(template.New("mapDeserializeMethodTemplateGo").Parse(mapDeserializeMethodTemplateStr))
-	listDeserializeMethodTemplate  = template.Must(template.New("listDeserializeMethodTemplateGo").Parse(listDeserializeMethodTemplateStr))
+	mapByteSizeMethodTemplate     = template.Must(template.New("mapByteSizeMethodTemplateGo").Parse(mapByteSizeMethodTemplateStr))
+	listByteSizeMethodTemplate    = template.Must(template.New("listByteSizeMethodTemplateGo").Parse(listByteSizeMethodTemplateStr))
+	mapSerializeMethodTemplate    = template.Must(template.New("mapSerializeMethodTemplateGo").Parse(mapSerializeMethodTemplateStr))
+	listSerializeMethodTemplate   = template.Must(template.New("listSerializeMethodTemplateGo").Parse(listSerializeMethodTemplateStr))
+	mapDeserializeMethodTemplate  = template.Must(template.New("mapDeserializeMethodTemplateGo").Parse(mapDeserializeMethodTemplateStr))
+	listDeserializeMethodTemplate = template.Must(template.New("listDeserializeMethodTemplateGo").Parse(listDeserializeMethodTemplateStr))
 )
 
-func mapComparableTypeToGoType(dataType *parse.DataTypeComparableDefinition) (string, error) {
-	switch dataType.Type {
-	case parse.DataTypeComparableUInt8:
-		return "uint8", nil
-	case parse.DataTypeComparableUInt16:
-		return "uint16", nil
-	case parse.DataTypeComparableUInt32:
-		return "uint32", nil
-	case parse.DataTypeComparableUInt64:
-		return "uint64", nil
-	case parse.DataTypeComparableInt8:
-		return "int8", nil
-	case parse.DataTypeComparableInt16:
-		return "int16", nil
-	case parse.DataTypeComparableInt32:
-		return "int32", nil
-	case parse.DataTypeComparableInt64:
-		return "int64", nil
-	case parse.DataTypeComparableString:
-		return "string", nil
-	case parse.DataTypeComparableFloat32:
-		return "float32", nil
-	case parse.DataTypeComparableFloat64:
-		return "float64", nil
-	case parse.DataTypeComparableCustom:
-		if dataType.ImportedFromOtherPackage {
-			return fmt.Sprintf("%s.%s", convertPackageNameToGoPackage(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
-		} else {
-			return util.EnsurePascalCase(dataType.CustomType), nil
-		}
-	}
-	return "", fmt.Errorf("unrecognized type: %v", dataType)
-}
-
-func mapTypeToGoType(dataType *parse.DataTypeDefinition) (string, error) {
-
-	switch dataType.Type {
+func mapDataTypeToGoType(dataType parse.DataType) (string, error) {
+	switch dataType {
 	case parse.DataTypeByte:
 		return "byte", nil
 	case parse.DataTypeBool:
@@ -286,23 +248,32 @@ func mapTypeToGoType(dataType *parse.DataTypeDefinition) (string, error) {
 		return "int64", nil
 	case parse.DataTypeString:
 		return "string", nil
+	case parse.DataTypeTimestamp:
+		return "time.Time", nil
 	case parse.DataTypeFloat32:
 		return "float32", nil
 	case parse.DataTypeFloat64:
 		return "float64", nil
+	}
+	return "", fmt.Errorf("unrecognized type: %v", dataType)
+}
+
+func mapDataTypeDefinitionToGoType(dataType *parse.DataTypeDefinition) (string, error) {
+
+	switch dataType.Type {
 	case parse.DataTypeMap:
-		key, err := mapComparableTypeToGoType(dataType.Key)
+		key, err := mapDataTypeComparableDefinitionToGoType(dataType.Key)
 		if err != nil {
 			return "", err
 		}
-		subtype, err := mapTypeToGoType(dataType.SubType)
+		subtype, err := mapDataTypeDefinitionToGoType(dataType.SubType)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("map[%s]%s", key, subtype), nil
 	case parse.DataTypeList:
 
-		subtype, err := mapTypeToGoType(dataType.SubType)
+		subtype, err := mapDataTypeDefinitionToGoType(dataType.SubType)
 		if err != nil {
 			return "", err
 		}
@@ -315,7 +286,47 @@ func mapTypeToGoType(dataType *parse.DataTypeDefinition) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("unrecognized type: %v", dataType.Type)
+	return mapDataTypeToGoType(dataType.Type)
+}
+
+func mapDataTypeComparableToGoType(dataType parse.DataTypeComparable) (string, error) {
+	switch dataType {
+	case parse.DataTypeComparableUInt8:
+		return "uint8", nil
+	case parse.DataTypeComparableUInt16:
+		return "uint16", nil
+	case parse.DataTypeComparableUInt32:
+		return "uint32", nil
+	case parse.DataTypeComparableUInt64:
+		return "uint64", nil
+	case parse.DataTypeComparableInt8:
+		return "int8", nil
+	case parse.DataTypeComparableInt16:
+		return "int16", nil
+	case parse.DataTypeComparableInt32:
+		return "int32", nil
+	case parse.DataTypeComparableInt64:
+		return "int64", nil
+	case parse.DataTypeComparableString:
+		return "string", nil
+	case parse.DataTypeComparableFloat32:
+		return "float32", nil
+	case parse.DataTypeComparableFloat64:
+		return "float64", nil
+	}
+	return "", fmt.Errorf("unrecognized type: %v", dataType)
+}
+
+func mapDataTypeComparableDefinitionToGoType(dataType *parse.DataTypeComparableDefinition) (string, error) {
+	switch dataType.Type {
+	case parse.DataTypeComparableCustom:
+		if dataType.ImportedFromOtherPackage {
+			return fmt.Sprintf("%s.%s", convertPackageNameToGoPackage(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
+		} else {
+			return util.EnsurePascalCase(dataType.CustomType), nil
+		}
+	}
+	return mapDataTypeComparableToGoType(dataType.Type)
 }
 
 type FunctionCallArgs struct {
@@ -324,102 +335,108 @@ type FunctionCallArgs struct {
 
 const (
 	// calc bytes templates
-	calcByteSizeByteTemplateStr    = `serialize.CalcByteSizeUInt8({{.VariableName}})`
-	calcByteSizeBoolTemplateStr    = `serialize.CalcByteSizeBool({{.VariableName}})`
-	calcByteSizeUInt8TemplateStr   = `serialize.CalcByteSizeUInt8({{.VariableName}})`
-	calcByteSizeInt8TemplateStr    = `serialize.CalcByteSizeInt8({{.VariableName}})`
-	calcByteSizeUInt16TemplateStr  = `serialize.CalcByteSizeUInt16({{.VariableName}})`
-	calcByteSizeInt16TemplateStr   = `serialize.CalcByteSizeInt16({{.VariableName}})`
-	calcByteSizeUInt32TemplateStr  = `serialize.CalcByteSizeUInt32({{.VariableName}})`
-	calcByteSizeInt32TemplateStr   = `serialize.CalcByteSizeInt32({{.VariableName}})`
-	calcByteSizeUInt64TemplateStr  = `serialize.CalcByteSizeUInt64({{.VariableName}})`
-	calcByteSizeInt64TemplateStr   = `serialize.CalcByteSizeInt64({{.VariableName}})`
-	calcByteSizeFloat32TemplateStr = `serialize.CalcByteSizeFloat32({{.VariableName}})`
-	calcByteSizeFloat64TemplateStr = `serialize.CalcByteSizeFloat64({{.VariableName}})`
-	calcByteSizeStringTemplateStr  = `serialize.CalcByteSizeString({{.VariableName}})`
-	calcByteSizeCustomTemplateStr  = `{{.VariableName}}.CalcByteSize()`
+	byteSizeByteTemplateStr      = `serialize.ByteSizeUInt8({{.VariableName}})`
+	byteSizeBoolTemplateStr      = `serialize.ByteSizeBool({{.VariableName}})`
+	byteSizeUInt8TemplateStr     = `serialize.ByteSizeUInt8({{.VariableName}})`
+	byteSizeInt8TemplateStr      = `serialize.ByteSizeInt8({{.VariableName}})`
+	byteSizeUInt16TemplateStr    = `serialize.ByteSizeUInt16({{.VariableName}})`
+	byteSizeInt16TemplateStr     = `serialize.ByteSizeInt16({{.VariableName}})`
+	byteSizeUInt32TemplateStr    = `serialize.ByteSizeUInt32({{.VariableName}})`
+	byteSizeInt32TemplateStr     = `serialize.ByteSizeInt32({{.VariableName}})`
+	byteSizeUInt64TemplateStr    = `serialize.ByteSizeUInt64({{.VariableName}})`
+	byteSizeInt64TemplateStr     = `serialize.ByteSizeInt64({{.VariableName}})`
+	byteSizeFloat32TemplateStr   = `serialize.ByteSizeFloat32({{.VariableName}})`
+	byteSizeFloat64TemplateStr   = `serialize.ByteSizeFloat64({{.VariableName}})`
+	byteSizeStringTemplateStr    = `serialize.ByteSizeString({{.VariableName}})`
+	byteSizeTimestampTemplateStr = `serialize.ByteSizeTime({{.VariableName}})`
+	byteSizeCustomTemplateStr    = `{{.VariableName}}.ByteSize()`
 	// serialization templates
-	serializeByteTemplateStr    = `serialize.SerializeUInt8(writer, {{.VariableName}})`
-	serializeBoolTemplateStr    = `serialize.SerializeBool(writer, {{.VariableName}})`
-	serializeUInt8TemplateStr   = `serialize.SerializeUInt8(writer, {{.VariableName}})`
-	serializeInt8TemplateStr    = `serialize.SerializeInt8(writer, {{.VariableName}})`
-	serializeUInt16TemplateStr  = `serialize.SerializeUInt16(writer, {{.VariableName}})`
-	serializeInt16TemplateStr   = `serialize.SerializeInt16(writer, {{.VariableName}})`
-	serializeUInt32TemplateStr  = `serialize.SerializeUInt32(writer, {{.VariableName}})`
-	serializeInt32TemplateStr   = `serialize.SerializeInt32(writer, {{.VariableName}})`
-	serializeUInt64TemplateStr  = `serialize.SerializeUInt64(writer, {{.VariableName}})`
-	serializeInt64TemplateStr   = `serialize.SerializeInt64(writer, {{.VariableName}})`
-	serializeFloat32TemplateStr = `serialize.SerializeFloat32(writer, {{.VariableName}})`
-	serializeFloat64TemplateStr = `serialize.SerializeFloat64(writer, {{.VariableName}})`
-	serializeStringTemplateStr  = `serialize.SerializeString(writer, {{.VariableName}})`
-	serializeCustomTemplateStr  = `{{.VariableName}}.Serialize(writer)`
+	serializeByteTemplateStr      = `serialize.SerializeUInt8(writer, {{.VariableName}})`
+	serializeBoolTemplateStr      = `serialize.SerializeBool(writer, {{.VariableName}})`
+	serializeUInt8TemplateStr     = `serialize.SerializeUInt8(writer, {{.VariableName}})`
+	serializeInt8TemplateStr      = `serialize.SerializeInt8(writer, {{.VariableName}})`
+	serializeUInt16TemplateStr    = `serialize.SerializeUInt16(writer, {{.VariableName}})`
+	serializeInt16TemplateStr     = `serialize.SerializeInt16(writer, {{.VariableName}})`
+	serializeUInt32TemplateStr    = `serialize.SerializeUInt32(writer, {{.VariableName}})`
+	serializeInt32TemplateStr     = `serialize.SerializeInt32(writer, {{.VariableName}})`
+	serializeUInt64TemplateStr    = `serialize.SerializeUInt64(writer, {{.VariableName}})`
+	serializeInt64TemplateStr     = `serialize.SerializeInt64(writer, {{.VariableName}})`
+	serializeFloat32TemplateStr   = `serialize.SerializeFloat32(writer, {{.VariableName}})`
+	serializeFloat64TemplateStr   = `serialize.SerializeFloat64(writer, {{.VariableName}})`
+	serializeStringTemplateStr    = `serialize.SerializeString(writer, {{.VariableName}})`
+	serializeTimestampTemplateStr = `serialize.SerializeTime(writer, {{.VariableName}})`
+	serializeCustomTemplateStr    = `{{.VariableName}}.Serialize(writer)`
 	// deserialization templates
-	deserializeByteTemplateStr    = `serialize.DeserializeUInt8(&{{.VariableName}}, reader)`
-	deserializeBoolTemplateStr    = `serialize.DeserializeBool(&{{.VariableName}}, reader)`
-	deserializeUInt8TemplateStr   = `serialize.DeserializeUInt8(&{{.VariableName}}, reader)`
-	deserializeInt8TemplateStr    = `serialize.DeserializeInt8(&{{.VariableName}}, reader)`
-	deserializeUInt16TemplateStr  = `serialize.DeserializeUInt16(&{{.VariableName}}, reader)`
-	deserializeInt16TemplateStr   = `serialize.DeserializeInt16(&{{.VariableName}}, reader)`
-	deserializeUInt32TemplateStr  = `serialize.DeserializeUInt32(&{{.VariableName}}, reader)`
-	deserializeInt32TemplateStr   = `serialize.DeserializeInt32(&{{.VariableName}}, reader)`
-	deserializeUInt64TemplateStr  = `serialize.DeserializeUInt64(&{{.VariableName}}, reader)`
-	deserializeInt64TemplateStr   = `serialize.DeserializeInt64(&{{.VariableName}}, reader)`
-	deserializeFloat32TemplateStr = `serialize.DeserializeFloat32(&{{.VariableName}}, reader)`
-	deserializeFloat64TemplateStr = `serialize.DeserializeFloat64(&{{.VariableName}}, reader)`
-	deserializeStringTemplateStr  = `serialize.DeserializeString(&{{.VariableName}}, reader)`
-	deserializeCustomTemplateStr  = `{{.VariableName}}.Deserialize(reader)`
+	deserializeByteTemplateStr      = `serialize.DeserializeUInt8(&{{.VariableName}}, reader)`
+	deserializeBoolTemplateStr      = `serialize.DeserializeBool(&{{.VariableName}}, reader)`
+	deserializeUInt8TemplateStr     = `serialize.DeserializeUInt8(&{{.VariableName}}, reader)`
+	deserializeInt8TemplateStr      = `serialize.DeserializeInt8(&{{.VariableName}}, reader)`
+	deserializeUInt16TemplateStr    = `serialize.DeserializeUInt16(&{{.VariableName}}, reader)`
+	deserializeInt16TemplateStr     = `serialize.DeserializeInt16(&{{.VariableName}}, reader)`
+	deserializeUInt32TemplateStr    = `serialize.DeserializeUInt32(&{{.VariableName}}, reader)`
+	deserializeInt32TemplateStr     = `serialize.DeserializeInt32(&{{.VariableName}}, reader)`
+	deserializeUInt64TemplateStr    = `serialize.DeserializeUInt64(&{{.VariableName}}, reader)`
+	deserializeInt64TemplateStr     = `serialize.DeserializeInt64(&{{.VariableName}}, reader)`
+	deserializeFloat32TemplateStr   = `serialize.DeserializeFloat32(&{{.VariableName}}, reader)`
+	deserializeFloat64TemplateStr   = `serialize.DeserializeFloat64(&{{.VariableName}}, reader)`
+	deserializeStringTemplateStr    = `serialize.DeserializeString(&{{.VariableName}}, reader)`
+	deserializeTimestampTemplateStr = `serialize.DeserializeTime(&{{.VariableName}}, reader)`
+	deserializeCustomTemplateStr    = `{{.VariableName}}.Deserialize(reader)`
 )
 
 var (
 	// calc byte size templates
-	calcByteSizeByteTemplate    = template.Must(template.New("calcByteSizeByteTemplateGo").Parse(calcByteSizeByteTemplateStr))
-	calcByteSizeBoolTemplate    = template.Must(template.New("calcByteSizeBoolTemplateGo").Parse(calcByteSizeBoolTemplateStr))
-	calcByteSizeUInt8Template   = template.Must(template.New("calcByteSizeUInt8TemplateGo").Parse(calcByteSizeUInt8TemplateStr))
-	calcByteSizeInt8Template    = template.Must(template.New("calcByteSizeInt8TemplateGo").Parse(calcByteSizeInt8TemplateStr))
-	calcByteSizeUInt16Template  = template.Must(template.New("calcByteSizeUInt16TemplateGo").Parse(calcByteSizeUInt16TemplateStr))
-	calcByteSizeInt16Template   = template.Must(template.New("calcByteSizeInt16TemplateGo").Parse(calcByteSizeInt16TemplateStr))
-	calcByteSizeUInt32Template  = template.Must(template.New("calcByteSizeUInt32TemplateGo").Parse(calcByteSizeUInt32TemplateStr))
-	calcByteSizeInt32Template   = template.Must(template.New("calcByteSizeInt32TemplateGo").Parse(calcByteSizeInt32TemplateStr))
-	calcByteSizeUInt64Template  = template.Must(template.New("calcByteSizeUInt64TemplateGo").Parse(calcByteSizeUInt64TemplateStr))
-	calcByteSizeInt64Template   = template.Must(template.New("calcByteSizeInt64TemplateGo").Parse(calcByteSizeInt64TemplateStr))
-	calcByteSizeFloat32Template = template.Must(template.New("calcByteSizeFloat32TemplateGo").Parse(calcByteSizeFloat32TemplateStr))
-	calcByteSizeFloat64Template = template.Must(template.New("calcByteSizeFloat64TemplateGo").Parse(calcByteSizeFloat64TemplateStr))
-	calcByteSizeStringTemplate  = template.Must(template.New("calcByteSizeStringTemplateGo").Parse(calcByteSizeStringTemplateStr))
-	calcByteSizeCustomTemplate  = template.Must(template.New("calcByteSizeCustomTemplateGo").Parse(calcByteSizeCustomTemplateStr))
+	byteSizeByteTemplate      = template.Must(template.New("byteSizeByteTemplateGo").Parse(byteSizeByteTemplateStr))
+	byteSizeBoolTemplate      = template.Must(template.New("byteSizeBoolTemplateGo").Parse(byteSizeBoolTemplateStr))
+	byteSizeUInt8Template     = template.Must(template.New("byteSizeUInt8TemplateGo").Parse(byteSizeUInt8TemplateStr))
+	byteSizeInt8Template      = template.Must(template.New("byteSizeInt8TemplateGo").Parse(byteSizeInt8TemplateStr))
+	byteSizeUInt16Template    = template.Must(template.New("byteSizeUInt16TemplateGo").Parse(byteSizeUInt16TemplateStr))
+	byteSizeInt16Template     = template.Must(template.New("byteSizeInt16TemplateGo").Parse(byteSizeInt16TemplateStr))
+	byteSizeUInt32Template    = template.Must(template.New("byteSizeUInt32TemplateGo").Parse(byteSizeUInt32TemplateStr))
+	byteSizeInt32Template     = template.Must(template.New("byteSizeInt32TemplateGo").Parse(byteSizeInt32TemplateStr))
+	byteSizeUInt64Template    = template.Must(template.New("byteSizeUInt64TemplateGo").Parse(byteSizeUInt64TemplateStr))
+	byteSizeInt64Template     = template.Must(template.New("byteSizeInt64TemplateGo").Parse(byteSizeInt64TemplateStr))
+	byteSizeFloat32Template   = template.Must(template.New("byteSizeFloat32TemplateGo").Parse(byteSizeFloat32TemplateStr))
+	byteSizeFloat64Template   = template.Must(template.New("byteSizeFloat64TemplateGo").Parse(byteSizeFloat64TemplateStr))
+	byteSizeStringTemplate    = template.Must(template.New("byteSizeStringTemplateGo").Parse(byteSizeStringTemplateStr))
+	byteSizeTimestampTemplate = template.Must(template.New("byteSizeTimestampTemplateGo").Parse(byteSizeTimestampTemplateStr))
+	byteSizeCustomTemplate    = template.Must(template.New("byteSizeCustomTemplateGo").Parse(byteSizeCustomTemplateStr))
 	// serialization templates
-	serializeByteTemplate    = template.Must(template.New("serializeByteTemplateGo").Parse(serializeByteTemplateStr))
-	serializeBoolTemplate    = template.Must(template.New("serializeBoolTemplateGo").Parse(serializeBoolTemplateStr))
-	serializeUInt8Template   = template.Must(template.New("serializeUInt8TemplateGo").Parse(serializeUInt8TemplateStr))
-	serializeInt8Template    = template.Must(template.New("serializeInt8TemplateGo").Parse(serializeInt8TemplateStr))
-	serializeUInt16Template  = template.Must(template.New("serializeUInt16TemplateGo").Parse(serializeUInt16TemplateStr))
-	serializeInt16Template   = template.Must(template.New("serializeInt16TemplateGo").Parse(serializeInt16TemplateStr))
-	serializeUInt32Template  = template.Must(template.New("serializeUInt32TemplateGo").Parse(serializeUInt32TemplateStr))
-	serializeInt32Template   = template.Must(template.New("serializeInt32TemplateGo").Parse(serializeInt32TemplateStr))
-	serializeUInt64Template  = template.Must(template.New("serializeUInt64TemplateGo").Parse(serializeUInt64TemplateStr))
-	serializeInt64Template   = template.Must(template.New("serializeInt64TemplateGo").Parse(serializeInt64TemplateStr))
-	serializeFloat32Template = template.Must(template.New("serializeFloat32TemplateGo").Parse(serializeFloat32TemplateStr))
-	serializeFloat64Template = template.Must(template.New("serializeFloat64TemplateGo").Parse(serializeFloat64TemplateStr))
-	serializeStringTemplate  = template.Must(template.New("serializeStringTemplateGo").Parse(serializeStringTemplateStr))
-	serializeCustomTemplate  = template.Must(template.New("serializeCustomTemplateGo").Parse(serializeCustomTemplateStr))
+	serializeByteTemplate      = template.Must(template.New("serializeByteTemplateGo").Parse(serializeByteTemplateStr))
+	serializeBoolTemplate      = template.Must(template.New("serializeBoolTemplateGo").Parse(serializeBoolTemplateStr))
+	serializeUInt8Template     = template.Must(template.New("serializeUInt8TemplateGo").Parse(serializeUInt8TemplateStr))
+	serializeInt8Template      = template.Must(template.New("serializeInt8TemplateGo").Parse(serializeInt8TemplateStr))
+	serializeUInt16Template    = template.Must(template.New("serializeUInt16TemplateGo").Parse(serializeUInt16TemplateStr))
+	serializeInt16Template     = template.Must(template.New("serializeInt16TemplateGo").Parse(serializeInt16TemplateStr))
+	serializeUInt32Template    = template.Must(template.New("serializeUInt32TemplateGo").Parse(serializeUInt32TemplateStr))
+	serializeInt32Template     = template.Must(template.New("serializeInt32TemplateGo").Parse(serializeInt32TemplateStr))
+	serializeUInt64Template    = template.Must(template.New("serializeUInt64TemplateGo").Parse(serializeUInt64TemplateStr))
+	serializeInt64Template     = template.Must(template.New("serializeInt64TemplateGo").Parse(serializeInt64TemplateStr))
+	serializeFloat32Template   = template.Must(template.New("serializeFloat32TemplateGo").Parse(serializeFloat32TemplateStr))
+	serializeFloat64Template   = template.Must(template.New("serializeFloat64TemplateGo").Parse(serializeFloat64TemplateStr))
+	serializeStringTemplate    = template.Must(template.New("serializeStringTemplateGo").Parse(serializeStringTemplateStr))
+	serializeTimestampTemplate = template.Must(template.New("serializeTimestampTemplateGo").Parse(serializeTimestampTemplateStr))
+	serializeCustomTemplate    = template.Must(template.New("serializeCustomTemplateGo").Parse(serializeCustomTemplateStr))
 	// deserialization templates
-	deserializeByteTemplate    = template.Must(template.New("deserializeByteTemplateGo").Parse(deserializeByteTemplateStr))
-	deserializeBoolTemplate    = template.Must(template.New("deserializeBoolTemplateGo").Parse(deserializeBoolTemplateStr))
-	deserializeUInt8Template   = template.Must(template.New("deserializeUInt8TemplateGo").Parse(deserializeUInt8TemplateStr))
-	deserializeInt8Template    = template.Must(template.New("deserializeInt8TemplateGo").Parse(deserializeInt8TemplateStr))
-	deserializeUInt16Template  = template.Must(template.New("deserializeUInt16TemplateGo").Parse(deserializeUInt16TemplateStr))
-	deserializeInt16Template   = template.Must(template.New("deserializeInt16TemplateGo").Parse(deserializeInt16TemplateStr))
-	deserializeUInt32Template  = template.Must(template.New("deserializeUInt32TemplateGo").Parse(deserializeUInt32TemplateStr))
-	deserializeInt32Template   = template.Must(template.New("deserializeInt32TemplateGo").Parse(deserializeInt32TemplateStr))
-	deserializeUInt64Template  = template.Must(template.New("deserializeUInt64TemplateGo").Parse(deserializeUInt64TemplateStr))
-	deserializeInt64Template   = template.Must(template.New("deserializeInt64TemplateGo").Parse(deserializeInt64TemplateStr))
-	deserializeFloat32Template = template.Must(template.New("deserializeFloat32TemplateGo").Parse(deserializeFloat32TemplateStr))
-	deserializeFloat64Template = template.Must(template.New("deserializeFloat64TemplateGo").Parse(deserializeFloat64TemplateStr))
-	deserializeStringTemplate  = template.Must(template.New("deserializeStringTemplateGo").Parse(deserializeStringTemplateStr))
-	deserializeCustomTemplate  = template.Must(template.New("deserializeCustomTemplateGo").Parse(deserializeCustomTemplateStr))
+	deserializeByteTemplate      = template.Must(template.New("deserializeByteTemplateGo").Parse(deserializeByteTemplateStr))
+	deserializeBoolTemplate      = template.Must(template.New("deserializeBoolTemplateGo").Parse(deserializeBoolTemplateStr))
+	deserializeUInt8Template     = template.Must(template.New("deserializeUInt8TemplateGo").Parse(deserializeUInt8TemplateStr))
+	deserializeInt8Template      = template.Must(template.New("deserializeInt8TemplateGo").Parse(deserializeInt8TemplateStr))
+	deserializeUInt16Template    = template.Must(template.New("deserializeUInt16TemplateGo").Parse(deserializeUInt16TemplateStr))
+	deserializeInt16Template     = template.Must(template.New("deserializeInt16TemplateGo").Parse(deserializeInt16TemplateStr))
+	deserializeUInt32Template    = template.Must(template.New("deserializeUInt32TemplateGo").Parse(deserializeUInt32TemplateStr))
+	deserializeInt32Template     = template.Must(template.New("deserializeInt32TemplateGo").Parse(deserializeInt32TemplateStr))
+	deserializeUInt64Template    = template.Must(template.New("deserializeUInt64TemplateGo").Parse(deserializeUInt64TemplateStr))
+	deserializeInt64Template     = template.Must(template.New("deserializeInt64TemplateGo").Parse(deserializeInt64TemplateStr))
+	deserializeFloat32Template   = template.Must(template.New("deserializeFloat32TemplateGo").Parse(deserializeFloat32TemplateStr))
+	deserializeFloat64Template   = template.Must(template.New("deserializeFloat64TemplateGo").Parse(deserializeFloat64TemplateStr))
+	deserializeStringTemplate    = template.Must(template.New("deserializeStringTemplateGo").Parse(deserializeStringTemplateStr))
+	deserializeTimestampTemplate = template.Must(template.New("deserializeTimestampTemplateGo").Parse(deserializeTimestampTemplateStr))
+	deserializeCustomTemplate    = template.Must(template.New("deserializeCustomTemplateGo").Parse(deserializeCustomTemplateStr))
 )
 
-func getComparableDataTypeName(dataType *parse.DataTypeComparableDefinition) (string, error) {
-	switch dataType.Type {
+func getDataTypeComparableMethodSuffix(dataType parse.DataTypeComparable) (string, error) {
+	switch dataType {
 	case parse.DataTypeComparableUInt8:
 		return "UInt8", nil
 	case parse.DataTypeComparableUInt16:
@@ -442,18 +459,23 @@ func getComparableDataTypeName(dataType *parse.DataTypeComparableDefinition) (st
 		return "Float32", nil
 	case parse.DataTypeComparableFloat64:
 		return "Float64", nil
+	}
+	return "", fmt.Errorf("unrecognized type: %v", dataType)
+}
+
+func getDataTypeComparableDefinitionMethodSuffix(dataType *parse.DataTypeComparableDefinition) (string, error) {
+	switch dataType.Type {
 	case parse.DataTypeComparableCustom:
 		if dataType.ImportedFromOtherPackage {
 			return fmt.Sprintf("%sPkg%s", util.EnsurePascalCase(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
 		}
 		return util.EnsurePascalCase(dataType.CustomType), nil
 	}
-	return "", fmt.Errorf("unrecognized type: %v", dataType)
+	return getDataTypeComparableMethodSuffix(dataType.Type)
 }
 
-func getContainerTypesRecursively(dataType *parse.DataTypeDefinition) (string, error) {
-
-	switch dataType.Type {
+func getDataTypeMethodSuffix(dataType parse.DataType) (string, error) {
+	switch dataType {
 	case parse.DataTypeByte:
 		return "Byte", nil
 	case parse.DataTypeBool:
@@ -476,16 +498,24 @@ func getContainerTypesRecursively(dataType *parse.DataTypeDefinition) (string, e
 		return "Int64", nil
 	case parse.DataTypeString:
 		return "String", nil
+	case parse.DataTypeTimestamp:
+		return "Time", nil
 	case parse.DataTypeFloat32:
 		return "Float32", nil
 	case parse.DataTypeFloat64:
 		return "Float64", nil
+	}
+	return "", fmt.Errorf("unrecognized type: %v", dataType)
+}
+
+func getDataTypeDefinitionMethodSuffix(dataType *parse.DataTypeDefinition) (string, error) {
+	switch dataType.Type {
 	case parse.DataTypeMap:
-		key, err := getComparableDataTypeName(dataType.Key)
+		key, err := getDataTypeComparableDefinitionMethodSuffix(dataType.Key)
 		if err != nil {
 			return "", err
 		}
-		subNames, err := getContainerTypesRecursively(dataType.SubType)
+		subNames, err := getDataTypeDefinitionMethodSuffix(dataType.SubType)
 		if err != nil {
 			return "", err
 		}
@@ -493,7 +523,7 @@ func getContainerTypesRecursively(dataType *parse.DataTypeDefinition) (string, e
 
 	case parse.DataTypeList:
 
-		subNames, err := getContainerTypesRecursively(dataType.SubType)
+		subNames, err := getDataTypeDefinitionMethodSuffix(dataType.SubType)
 		if err != nil {
 			return "", err
 		}
@@ -507,34 +537,34 @@ func getContainerTypesRecursively(dataType *parse.DataTypeDefinition) (string, e
 
 	}
 
-	return "", fmt.Errorf("unrecognized type: %v", dataType.Type)
+	return getDataTypeMethodSuffix(dataType.Type)
 }
 
-func generateCalcByteSizeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func generateByteSizeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
-	fullTypeName, err := getContainerTypesRecursively(dataType)
+	fullTypeName, err := getDataTypeDefinitionMethodSuffix(dataType)
 	if err != nil {
 		return "", nil, err
 	}
 
-	methodFullName := fmt.Sprintf("%s_CalcByteSize%s", util.EnsureCamelCase(messageName), fullTypeName)
+	methodFullName := fmt.Sprintf("%s_ByteSize%s", util.EnsureCamelCase(messageName), fullTypeName)
 
 	serializationMethodCode := map[string]string{}
 
-	argType, err := mapTypeToGoType(dataType)
+	argType, err := mapDataTypeDefinitionToGoType(dataType)
 	if err != nil {
 		return "", nil, err
 	}
 
-	valueMethodCall, methodCode, err := generateFieldCalcByteSizeMethodCall(messageName, "v", dataType.SubType)
+	valueMethodCall, methodCode, err := generateFieldByteSizeMethodCall(messageName, "v", dataType.SubType)
 	if err != nil {
 		return "", nil, err
 	}
 
-	args := CalcByteSizeContainerMethodArgs{
-		FullMethodName:                  methodFullName,
-		ArgType:                         argType,
-		ValueTypeCalcByteSizeMethodCall: valueMethodCall,
+	args := ByteSizeContainerMethodArgs{
+		FullMethodName:              methodFullName,
+		ArgType:                     argType,
+		ValueTypeByteSizeMethodCall: valueMethodCall,
 	}
 
 	buf := &bytes.Buffer{}
@@ -542,7 +572,7 @@ func generateCalcByteSizeContainerMethod(messageName string, varName string, dat
 
 		// list
 
-		err = listCalcByteSizeMethodTemplate.Execute(buf, args)
+		err = listByteSizeMethodTemplate.Execute(buf, args)
 		if err != nil {
 			return "", nil, err
 		}
@@ -551,13 +581,13 @@ func generateCalcByteSizeContainerMethod(messageName string, varName string, dat
 
 		// map
 
-		keyMethodCall, err := generateKeyFieldCalcByteSizeMethodCall("k", dataType.Key.Type)
+		keyMethodCall, err := generateKeyFieldByteSizeMethodCall("k", dataType.Key.Type)
 		if err != nil {
 			return "", nil, err
 		}
-		args.KeyTypeCalcByteSizeMethodCall = keyMethodCall
+		args.KeyTypeByteSizeMethodCall = keyMethodCall
 
-		err = mapCalcByteSizeMethodTemplate.Execute(buf, args)
+		err = mapByteSizeMethodTemplate.Execute(buf, args)
 		if err != nil {
 			return "", nil, err
 		}
@@ -576,7 +606,7 @@ func generateCalcByteSizeContainerMethod(messageName string, varName string, dat
 
 func generateSerializeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
-	fullTypeName, err := getContainerTypesRecursively(dataType)
+	fullTypeName, err := getDataTypeDefinitionMethodSuffix(dataType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -585,7 +615,7 @@ func generateSerializeContainerMethod(messageName string, varName string, dataTy
 
 	serializationMethodCode := map[string]string{}
 
-	argType, err := mapTypeToGoType(dataType)
+	argType, err := mapDataTypeDefinitionToGoType(dataType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -640,7 +670,7 @@ func generateSerializeContainerMethod(messageName string, varName string, dataTy
 
 func generateDeserializeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
-	fullTypeName, err := getContainerTypesRecursively(dataType)
+	fullTypeName, err := getDataTypeDefinitionMethodSuffix(dataType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -649,7 +679,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 
 	deserializationMethodCode := map[string]string{}
 
-	argType, err := mapTypeToGoType(dataType)
+	argType, err := mapDataTypeDefinitionToGoType(dataType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -659,7 +689,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 		return "", nil, err
 	}
 
-	valueType, err := mapTypeToGoType(dataType.SubType)
+	valueType, err := mapDataTypeDefinitionToGoType(dataType.SubType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -685,7 +715,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 
 		// map
 
-		keyType, err := mapComparableTypeToGoType(dataType.Key)
+		keyType, err := mapDataTypeComparableDefinitionToGoType(dataType.Key)
 		if err != nil {
 			return "", nil, err
 		}
@@ -714,7 +744,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 	return fullMethodCall, deserializationMethodCode, nil
 }
 
-func generateKeyFieldCalcByteSizeMethodCall(varName string, dataType parse.DataTypeComparable) (string, error) {
+func generateKeyFieldByteSizeMethodCall(varName string, dataType parse.DataTypeComparable) (string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -724,29 +754,29 @@ func generateKeyFieldCalcByteSizeMethodCall(varName string, dataType parse.DataT
 
 	switch dataType {
 	case parse.DataTypeComparableUInt8:
-		tmpl = calcByteSizeUInt8Template
+		tmpl = byteSizeUInt8Template
 	case parse.DataTypeComparableUInt16:
-		tmpl = calcByteSizeUInt16Template
+		tmpl = byteSizeUInt16Template
 	case parse.DataTypeComparableUInt32:
-		tmpl = calcByteSizeUInt32Template
+		tmpl = byteSizeUInt32Template
 	case parse.DataTypeComparableUInt64:
-		tmpl = calcByteSizeUInt64Template
+		tmpl = byteSizeUInt64Template
 	case parse.DataTypeComparableInt8:
-		tmpl = calcByteSizeInt8Template
+		tmpl = byteSizeInt8Template
 	case parse.DataTypeComparableInt16:
-		tmpl = calcByteSizeInt16Template
+		tmpl = byteSizeInt16Template
 	case parse.DataTypeComparableInt32:
-		tmpl = calcByteSizeInt32Template
+		tmpl = byteSizeInt32Template
 	case parse.DataTypeComparableInt64:
-		tmpl = calcByteSizeInt64Template
+		tmpl = byteSizeInt64Template
 	case parse.DataTypeComparableFloat32:
-		tmpl = calcByteSizeFloat32Template
+		tmpl = byteSizeFloat32Template
 	case parse.DataTypeComparableFloat64:
-		tmpl = calcByteSizeFloat64Template
+		tmpl = byteSizeFloat64Template
 	case parse.DataTypeComparableString:
-		tmpl = calcByteSizeStringTemplate
+		tmpl = byteSizeStringTemplate
 	case parse.DataTypeComparableCustom:
-		tmpl = calcByteSizeCustomTemplate
+		tmpl = byteSizeCustomTemplate
 	default:
 		return "", fmt.Errorf("unrecognized key type: %v", dataType)
 	}
@@ -852,7 +882,7 @@ func generateKeyFieldDeserializationMethodCall(varName string, dataType parse.Da
 	return buf.String(), nil
 }
 
-func generateFieldCalcByteSizeMethodCall(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func generateFieldByteSizeMethodCall(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -862,37 +892,39 @@ func generateFieldCalcByteSizeMethodCall(messageName string, varName string, dat
 
 	switch dataType.Type {
 	case parse.DataTypeByte:
-		tmpl = calcByteSizeByteTemplate
+		tmpl = byteSizeByteTemplate
 	case parse.DataTypeBool:
-		tmpl = calcByteSizeBoolTemplate
+		tmpl = byteSizeBoolTemplate
 	case parse.DataTypeUInt8:
-		tmpl = calcByteSizeUInt8Template
+		tmpl = byteSizeUInt8Template
 	case parse.DataTypeUInt16:
-		tmpl = calcByteSizeUInt16Template
+		tmpl = byteSizeUInt16Template
 	case parse.DataTypeUInt32:
-		tmpl = calcByteSizeUInt32Template
+		tmpl = byteSizeUInt32Template
 	case parse.DataTypeUInt64:
-		tmpl = calcByteSizeUInt64Template
+		tmpl = byteSizeUInt64Template
 	case parse.DataTypeInt8:
-		tmpl = calcByteSizeInt8Template
+		tmpl = byteSizeInt8Template
 	case parse.DataTypeInt16:
-		tmpl = calcByteSizeInt16Template
+		tmpl = byteSizeInt16Template
 	case parse.DataTypeInt32:
-		tmpl = calcByteSizeInt32Template
+		tmpl = byteSizeInt32Template
 	case parse.DataTypeInt64:
-		tmpl = calcByteSizeInt64Template
+		tmpl = byteSizeInt64Template
 	case parse.DataTypeFloat32:
-		tmpl = calcByteSizeFloat32Template
+		tmpl = byteSizeFloat32Template
 	case parse.DataTypeFloat64:
-		tmpl = calcByteSizeFloat64Template
+		tmpl = byteSizeFloat64Template
 	case parse.DataTypeString:
-		tmpl = calcByteSizeStringTemplate
+		tmpl = byteSizeStringTemplate
+	case parse.DataTypeTimestamp:
+		tmpl = byteSizeTimestampTemplate
 	case parse.DataTypeCustom:
-		tmpl = calcByteSizeCustomTemplate
+		tmpl = byteSizeCustomTemplate
 	case parse.DataTypeMap,
 		parse.DataTypeList:
 		// special case for containers
-		return generateCalcByteSizeContainerMethod(messageName, varName, dataType)
+		return generateByteSizeContainerMethod(messageName, varName, dataType)
 
 	default:
 		return "", nil, fmt.Errorf("unrecognized type: %v", dataType.Type)
@@ -942,6 +974,8 @@ func generateFieldSerializationMethodCall(messageName string, varName string, da
 		tmpl = serializeFloat64Template
 	case parse.DataTypeString:
 		tmpl = serializeStringTemplate
+	case parse.DataTypeTimestamp:
+		tmpl = serializeTimestampTemplate
 	case parse.DataTypeCustom:
 		tmpl = serializeCustomTemplate
 	case parse.DataTypeMap,
@@ -997,6 +1031,8 @@ func generateFieldDeserializationMethodCall(messageName string, varName string, 
 		tmpl = deserializeFloat64Template
 	case parse.DataTypeString:
 		tmpl = deserializeStringTemplate
+	case parse.DataTypeTimestamp:
+		tmpl = deserializeTimestampTemplate
 	case parse.DataTypeCustom:
 		tmpl = deserializeCustomTemplate
 	case parse.DataTypeMap,
@@ -1033,8 +1069,8 @@ func valuesSortedByKey(m map[string]string) []string {
 	return values
 }
 
-func generateMessageCalcByteSizeMethod(msg *parse.MessageDefinition) (string, error) {
-	args := CalcByteSizeMethodArgs{
+func generateMessageByteSizeMethod(msg *parse.MessageDefinition) (string, error) {
+	args := ByteSizeMethodArgs{
 		MessageNameFirstLetter: util.FirstLetterAsLowercase(msg.Name),
 		MessageNamePascalCase:  util.EnsurePascalCase(msg.Name),
 	}
@@ -1045,16 +1081,16 @@ func generateMessageCalcByteSizeMethod(msg *parse.MessageDefinition) (string, er
 
 		fieldName := fmt.Sprintf("%s.%s", util.FirstLetterAsLowercase(msg.Name), util.EnsurePascalCase(field.Name))
 
-		fieldCalcByteSizeMethodCall, methodCode, err := generateFieldCalcByteSizeMethodCall(msg.Name, fieldName, field.DataTypeDefinition)
+		fieldByteSizeMethodCall, methodCode, err := generateFieldByteSizeMethodCall(msg.Name, fieldName, field.DataTypeDefinition)
 		if err != nil {
 			return "", err
 		}
 		additionalFunctionCode = util.MergeMap(additionalFunctionCode, methodCode)
-		args.FieldCalcByteSizeMethodCalls = append(args.FieldCalcByteSizeMethodCalls, fieldCalcByteSizeMethodCall)
+		args.FieldByteSizeMethodCalls = append(args.FieldByteSizeMethodCalls, fieldByteSizeMethodCall)
 	}
 
 	buf := &bytes.Buffer{}
-	err := messageCalcByteSizeMethodTemplate.Execute(buf, args)
+	err := messageByteSizeMethodTemplate.Execute(buf, args)
 	if err != nil {
 		return "", err
 	}
@@ -1133,7 +1169,7 @@ func generateMessageDeserializationMethod(msg *parse.MessageDefinition) (string,
 }
 
 func getMessageFieldArg(field *parse.MessageFieldDefinition) (MessageFieldArgs, error) {
-	goType, err := mapTypeToGoType(field.DataTypeDefinition)
+	goType, err := mapDataTypeDefinitionToGoType(field.DataTypeDefinition)
 	if err != nil {
 		return MessageFieldArgs{}, err
 	}
@@ -1159,7 +1195,7 @@ func generateMessageGoCode(msg *parse.MessageDefinition) (string, error) {
 		args.MessageFields = append(args.MessageFields, fieldArg)
 	}
 
-	calcByteSizeCode, err := generateMessageCalcByteSizeMethod(msg)
+	byteSizeCode, err := generateMessageByteSizeMethod(msg)
 	if err != nil {
 		return "", err
 	}
@@ -1174,7 +1210,7 @@ func generateMessageGoCode(msg *parse.MessageDefinition) (string, error) {
 		return "", err
 	}
 
-	args.CalcByteSizeCode = calcByteSizeCode
+	args.ByteSizeCode = byteSizeCode
 	args.SerializeCode = serializeCode
 	args.DeserializeCode = deserializeCode
 

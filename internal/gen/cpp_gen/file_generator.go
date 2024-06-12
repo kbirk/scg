@@ -41,9 +41,18 @@ func generateFileCppCode(pkg *parse.Package, file *parse.File) (string, error) {
 
 	namespaces := convertPackageNameToCppNamespaces(pkg.Name)
 
-	importCode, err := generateImportsCppCode(file.GetFileDependencies(), len(file.ServiceDefinitions) > 0, len(file.MessageDefinitions) > 0, len(file.Typedefs) > 0)
+	importCode, err := generateImportsCppCode(file)
 	if err != nil {
 		return "", err
+	}
+
+	var enumCode []string
+	for _, msg := range file.EnumsSortedByKey() {
+		enum, err := generateEnumCppCode(msg)
+		if err != nil {
+			return "", err
+		}
+		enumCode = append(enumCode, enum)
 	}
 
 	var typedefCode []string

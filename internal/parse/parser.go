@@ -10,6 +10,7 @@ var (
 	blockScopedNamedDeclaration = map[string]TokenType{
 		"service": ServiceTokenType,
 		"message": MessageTokenType,
+		"enum":    EnumTokenType,
 	}
 	packageDeclaration = map[string]TokenType{
 		"package": PackageTokenType,

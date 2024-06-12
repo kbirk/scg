@@ -3,3 +3,9 @@ package sample2;
 typedef MyString = string;
 
 typedef MyInt32 = int32;
+
+enum MyEnumType {
+	ValueA = 0;
+	ValueB = 1;
+	ValueC = 2;
+}

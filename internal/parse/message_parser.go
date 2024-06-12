@@ -12,7 +12,7 @@ var (
 	messageRegex                 = regexp.MustCompile(`(?s)message\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
 	fieldRegex                   = regexp.MustCompile(`^((?:list\s*\<\s*(?:.*)\s*\>)|(?:map\s*\<\s*(?:.*)\s*\>)|(?:.+?))\s+(.+?)\s*=\s*(.+?)\s*;*$`)
 	fieldNameRegex               = regexp.MustCompile(`^[a-zA-Z][a-zA-Z_0-9]*$`)
-	plainDataTypeRegex           = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)$`)
+	plainDataTypeRegex           = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string|timestamp)$`)
 	plainDataTypeComparableRegex = regexp.MustCompile(`^(uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)$`)
 	customDataTypeRegex          = regexp.MustCompile(`^((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)$`)
 	mapDataTypeRegex             = regexp.MustCompile(`^map\s*\<\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*,\s*(.+?)\s*\>$`)
@@ -37,6 +37,7 @@ const (
 	DataTypeFloat32
 	DataTypeFloat64
 	DataTypeString
+	DataTypeTimestamp
 	DataTypeMap
 	DataTypeList
 	DataTypeCustom
@@ -112,6 +113,8 @@ func mapTypeEnumToString(typ DataType) string {
 		return "float64"
 	case DataTypeString:
 		return "string"
+	case DataTypeTimestamp:
+		return "timestamp"
 	}
 	panic("invalid data type")
 }
@@ -163,7 +166,7 @@ func (d *DataTypeDefinition) ToString() string {
 
 type MessageFieldDefinition struct {
 	Name               string
-	Index              uint
+	Index              uint32
 	DataTypeDefinition *DataTypeDefinition
 	Token              *Token
 }
@@ -211,6 +214,8 @@ func mapPlainDataTypeStringToEnum(typ string) (DataType, error) {
 		return DataTypeFloat64, nil
 	case "string":
 		return DataTypeString, nil
+	case "timestamp":
+		return DataTypeTimestamp, nil
 	}
 	return 0, fmt.Errorf("invalid data type %s", typ)
 }
@@ -486,7 +491,7 @@ func parseFieldDefinition(input *Token) (*MessageFieldDefinition, *ParsingError)
 	return &MessageFieldDefinition{
 		Name:               name,
 		DataTypeDefinition: dataType,
-		Index:              uint(index),
+		Index:              uint32(index),
 		Token:              input,
 	}, nil
 }
@@ -593,7 +598,7 @@ func parseMessageDefinitions(tokens []*Token) (map[string]*MessageDefinition, *P
 		}
 
 		// ensure message indices are valid and sequential
-		indices := make(map[uint]bool)
+		indices := make(map[uint32]bool)
 		for _, field := range message.Fields {
 
 			// track indices
@@ -607,7 +612,7 @@ func parseMessageDefinitions(tokens []*Token) (map[string]*MessageDefinition, *P
 			indices[field.Index] = true
 		}
 		for i := 0; i < len(message.Fields); i++ {
-			_, ok := indices[uint(i)]
+			_, ok := indices[uint32(i)]
 			if !ok {
 				return nil, &ParsingError{
 					Message: fmt.Sprintf("missing index %d in message definition %s", i, message.Name),

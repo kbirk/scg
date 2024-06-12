@@ -87,11 +87,11 @@ func getServerStubStructName(serviceName string) string {
 
 func generateServiceMethodParams(method *parse.ServiceMethodDefinition) (string, string, error) {
 
-	argType, err := mapTypeToCppType(method.Argument)
+	argType, err := mapDataTypeDefinitionToCppType(method.Argument)
 	if err != nil {
 		return "", "", err
 	}
-	retType, err := mapTypeToCppType(method.Return)
+	retType, err := mapDataTypeDefinitionToCppType(method.Return)
 	if err != nil {
 		return "", "", err
 	}

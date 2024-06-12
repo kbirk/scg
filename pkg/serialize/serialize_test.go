@@ -33,7 +33,7 @@ func TestSerializeString(t *testing.T) {
 
 	input := "this is my test string"
 
-	size := CalcByteSizeString(input)
+	size := ByteSizeString(input)
 
 	writer := NewFixedSizeWriter(size)
 	SerializeString(writer, input)
@@ -52,7 +52,7 @@ func TestSerializeBool(t *testing.T) {
 
 	input := true
 
-	size := CalcByteSizeBool(input)
+	size := ByteSizeBool(input)
 
 	writer := NewFixedSizeWriter(size)
 	SerializeBool(writer, input)
@@ -71,7 +71,7 @@ func TestSerializeUInt8(t *testing.T) {
 
 	input := uint8(224)
 
-	size := CalcByteSizeUInt8(input)
+	size := ByteSizeUInt8(input)
 
 	writer := NewFixedSizeWriter(size)
 	SerializeUInt8(writer, input)
@@ -90,7 +90,7 @@ func TestSerializeInt8(t *testing.T) {
 
 	input := int8(-112)
 
-	size := CalcByteSizeInt8(input)
+	size := ByteSizeInt8(input)
 
 	writer := NewFixedSizeWriter(size)
 	SerializeInt8(writer, input)
@@ -109,7 +109,7 @@ func TestSerializeUInt32(t *testing.T) {
 
 	input := uint32(12234523)
 
-	size := CalcByteSizeUInt32(input)
+	size := ByteSizeUInt32(input)
 
 	writer := NewFixedSizeWriter(size)
 	SerializeUInt32(writer, input)
@@ -128,7 +128,7 @@ func TestSerializeInt32(t *testing.T) {
 
 	input := int32(-2147483648)
 
-	size := CalcByteSizeInt32(input)
+	size := ByteSizeInt32(input)
 
 	writer := NewFixedSizeWriter(size)
 	SerializeInt32(writer, input)
@@ -147,7 +147,7 @@ func TestSerializeUInt64(t *testing.T) {
 
 	input := uint64(122346575523)
 
-	size := CalcByteSizeUInt64(input)
+	size := ByteSizeUInt64(input)
 
 	writer := NewFixedSizeWriter(size)
 	SerializeUInt64(writer, input)
@@ -166,7 +166,7 @@ func TestSerializeInt64(t *testing.T) {
 
 	input := int64(-2156747483648)
 
-	size := CalcByteSizeInt64(input)
+	size := ByteSizeInt64(input)
 
 	writer := NewFixedSizeWriter(size)
 	SerializeInt64(writer, input)

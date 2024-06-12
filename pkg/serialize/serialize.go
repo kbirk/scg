@@ -1,10 +1,42 @@
 package serialize
 
 import (
+	"time"
 	"unsafe"
 )
 
-func CalcByteSizeString(data string) int {
+func ByteSizeTime(data time.Time) int {
+	return 16
+}
+
+func SerializeTime(writer *FixedSizeWriter, data time.Time) {
+
+	timeUTC := data.UTC()
+
+	seconds := timeUTC.Unix()                                      // number of seconds since Unix epoch
+	nanoseconds := timeUTC.UnixNano() - seconds*int64(time.Second) // remaining nanoseconds
+
+	SerializeUInt64(writer, uint64(seconds))
+	SerializeUInt64(writer, uint64(nanoseconds))
+}
+
+func DeserializeTime(data *time.Time, reader *Reader) error {
+	var seconds uint64
+	var nanoseconds uint64
+	err := DeserializeUInt64(&seconds, reader)
+	if err != nil {
+		return err
+	}
+	err = DeserializeUInt64(&nanoseconds, reader)
+	if err != nil {
+		return err
+	}
+
+	*data = time.Unix(int64(seconds), int64(nanoseconds))
+	return nil
+}
+
+func ByteSizeString(data string) int {
 	return 4 + len(data)
 }
 
@@ -29,7 +61,7 @@ func DeserializeString(data *string, reader *Reader) error {
 	return nil
 }
 
-func CalcByteSizeBool(bool) int {
+func ByteSizeBool(bool) int {
 	return 1
 }
 
@@ -54,7 +86,7 @@ func DeserializeBool(data *bool, reader *Reader) error {
 	return nil
 }
 
-func CalcByteSizeUInt8(uint8) int {
+func ByteSizeUInt8(uint8) int {
 	return 1
 }
 
@@ -72,7 +104,7 @@ func DeserializeUInt8(data *uint8, reader *Reader) error {
 	return nil
 }
 
-func CalcByteSizeUInt16(uint16) int {
+func ByteSizeUInt16(uint16) int {
 	return 2
 }
 
@@ -91,7 +123,7 @@ func DeserializeUInt16(data *uint16, reader *Reader) error {
 	return nil
 }
 
-func CalcByteSizeUInt32(uint32) int {
+func ByteSizeUInt32(uint32) int {
 	return 4
 }
 
@@ -115,7 +147,7 @@ func DeserializeUInt32(data *uint32, reader *Reader) error {
 	return nil
 }
 
-func CalcByteSizeUInt64(uint64) int {
+func ByteSizeUInt64(uint64) int {
 	return 8
 }
 
@@ -147,7 +179,7 @@ func DeserializeUInt64(data *uint64, reader *Reader) error {
 	return nil
 }
 
-func CalcByteSizeInt8(int8) int {
+func ByteSizeInt8(int8) int {
 	return 1
 }
 
@@ -159,7 +191,7 @@ func DeserializeInt8(data *int8, reader *Reader) error {
 	return DeserializeUInt8((*uint8)(unsafe.Pointer(data)), reader)
 }
 
-func CalcByteSizeInt16(int16) int {
+func ByteSizeInt16(int16) int {
 	return 2
 }
 
@@ -171,7 +203,7 @@ func DeserializeInt16(data *int16, reader *Reader) error {
 	return DeserializeUInt16((*uint16)(unsafe.Pointer(data)), reader)
 }
 
-func CalcByteSizeInt32(int32) int {
+func ByteSizeInt32(int32) int {
 	return 4
 }
 
@@ -183,7 +215,7 @@ func DeserializeInt32(data *int32, reader *Reader) error {
 	return DeserializeUInt32((*uint32)(unsafe.Pointer(data)), reader)
 }
 
-func CalcByteSizeInt64(int64) int {
+func ByteSizeInt64(int64) int {
 	return 8
 }
 
@@ -195,7 +227,7 @@ func DeserializeInt64(data *int64, reader *Reader) error {
 	return DeserializeUInt64((*uint64)(unsafe.Pointer(data)), reader)
 }
 
-func CalcByteSizeFloat32(float32) int {
+func ByteSizeFloat32(float32) int {
 	return 4
 }
 
@@ -213,7 +245,7 @@ func DeserializeFloat32(data *float32, reader *Reader) error {
 	return nil
 }
 
-func CalcByteSizeFloat64(float64) int {
+func ByteSizeFloat64(float64) int {
 	return 8
 }
 

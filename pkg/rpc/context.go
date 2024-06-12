@@ -30,12 +30,12 @@ func GetMetadataFromContext(ctx context.Context) map[string]string {
 	return nil
 }
 
-func CalcByteSizeContext(ctx context.Context) int {
+func ByteSizeContext(ctx context.Context) int {
 	md := GetMetadataFromContext(ctx)
-	size := serialize.CalcByteSizeUInt32(uint32(len(md)))
+	size := serialize.ByteSizeUInt32(uint32(len(md)))
 	for k, v := range md {
-		size += serialize.CalcByteSizeString(k)
-		size += serialize.CalcByteSizeString(v)
+		size += serialize.ByteSizeString(k)
+		size += serialize.ByteSizeString(v)
 	}
 	return size
 }

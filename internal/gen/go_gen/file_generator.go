@@ -13,6 +13,7 @@ type FileArgs struct {
 	Header   string
 	Package  string
 	Imports  string
+	Enums    string
 	Typedefs string
 	Messages string
 	Servers  string
@@ -23,6 +24,7 @@ const fileTemplateStr = `
 {{.Header}}
 {{.Package}}
 {{.Imports}}
+{{.Enums}}
 {{.Typedefs}}
 {{.Messages}}
 {{.Servers}}
@@ -45,9 +47,18 @@ func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.Fi
 		return "", err
 	}
 
-	importCode, err := generateImportsGoCode(goBasePackage, file.GetPackageDependencies(), len(file.ServiceDefinitions) > 0, len(file.MessageDefinitions) > 0, len(file.Typedefs) > 0)
+	importCode, err := generateImportsGoCode(goBasePackage, file)
 	if err != nil {
 		return "", err
+	}
+
+	var enumCode []string
+	for _, msg := range file.EnumsSortedByKey() {
+		enum, err := generateEnumGoCode(msg)
+		if err != nil {
+			return "", err
+		}
+		enumCode = append(enumCode, enum)
 	}
 
 	var typedefCode []string
@@ -90,6 +101,7 @@ func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.Fi
 		Header:   headerCode,
 		Package:  pkgCode,
 		Imports:  importCode,
+		Enums:    strings.Join(enumCode, "\n"),
 		Typedefs: strings.Join(typedefCode, "\n"),
 		Messages: strings.Join(messageCode, "\n"),
 		Servers:  strings.Join(serverCode, "\n"),

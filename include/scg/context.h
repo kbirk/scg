@@ -43,7 +43,7 @@ public:
 
 	inline uint32_t byteSize() const
 	{
-		return serialize::calc_byte_size(values_);
+		return serialize::byte_size(values_);
 	}
 
 	inline void serialize(serialize::FixedSizeWriter& writer) const

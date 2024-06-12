@@ -11,6 +11,8 @@ const (
 	ServiceMethodParamTokenType
 	PackageTokenType
 	TypedefTokenType
+	EnumTokenType
+	EnumValueTokenType
 )
 
 type Token struct {

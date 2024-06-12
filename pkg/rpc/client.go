@@ -174,7 +174,7 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 	c.requestID += 1
 	c.mu.Unlock()
 
-	writer := serialize.NewFixedSizeWriter(RequestHeaderSize + CalcByteSizeContext(ctx) + msg.CalcByteSize())
+	writer := serialize.NewFixedSizeWriter(RequestHeaderSize + ByteSizeContext(ctx) + msg.ByteSize())
 	SerializePrefix(writer, RequestPrefix)
 	SerializeContext(writer, ctx)
 	serialize.SerializeUInt64(writer, requestID)

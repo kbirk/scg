@@ -55,7 +55,7 @@ message PongResponse {
 }
 ```
 
-Containers such as maps and lists use golang syntax and can be nested:
+Containers such as maps and lists use `<T>` syntax and can be nested:
 
 ```
 message OtherStuff {
@@ -238,8 +238,7 @@ Run the tests:
 
 ## TODO:
 
-- Add `enum` support
 - Implement context cancellations and deadlines
 - Opentracing hooks and context serialization
 - Add stream support
-- Add C++ server code?
+- Add C++ server code

@@ -95,18 +95,18 @@ func getServerStubStructName(serviceName string) string {
 
 func generateServiceMethodParams(method *parse.ServiceMethodDefinition) (string, string, error) {
 
-	argType, err := mapTypeToGoType(method.Argument)
+	argType, err := mapDataTypeDefinitionToGoType(method.Argument)
 	if err != nil {
 		return "", "", err
 	}
-	retType, err := mapTypeToGoType(method.Return)
+	retType, err := mapDataTypeDefinitionToGoType(method.Return)
 	if err != nil {
 		return "", "", err
 	}
 	return argType, retType, nil
 }
 
-func getServerNamePascaleCase(serviceName string) string {
+func getServerNamePascalCase(serviceName string) string {
 	return fmt.Sprintf("%s%s", util.EnsurePascalCase(serviceName), "Server")
 }
 func getServerNameCamelCase(serviceName string) string {
@@ -121,7 +121,7 @@ func generateServerGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 	}
 
 	args := ServerArgs{
-		ServerNamePascalCase: getServerNamePascaleCase(svc.Name),
+		ServerNamePascalCase: getServerNamePascalCase(svc.Name),
 		ServerNameCamelCase:  getServerNameCamelCase(svc.Name),
 		ServiceIDVarName:     serviceIDVarName(svc.Name),
 		ServiceID:            serverID,

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/kbirk/scg/internal/util"
 )
 
@@ -13,6 +14,48 @@ type Parse struct {
 	Version  string
 	Files    map[string]*File
 	Packages map[string]*Package
+}
+
+func (p *Parse) ToStringPretty() string {
+	black := color.New(color.FgBlack, color.Bold).SprintFunc()
+	green := color.New(color.FgGreen, color.Bold).SprintFunc()
+	blue := color.New(color.FgBlue, color.Bold).SprintFunc()
+	yellow := color.New(color.FgYellow, color.Bold).SprintFunc()
+	cyan := color.New(color.FgCyan, color.Bold).SprintFunc()
+	magenta := color.New(color.FgMagenta, color.Bold).SprintFunc()
+	white := color.New(color.FgWhite, color.Bold).SprintFunc()
+
+	var sb strings.Builder
+
+	for _, pkg := range p.Packages {
+		sb.WriteString(fmt.Sprintf("%s: %s\n", magenta("[package]"), white(pkg.Name)))
+		for _, enum := range pkg.Enums {
+			sb.WriteString(fmt.Sprintf("    %s %s {\n", black("[enum]"), white(enum.Name)))
+			for _, value := range enum.Values {
+				sb.WriteString(fmt.Sprintf("        %s = %s\n", white(value.Name), white(value.Index)))
+			}
+			sb.WriteString("    }\n")
+		}
+		for _, typedef := range pkg.Typedefs {
+			sb.WriteString(fmt.Sprintf("    %s %s = %s\n", green("[typedef]"), white(typedef.Name), cyan(typedef.DataTypeDefinition.ToString())))
+		}
+		for _, msg := range pkg.MessageDefinitions {
+			sb.WriteString(fmt.Sprintf("    %s %s {\n", blue("[message]"), white(msg.Name)))
+			for _, field := range msg.FieldsByIndex() {
+				sb.WriteString(fmt.Sprintf("        %s %s = %s\n", cyan(field.DataTypeDefinition.ToString()), white(field.Name), white(field.Index)))
+			}
+			sb.WriteString("    }\n")
+		}
+		for _, svc := range pkg.ServiceDefinitions {
+			sb.WriteString(fmt.Sprintf("    %s %s {\n", yellow("[service]"), white(svc.Name)))
+			for _, method := range svc.Methods {
+				sb.WriteString(fmt.Sprintf("        %s (%s) %s\n", white(method.Name), cyan(method.Argument.CustomType), cyan(method.Return.CustomType)))
+			}
+			sb.WriteString("    }\n")
+		}
+	}
+
+	return sb.String()
 }
 
 type PackageDependency struct {
@@ -24,6 +67,7 @@ type Package struct {
 	Name                   string
 	Declaration            *PackageDeclaration
 	PackageDependencies    map[string]*PackageDependency
+	Enums                  map[string]*EnumDefinition
 	Typedefs               map[string]*TypedefDeclaration
 	ServiceDefinitions     map[string]*ServiceDefinition
 	MessageDefinitions     map[string]*MessageDefinition
@@ -212,9 +256,10 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 				Name:                f.Package.Name,
 				Declaration:         f.Package,
 				PackageDependencies: map[string]*PackageDependency{},
+				Enums:               map[string]*EnumDefinition{},
 				Typedefs:            map[string]*TypedefDeclaration{},
-				ServiceDefinitions:  map[string]*ServiceDefinition{},
 				MessageDefinitions:  map[string]*MessageDefinition{},
+				ServiceDefinitions:  map[string]*ServiceDefinition{},
 			}
 		}
 		// append definitions from the file to the package
@@ -227,6 +272,18 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 				PackageName: v.CustomTypePackage,
 				Token:       v.Token,
 			}
+		}
+		for k, v := range f.Enums {
+			_, ok := parse.Packages[f.Package.Name].Enums[k]
+			if ok {
+				return nil, &ParsingError{
+					Message:  fmt.Sprintf("typedef %s defined multiple times", k),
+					Token:    v.Token,
+					Filename: f.Name,
+					Content:  f.Content,
+				}
+			}
+			parse.Packages[f.Package.Name].Enums[k] = v
 		}
 		for k, v := range f.Typedefs {
 			_, ok := parse.Packages[f.Package.Name].Typedefs[k]

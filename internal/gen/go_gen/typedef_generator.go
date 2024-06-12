@@ -18,8 +18,8 @@ type TypedefArgs struct {
 const typedefTemplateStr = `
 type {{.TypedefNamePascalCase}} {{.TypedefUnderlyingType}}
 
-func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) CalcByteSize() int {
-	return serialize.CalcByteSize{{.TypedefUnderlyingTypePascalCase}}(*(*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}))
+func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) ByteSize() int {
+	return serialize.ByteSize{{.TypedefUnderlyingTypePascalCase}}(*(*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}))
 }
 
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Serialize(writer *serialize.FixedSizeWriter) {
@@ -37,12 +37,12 @@ var (
 
 func generateTypedefGoCode(typdef *parse.TypedefDeclaration) (string, error) {
 
-	typeName, err := mapComparableTypeToGoType(typdef.DataTypeDefinition)
+	typeName, err := mapDataTypeComparableDefinitionToGoType(typdef.DataTypeDefinition)
 	if err != nil {
 		return "", err
 	}
 
-	typeNamePascaleCase, err := getComparableDataTypeName(typdef.DataTypeDefinition)
+	typeNamePascalCase, err := getDataTypeComparableDefinitionMethodSuffix(typdef.DataTypeDefinition)
 	if err != nil {
 		return "", err
 	}
@@ -51,7 +51,7 @@ func generateTypedefGoCode(typdef *parse.TypedefDeclaration) (string, error) {
 		TypedefNamePascalCase:           util.EnsurePascalCase(typdef.Name),
 		TypedefNameNameFirstLetter:      util.FirstLetterAsLowercase(typdef.Name),
 		TypedefUnderlyingType:           typeName,
-		TypedefUnderlyingTypePascalCase: typeNamePascaleCase,
+		TypedefUnderlyingTypePascalCase: typeNamePascalCase,
 	}
 
 	buf := &bytes.Buffer{}

@@ -43,7 +43,7 @@ struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 	inline std::vector<uint8_t> toBytes() const
 	{
 		uint32_t size = 0;{{- range .MessageFields}}
-		size += scg::serialize::calc_byte_size({{.FieldNameCamelCase}});{{end}}
+		size += scg::serialize::byte_size({{.FieldNameCamelCase}});{{end}}
 
 		scg::serialize::FixedSizeWriter writer(size); {{- range .MessageFields}}
 		scg::serialize::serialize(writer, {{.FieldNameCamelCase}});{{end}}
@@ -81,7 +81,7 @@ struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 	inline uint32_t byteSize() const
 	{
 		uint32_t size = 0;{{- range .MessageFields}}
-		size += scg::serialize::calc_byte_size({{.FieldNameCamelCase}});{{end}}
+		size += scg::serialize::byte_size({{.FieldNameCamelCase}});{{end}}
 		return size;
 	}
 
@@ -101,8 +101,8 @@ func convertPackageNameToCppNamespacePrefix(name string) string {
 	return strings.Join(convertPackageNameToCppNamespaces(name), "::")
 }
 
-func mapComparableTypeToCppType(dataType *parse.DataTypeComparableDefinition) (string, error) {
-	switch dataType.Type {
+func mapDataTypeComparableToCppType(dataType parse.DataTypeComparable) (string, error) {
+	switch dataType {
 	case parse.DataTypeComparableUInt8:
 		return "uint8_t", nil
 	case parse.DataTypeComparableUInt16:
@@ -125,18 +125,24 @@ func mapComparableTypeToCppType(dataType *parse.DataTypeComparableDefinition) (s
 		return "float32_t", nil
 	case parse.DataTypeComparableFloat64:
 		return "float64_t", nil
+	}
+	return "", fmt.Errorf("unrecognized type: %v", dataType)
+}
+
+func mapDataTypeComparableDefinitionToCppType(dataType *parse.DataTypeComparableDefinition) (string, error) {
+	switch dataType.Type {
 	case parse.DataTypeComparableCustom:
 		if dataType.ImportedFromOtherPackage {
 			return fmt.Sprintf("%s::%s", convertPackageNameToCppNamespacePrefix(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
 		}
 		return util.EnsurePascalCase(dataType.CustomType), nil
 	}
-	return "", fmt.Errorf("unrecognized type: %v", dataType)
+	return mapDataTypeComparableToCppType(dataType.Type)
 }
 
-func mapTypeToCppType(dataType *parse.DataTypeDefinition) (string, error) {
+func mapDataTypeToCppType(dataType parse.DataType) (string, error) {
 
-	switch dataType.Type {
+	switch dataType {
 	case parse.DataTypeByte:
 		return "uint8_t", nil
 	case parse.DataTypeBool:
@@ -159,23 +165,33 @@ func mapTypeToCppType(dataType *parse.DataTypeDefinition) (string, error) {
 		return "int64_t", nil
 	case parse.DataTypeString:
 		return "std::string", nil
+	case parse.DataTypeTimestamp:
+		return "scg::timestamp", nil
 	case parse.DataTypeFloat32:
 		return "float32_t", nil
 	case parse.DataTypeFloat64:
 		return "float64_t", nil
+	}
+
+	return "", fmt.Errorf("unrecognized type: %v", dataType)
+}
+
+func mapDataTypeDefinitionToCppType(dataType *parse.DataTypeDefinition) (string, error) {
+
+	switch dataType.Type {
 	case parse.DataTypeMap:
-		key, err := mapComparableTypeToCppType(dataType.Key)
+		key, err := mapDataTypeComparableDefinitionToCppType(dataType.Key)
 		if err != nil {
 			return "", err
 		}
-		subtype, err := mapTypeToCppType(dataType.SubType)
+		subtype, err := mapDataTypeDefinitionToCppType(dataType.SubType)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("std::map<%s, %s>", key, subtype), nil
 	case parse.DataTypeList:
 
-		subtype, err := mapTypeToCppType(dataType.SubType)
+		subtype, err := mapDataTypeDefinitionToCppType(dataType.SubType)
 		if err != nil {
 			return "", err
 		}
@@ -187,11 +203,11 @@ func mapTypeToCppType(dataType *parse.DataTypeDefinition) (string, error) {
 		return util.EnsurePascalCase(dataType.CustomType), nil
 	}
 
-	return "", fmt.Errorf("unrecognized type: %v", dataType.Type)
+	return mapDataTypeToCppType(dataType.Type)
 }
 
 func getMessageFieldArg(field *parse.MessageFieldDefinition) (MessageFieldArgs, error) {
-	goType, err := mapTypeToCppType(field.DataTypeDefinition)
+	goType, err := mapDataTypeDefinitionToCppType(field.DataTypeDefinition)
 	if err != nil {
 		return MessageFieldArgs{}, err
 	}

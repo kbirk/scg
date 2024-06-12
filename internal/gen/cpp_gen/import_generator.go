@@ -44,25 +44,25 @@ func getOutputFileName(path string) string {
 	return util.EnsureSnakeCase(filename) + ".h"
 }
 
-func generateImportsCppCode(deps []parse.FileDependency, hasServices bool, hasMessages bool, hasTypedefs bool) (string, error) {
+func generateImportsCppCode(file *parse.File) (string, error) {
 
 	args := IncludeArgs{}
 
-	if hasTypedefs {
+	if len(file.Typedefs) > 0 {
 		args.LibIncludes = append(args.LibIncludes, typedefIncludes...)
 	}
 
-	if hasMessages {
+	if len(file.MessageDefinitions) > 0 {
 		args.LibIncludes = append(args.LibIncludes, messageIncludes...)
 	}
 
-	if hasServices {
+	if len(file.ServiceDefinitions) > 0 {
 		args.LibIncludes = append(args.LibIncludes, serviceIncludes...)
 	}
 
 	args.LibIncludes = util.RemoveDuplicates(args.LibIncludes)
 
-	for _, dep := range deps {
+	for _, dep := range file.GetFileDependencies() {
 		args.SrcIncludes = append(args.SrcIncludes, getOutputFileName(dep.File.Name))
 	}
 

@@ -144,7 +144,7 @@ public:
 
 	uint32_t byteSize() const
 	{
-		return scg::serialize::calc_byte_size(value_);
+		return scg::serialize::byte_size(value_);
 	}
 
 	void serialize(scg::serialize::FixedSizeWriter& writer) const

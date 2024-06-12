@@ -26,7 +26,7 @@ const (
 )
 
 type Message interface {
-	CalcByteSize() int
+	ByteSize() int
 	ToJSON() ([]byte, error)
 	FromJSON([]byte) error
 	ToBytes() []byte

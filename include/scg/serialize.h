@@ -5,9 +5,11 @@
 #include <string>
 #include <vector>
 #include <cassert>
+#include <type_traits>
 
 #include "scg/pack.h"
 #include "scg/error.h"
+#include "scg/timestamp.h"
 
 namespace scg {
 namespace serialize {
@@ -96,7 +98,7 @@ private:
 	size_t pos_ = 0;
 };
 
-constexpr uint32_t calc_byte_size(uint8_t)
+constexpr uint32_t byte_size(uint8_t)
 {
 	return 1;
 }
@@ -117,7 +119,7 @@ inline error::Error deserialize(uint8_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(uint16_t)
+constexpr uint32_t byte_size(uint16_t)
 {
 	return 2;
 }
@@ -142,7 +144,7 @@ inline error::Error deserialize(uint16_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(uint32_t)
+constexpr uint32_t byte_size(uint32_t)
 {
 	return 4;
 }
@@ -171,7 +173,7 @@ inline error::Error deserialize(uint32_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(uint64_t)
+constexpr uint32_t byte_size(uint64_t)
 {
 	return 8;
 }
@@ -208,7 +210,7 @@ inline error::Error deserialize(uint64_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(int8_t)
+constexpr uint32_t byte_size(int8_t)
 {
 	return 1;
 }
@@ -234,7 +236,7 @@ inline error::Error deserialize(int8_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(int16_t)
+constexpr uint32_t byte_size(int16_t)
 {
 	return 2;
 }
@@ -260,7 +262,7 @@ inline error::Error deserialize(int16_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(int32_t)
+constexpr uint32_t byte_size(int32_t)
 {
 	return 4;
 }
@@ -286,7 +288,7 @@ inline error::Error deserialize(int32_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(int64_t)
+constexpr uint32_t byte_size(int64_t)
 {
 	return 8;
 }
@@ -312,7 +314,7 @@ inline error::Error deserialize(int64_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(float32_t)
+constexpr uint32_t byte_size(float32_t)
 {
 	return 4;
 }
@@ -334,7 +336,7 @@ inline error::Error deserialize(float32_t& value, Reader& reader)
 	return nullptr;
 }
 
-constexpr uint32_t calc_byte_size(float64_t)
+constexpr uint32_t byte_size(float64_t)
 {
 	return 8;
 }
@@ -355,7 +357,7 @@ inline error::Error deserialize(float64_t& value, Reader& reader)
 	return nullptr;
 }
 
-inline uint32_t calc_byte_size(std::string value)
+inline uint32_t byte_size(std::string value)
 {
 	return 4 + value.size();
 }
@@ -378,12 +380,45 @@ inline error::Error deserialize(std::string& value, Reader& reader)
 	return reader.read((uint8_t*)value.data(), len);
 }
 
+inline uint32_t byte_size(timestamp value)
+{
+	return 16;
+}
+
+inline void serialize(FixedSizeWriter& writer, timestamp value)
+{
+	auto duration_since_epoch = value.time_since_epoch();
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration_since_epoch);
+	auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch - seconds);
+
+	serialize(writer, uint64_t(seconds.count()));
+	serialize(writer, uint64_t(nanoseconds.count()));
+}
+
+inline error::Error deserialize(timestamp& value, Reader& reader)
+{
+	uint64_t seconds = 0;
+	uint64_t nanoseconds = 0;
+
+	auto err = deserialize(seconds, reader);
+	if (err) {
+		return err;
+	}
+	err = deserialize(nanoseconds, reader);
+	if (err) {
+		return err;
+	}
+
+	value = timestamp(std::chrono::seconds(seconds) + std::chrono::nanoseconds(nanoseconds));
+	return nullptr;
+}
+
 template <typename T>
-inline uint32_t calc_byte_size(const std::vector<T>& value)
+inline uint32_t byte_size(const std::vector<T>& value)
 {
 	uint32_t size = 4;
 	for (const auto& item : value) {
-		size += calc_byte_size(item);
+		size += byte_size(item);
 	}
 	return size;
 }
@@ -436,7 +471,7 @@ inline error::Error deserialize(std::vector<uint8_t>& value, Reader& reader)
 }
 
 template <>
-inline uint32_t calc_byte_size(const std::vector<uint8_t>& value)
+inline uint32_t byte_size(const std::vector<uint8_t>& value)
 {
 	return 4 + value.size();
 }
@@ -477,18 +512,44 @@ inline error::Error deserialize(std::map<K,V>& value, Reader& reader)
 }
 
 template <typename K, typename V>
-inline uint32_t calc_byte_size(const std::map<K,V>& value)
+inline uint32_t byte_size(const std::map<K,V>& value)
 {
 	uint32_t size = 4;
 	for (const auto& [k, v] : value) {
-		size += calc_byte_size(k) + calc_byte_size(v);
+		size += byte_size(k) + byte_size(v);
 	}
 	return size;
 }
 
+template <typename T,
+	std::enable_if_t<std::is_enum<T>::value, int> = 0>
+constexpr uint32_t byte_size(const T& t)
+{
+	return 2;
+}
+
+template <typename T,
+	std::enable_if_t<std::is_enum<T>::value, int> = 0>
+inline void serialize(FixedSizeWriter& writer, const T& value)
+{
+	serialize(writer, uint16_t(value));
+}
+
+template <typename T,
+	std::enable_if_t<std::is_enum<T>::value, int> = 0>
+inline error::Error deserialize(T& value, Reader& reader)
+{
+	uint16_t val = 0;
+	auto err = deserialize(val, reader);
+	if (err) {
+		return err;
+	}
+	value = T(val);
+	return nullptr;
+}
 
 template <typename T>
-constexpr uint32_t calc_byte_size(const T& t)
+constexpr uint32_t byte_size(const T& t)
 {
 	return t.byteSize();
 }
