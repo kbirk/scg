@@ -399,3 +399,133 @@ func TestServiceParsingFailures(t *testing.T) {
 	`)
 	assert.NotNil(t, err)
 }
+
+func TestMessageSortedByDependenciesThenKeys(t *testing.T) {
+
+	file, err := parseFileContent(path, relativeDir, `
+		package test;
+
+		message M10 {
+			M11 m11 = 0;
+			M3 m3 = 1;
+		}
+
+		message M7 {
+			int64 val = 0;
+		}
+
+		message M2 {
+			other.TypeName other = 0;
+			M11 m11 = 1;
+		}
+
+		message Z3 {
+			string val = 0;
+		}
+
+		message M9 {
+			M11 m11 = 0;
+			M8 m8 = 1;
+		}
+
+		message M11 {
+			M5 m5 = 0;
+			M7 m7 = 1;
+		}
+
+		message Z2 {
+			string val = 0;
+		}
+
+		message M8 {
+			M7 m7 = 0;
+			M3 m3 = 1;
+		}
+
+		message M5 {
+			external.Something something = 0;
+			uint32 val = 1;
+		}
+
+		message M3 {
+			string val = 0;
+		}
+
+		message Z1 {
+			string val = 0;
+			another.Something something = 1;
+		}
+
+	`)
+	require.Nil(t, err)
+
+	messages := file.MessagesSortedByDependenciesAndKeys()
+
+	for _, message := range messages {
+		t.Logf("Message: %s", message.Name)
+	}
+
+	assert.Equal(t, 11, len(messages))
+	assert.Equal(t, "Z3", messages[0].Name)
+	assert.Equal(t, "Z2", messages[1].Name)
+	assert.Equal(t, "Z1", messages[2].Name)
+	assert.Equal(t, "M7", messages[3].Name)
+	assert.Equal(t, "M5", messages[4].Name)
+	assert.Equal(t, "M11", messages[5].Name)
+	assert.Equal(t, "M2", messages[6].Name)
+	assert.Equal(t, "M3", messages[7].Name)
+	assert.Equal(t, "M8", messages[8].Name)
+	assert.Equal(t, "M9", messages[9].Name)
+	assert.Equal(t, "M10", messages[10].Name)
+
+}
+
+func TestMessageSortedByDependenciesThenKeysDuplicates(t *testing.T) {
+
+	file, err := parseFileContent(path, relativeDir, `
+		package test;
+
+		enum EnumA {
+			VAL1 = 0;
+		}
+
+		typedef TypeA = string;
+
+		message A {
+
+		}
+
+		message B {
+			A a = 0;
+			list<A> aList = 1;
+			map<string, A> aMap = 2;
+			EnumA aEnum = 3;
+		}
+
+		message C {
+			B b = 0;
+			list<B> bList = 1;
+			map<TypeA, B> bMap = 2;
+			EnumA aEnum = 3;
+		}
+
+		message D {
+			A a = 0;
+			B b = 1;
+			C c = 2;
+			EnumA aEnum = 3;
+			TypeA aType = 4;
+		}
+
+	`)
+	require.Nil(t, err)
+
+	messages := file.MessagesSortedByDependenciesAndKeys()
+
+	assert.Equal(t, 4, len(messages))
+	assert.Equal(t, "A", messages[0].Name)
+	assert.Equal(t, "B", messages[1].Name)
+	assert.Equal(t, "C", messages[2].Name)
+	assert.Equal(t, "D", messages[3].Name)
+
+}

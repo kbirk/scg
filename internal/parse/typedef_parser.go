@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	typedefRegex = regexp.MustCompile(`typedef\s+([a-zA-Z][a-zA-Z_0-9]*)\s*=\s*(uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)\s*;$`)
+	typedefRegex = regexp.MustCompile(`typedef\s+([a-zA-Z][a-zA-Z_0-9]*)\s*=\s*(uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string|uuid)\s*;$`)
 )
 
 type TypedefDeclaration struct {

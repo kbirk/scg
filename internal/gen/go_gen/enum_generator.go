@@ -47,15 +47,11 @@ var (
 )
 
 func generateEnumGoCode(enum *parse.EnumDefinition) (string, error) {
-
-	dataType := parse.DataTypeUInt8
-	if len(enum.Values) >= 256 {
-		if len(enum.Values) >= 65536 {
-			return "", fmt.Errorf("enum %s has too many values", enum.Name)
-		} else {
-			dataType = parse.DataTypeUInt16
-		}
+	if len(enum.Values) >= 65536 {
+		return "", fmt.Errorf("enum %s has too many values", enum.Name)
 	}
+
+	dataType := parse.DataTypeUInt16
 
 	typeName, err := mapDataTypeToGoType(dataType)
 	if err != nil {

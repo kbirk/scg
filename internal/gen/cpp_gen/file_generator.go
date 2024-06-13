@@ -12,6 +12,7 @@ type FileArgs struct {
 	Header     string
 	Namespaces []string
 	Imports    string
+	Enums      string
 	Typedefs   string
 	Messages   string
 	// Servers  string
@@ -22,6 +23,7 @@ const fileTemplateStr = `
 {{.Header}}
 {{.Imports}}{{ range .Namespaces }}
 namespace {{.}} { {{end}}
+{{.Enums}}
 {{.Typedefs}}
 {{.Messages}}
 {{.Clients}}{{ range .Namespaces }}
@@ -65,7 +67,7 @@ func generateFileCppCode(pkg *parse.Package, file *parse.File) (string, error) {
 	}
 
 	var messageCode []string
-	for _, msg := range file.MessagesSortedByKey() {
+	for _, msg := range file.MessagesSortedByDependenciesAndKeys() {
 		message, err := generateMessageCppCode(msg)
 		if err != nil {
 			return "", err
@@ -95,6 +97,7 @@ func generateFileCppCode(pkg *parse.Package, file *parse.File) (string, error) {
 		Header:     headerCode,
 		Namespaces: namespaces,
 		Imports:    importCode,
+		Enums:      strings.Join(enumCode, "\n"),
 		Typedefs:   strings.Join(typedefCode, "\n"),
 		Messages:   strings.Join(messageCode, "\n"),
 		// Servers:    strings.Join(serverCode, "\n"),

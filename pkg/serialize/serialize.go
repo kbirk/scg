@@ -3,7 +3,27 @@ package serialize
 import (
 	"time"
 	"unsafe"
+
+	"github.com/google/uuid"
 )
+
+func ByteSizeUUID(data uuid.UUID) int {
+	return 16
+}
+
+func SerializeUUID(writer *FixedSizeWriter, data uuid.UUID) {
+	bs := writer.Next(16)
+	src, _ := data.MarshalBinary() // does not return an error
+	copy(bs, src)
+}
+
+func DeserializeUUID(data *uuid.UUID, reader *Reader) error {
+	bs, err := reader.Read(16)
+	if err != nil {
+		return err
+	}
+	return data.UnmarshalBinary(bs)
+}
 
 func ByteSizeTime(data time.Time) int {
 	return 16

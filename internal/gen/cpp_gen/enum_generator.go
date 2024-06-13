@@ -3,6 +3,7 @@ package cpp_gen
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"text/template"
 
 	"github.com/kbirk/scg/internal/parse"
@@ -10,8 +11,8 @@ import (
 )
 
 type EnumValueArgs struct {
-	ValueNamePascalCase string
-	Index               int
+	ValueNameUpperCase string
+	Index              int
 }
 
 type EnumArgs struct {
@@ -21,7 +22,7 @@ type EnumArgs struct {
 
 const enumTemplateStr = `
 enum class {{.EnumNamePascalCase}} { {{- range .EnumValueArgs}}
-	{{.ValueNamePascalCase}} = {{.Index}},{{end}}
+	{{.ValueNameUpperCase}} = {{.Index}},{{end}}
 };
 `
 
@@ -38,8 +39,8 @@ func generateEnumCppCode(enum *parse.EnumDefinition) (string, error) {
 	var enumValueArgs []EnumValueArgs
 	for i, v := range enum.ValuesByIndex() {
 		enumValueArgs = append(enumValueArgs, EnumValueArgs{
-			ValueNamePascalCase: util.EnsurePascalCase(v.Name),
-			Index:               i,
+			ValueNameUpperCase: strings.ToUpper(v.Name),
+			Index:              i,
 		})
 	}
 

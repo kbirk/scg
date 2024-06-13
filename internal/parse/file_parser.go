@@ -116,6 +116,113 @@ func (f *File) MessagesSortedByKey() []*MessageDefinition {
 	return values
 }
 
+func (f *File) MessagesSortedByDependenciesAndKeys() []*MessageDefinition {
+
+	// build edges of the dependency graph
+	//
+	// edge from A -> B means that A is a dependency of B, you require A to have B
+
+	outgoingEdges := map[string][]string{}
+	incomingEdges := map[string][]string{}
+	for k := range f.MessageDefinitions {
+		outgoingEdges[k] = []string{}
+		incomingEdges[k] = []string{}
+	}
+
+	for _, msg := range f.MessagesSortedByKey() {
+		for _, field := range msg.FieldsByIndex() {
+			elem := field.DataTypeDefinition.GetElementType()
+			if elem.Type == DataTypeCustom {
+
+				_, ok := f.MessageDefinitions[elem.CustomType]
+				if !ok {
+					// custom type dependency is not defined in this file
+					continue
+				}
+
+				// add incoming edge
+				incomingEdges[msg.Name] = append(incomingEdges[msg.Name], elem.CustomType)
+
+				// add outgoing edge
+				outgoingEdges[elem.CustomType] = append(outgoingEdges[elem.CustomType], msg.Name)
+			}
+		}
+	}
+
+	// kahn's algorithm to sort them
+
+	stack := []string{}
+	sorted := []string{}
+
+	// add nodes with no incoming edges
+	for k, edge := range incomingEdges {
+		if len(edge) == 0 {
+			stack = append(stack, k)
+		}
+	}
+
+	// sort for deterministic output
+	sort.Slice(stack, func(i, j int) bool { return stack[i] < stack[j] })
+
+	for len(stack) > 0 {
+		// pop a node
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		// add to sorted list
+		sorted = append(sorted, n)
+
+		outgoingEdgesForN, ok := outgoingEdges[n]
+		if !ok {
+			panic("missing edge")
+		}
+
+		// for each node m with an incoming edge from n
+		for _, m := range outgoingEdgesForN {
+			// remove edge n -> m
+			incomingEdgesForM, ok := incomingEdges[m]
+			if !ok {
+				panic("missing edge")
+			}
+
+			// remove n from incoming edges of m
+			indexToRemove := -1
+			for i, v := range incomingEdgesForM {
+				if v == n {
+					indexToRemove = i
+					break
+				}
+			}
+			if indexToRemove == -1 {
+				panic("missing edge")
+			}
+			incomingEdgesForM = append(incomingEdgesForM[:indexToRemove], incomingEdgesForM[indexToRemove+1:]...)
+
+			// if m has no other incoming edges then insert m into S
+			if len(incomingEdgesForM) == 0 {
+				delete(incomingEdges, m)
+				stack = append(stack, m)
+			} else {
+				incomingEdges[m] = incomingEdgesForM
+			}
+		}
+
+		delete(outgoingEdges, n)
+		delete(incomingEdges, n)
+	}
+
+	if len(outgoingEdges) > 0 || len(incomingEdges) > 0 {
+		panic("circular dependency detected")
+	}
+
+	values := make([]*MessageDefinition, 0, len(f.MessageDefinitions))
+	for _, k := range sorted {
+		values = append(values, f.MessageDefinitions[k])
+	}
+	return values
+
+}
+
 func (f *File) ServicesSortedByKey() []*ServiceDefinition {
 	keys := make([]string, 0, len(f.ServiceDefinitions))
 	for k := range f.ServiceDefinitions {
@@ -286,18 +393,15 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 	dependencies := make(map[string]*CustomTypeDependency)
 
 	for _, enum := range enums {
-		// set the file
 		enum.File = f
 	}
 
 	for _, typdef := range typedefs {
-		// set the file
 		typdef.File = f
 	}
 
 	for _, msg := range messageDefinitions {
 
-		// set the file
 		msg.File = f
 
 		for _, field := range msg.Fields {
@@ -322,7 +426,6 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 	// if package is omitted, use the file's package name
 	for _, svc := range serviceDefinitions {
 
-		// set the file
 		svc.File = f
 
 		for _, method := range svc.Methods {

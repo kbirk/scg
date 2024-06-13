@@ -121,6 +121,8 @@ func mapDataTypeComparableToCppType(dataType parse.DataTypeComparable) (string, 
 		return "int64_t", nil
 	case parse.DataTypeComparableString:
 		return "std::string", nil
+	case parse.DataTypeComparableUUID:
+		return "scg::uuid", nil
 	case parse.DataTypeComparableFloat32:
 		return "float32_t", nil
 	case parse.DataTypeComparableFloat64:
@@ -167,6 +169,8 @@ func mapDataTypeToCppType(dataType parse.DataType) (string, error) {
 		return "std::string", nil
 	case parse.DataTypeTimestamp:
 		return "scg::timestamp", nil
+	case parse.DataTypeUUID:
+		return "scg::uuid", nil
 	case parse.DataTypeFloat32:
 		return "float32_t", nil
 	case parse.DataTypeFloat64:

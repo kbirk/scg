@@ -12,8 +12,8 @@ var (
 	messageRegex                 = regexp.MustCompile(`(?s)message\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
 	fieldRegex                   = regexp.MustCompile(`^((?:list\s*\<\s*(?:.*)\s*\>)|(?:map\s*\<\s*(?:.*)\s*\>)|(?:.+?))\s+(.+?)\s*=\s*(.+?)\s*;*$`)
 	fieldNameRegex               = regexp.MustCompile(`^[a-zA-Z][a-zA-Z_0-9]*$`)
-	plainDataTypeRegex           = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string|timestamp)$`)
-	plainDataTypeComparableRegex = regexp.MustCompile(`^(uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string)$`)
+	plainDataTypeRegex           = regexp.MustCompile(`^(byte|bool|uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string|timestamp|uuid)$`)
+	plainDataTypeComparableRegex = regexp.MustCompile(`^(uint8|uint16|uint32|uint64|int8|int16|int32|int64|float32|float64|string|uuid)$`)
 	customDataTypeRegex          = regexp.MustCompile(`^((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)$`)
 	mapDataTypeRegex             = regexp.MustCompile(`^map\s*\<\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*,\s*(.+?)\s*\>$`)
 	listDataTypeRegex            = regexp.MustCompile(`^list\s*\<\s*(.+)\s*\>$`)
@@ -38,6 +38,7 @@ const (
 	DataTypeFloat64
 	DataTypeString
 	DataTypeTimestamp
+	DataTypeUUID
 	DataTypeMap
 	DataTypeList
 	DataTypeCustom
@@ -55,6 +56,7 @@ const (
 	DataTypeComparableFloat32
 	DataTypeComparableFloat64
 	DataTypeComparableString
+	DataTypeComparableUUID
 	DataTypeComparableCustom
 )
 
@@ -83,6 +85,16 @@ type DataTypeDefinition struct {
 	SubType                  *DataTypeDefinition
 	ImportedFromOtherPackage bool
 	Token                    *Token
+}
+
+func (dt *DataTypeDefinition) GetElementType() *DataTypeDefinition {
+	if dt.Type == DataTypeList || dt.Type == DataTypeMap {
+		if dt.SubType == nil {
+			panic("list / map subtype not found")
+		}
+		return dt.SubType.GetElementType()
+	}
+	return dt
 }
 
 func mapTypeEnumToString(typ DataType) string {
@@ -115,6 +127,8 @@ func mapTypeEnumToString(typ DataType) string {
 		return "string"
 	case DataTypeTimestamp:
 		return "timestamp"
+	case DataTypeUUID:
+		return "uuid"
 	}
 	panic("invalid data type")
 }
@@ -143,7 +157,8 @@ func mapComparableTypeEnumToString(typ DataTypeComparable) string {
 		return "float64"
 	case DataTypeComparableString:
 		return "string"
-
+	case DataTypeComparableUUID:
+		return "uuid"
 	}
 	panic("invalid data type")
 }
@@ -216,6 +231,8 @@ func mapPlainDataTypeStringToEnum(typ string) (DataType, error) {
 		return DataTypeString, nil
 	case "timestamp":
 		return DataTypeTimestamp, nil
+	case "uuid":
+		return DataTypeUUID, nil
 	}
 	return 0, fmt.Errorf("invalid data type %s", typ)
 }
@@ -244,6 +261,8 @@ func mapPlainDataTypeComparableStringToEnum(typ string) (DataTypeComparable, err
 		return DataTypeComparableFloat64, nil
 	case "string":
 		return DataTypeComparableString, nil
+	case "uuid":
+		return DataTypeComparableUUID, nil
 	}
 
 	return 0, fmt.Errorf("invalid comparable data type %s", typ)

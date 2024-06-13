@@ -24,7 +24,7 @@ func (b *Reader) Read(n int) ([]byte, error) {
 	}
 
 	if b.pos+n > len(b.bytes) {
-		return nil, fmt.Errorf("not enough data")
+		return nil, fmt.Errorf("not enough data, attempting to read %d bytes but only %d remain in buffer", n, len(b.bytes)-b.pos)
 	}
 	data := b.bytes[b.pos : b.pos+n]
 	b.pos += n

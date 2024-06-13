@@ -6,12 +6,12 @@ service PingPong {
 
 message Ping {
 	int32 count = 0;
-	timestamp timestamp = 1;
+	TestPayload payload = 1;
 }
 
 message Pong {
 	int32 count = 0;
-	timestamp timestamp = 1;
+	TestPayload payload = 1;
 }
 
 message PingRequest {
@@ -20,4 +20,38 @@ message PingRequest {
 
 message PongResponse {
 	Pong pong = 0;
+}
+
+message NestedPayload {
+	string val_string = 0;
+	float64 val_double = 1;
+}
+
+typedef KeyType = string;
+
+enum EnumType {
+	ENUM_TYPE_1 = 0;
+	ENUM_TYPE_2 = 1;
+	ENUM_TYPE_3 = 2;
+}
+
+message TestPayload {
+	uint8 val_uint8 = 0;
+	uint16 val_uint16 = 1;
+	uint32 val_uint32 = 2;
+	uint64 val_uint64 = 3;
+	int8 val_int8 = 4;
+	int16 val_int16 = 5;
+	int32 val_int32 = 6;
+	int64 val_int64 = 7;
+	float32 val_float = 8;
+	float64 val_double = 9;
+	bool val_bool = 10;
+	byte val_byte = 11;
+	string val_string = 12;
+	timestamp val_timestamp = 13;
+	uuid val_uuid = 14;
+	EnumType val_enum = 15;
+	list<NestedPayload> val_list_payload = 16;
+	map<KeyType, EnumType> val_map_key_enum = 17;
 }

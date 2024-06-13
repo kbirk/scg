@@ -8,27 +8,21 @@ import (
 
 var (
 	snakeCaseRegex = regexp.MustCompile(`([A-Z])`)
-	splitRegex     = regexp.MustCompile(`([A-Z][a-z0-9]*|[a-z0-9]+)`)
+	splitRegex     = regexp.MustCompile(`([A-Z]+[a-z0-9]*|[a-z0-9]+)`)
 )
 
 func splitNameIntoParts(name string) []string {
 	// Split the string into words
 	matches := splitRegex.FindAllStringSubmatch(name, -1)
-
-	// Extract the matched strings from the matches
 	words := make([]string, len(matches))
 	for i, match := range matches {
 		words[i] = match[0]
 	}
-
 	return words
 }
 
 func EnsurePascalCase(s string) string {
-
 	words := splitNameIntoParts(s)
-
-	// Capitalize the first letter of each word
 	for i, word := range words {
 		if len(word) > 0 {
 			word = strings.ToLower(word)
@@ -41,51 +35,34 @@ func EnsurePascalCase(s string) string {
 			words[i] = string(runes)
 		}
 	}
-
-	// Join the words together without spaces
 	return strings.Join(words, "")
 }
 
 func EnsureCamelCase(s string) string {
-
-	fields := splitNameIntoParts(s)
-
-	// Capitalize the first letter of each word and leave the rest of the word as it is
-	for i := range fields {
-		if len(fields[i]) > 0 {
-			fields[i] = strings.ToLower(fields[i])
+	words := splitNameIntoParts(s)
+	for i := range words {
+		if len(words[i]) > 0 {
+			words[i] = strings.ToLower(words[i])
 			if i == 0 {
-				fields[i] = string(unicode.ToLower(rune(fields[i][0]))) + fields[i][1:]
+				words[i] = string(unicode.ToLower(rune(words[i][0]))) + words[i][1:]
 			} else {
-				if fields[i] == "id" {
-					fields[i] = "ID"
+				if words[i] == "id" {
+					words[i] = "ID"
 					continue
 				}
-				fields[i] = string(unicode.ToUpper(rune(fields[i][0]))) + fields[i][1:]
+				words[i] = string(unicode.ToUpper(rune(words[i][0]))) + words[i][1:]
 			}
 		}
 	}
-	// Join the words together without spaces
-	return strings.Join(fields, "")
+	return strings.Join(words, "")
 }
 
 func EnsureSnakeCase(s string) string {
-	// Replace all uppercase letters with _lowercase
-	s = snakeCaseRegex.ReplaceAllString(s, "_${1}")
-
-	// Replace spaces and hyphens with underscores
-	s = strings.ReplaceAll(s, " ", "_")
-	s = strings.ReplaceAll(s, "-", "_")
-
-	// Convert to lowercase
-	s = strings.ToLower(s)
-
-	// If the string starts with an underscore, remove it
-	if strings.HasPrefix(s, "_") {
-		s = s[1:]
+	words := splitNameIntoParts(s)
+	for i, word := range words {
+		words[i] = strings.ToLower(word)
 	}
-
-	return s
+	return strings.Join(words, "_")
 }
 
 func FirstLetterAsLowercase(s string) string {

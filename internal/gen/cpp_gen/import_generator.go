@@ -23,9 +23,11 @@ const importTemplateStr = `
 var (
 	typedefIncludes = []string{
 		"scg/typedef.h",
+		"scg/uuid.h",
 	}
 	messageIncludes = []string{
 		"scg/serialize.h",
+		"scg/uuid.h",
 		"nlohmann/json.hpp",
 	}
 	serviceIncludes = []string{

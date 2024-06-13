@@ -98,6 +98,28 @@ private:
 	size_t pos_ = 0;
 };
 
+
+constexpr uint32_t byte_size(bool)
+{
+	return 1;
+}
+
+inline void serialize(FixedSizeWriter& writer, bool value)
+{
+	writer.write(value ? uint8_t(1) : uint8_t(0));
+}
+
+inline error::Error deserialize(bool& value, Reader& reader)
+{
+	std::array<uint8_t, 1> data;
+	auto err = reader.read(data);
+	if (err) {
+		return err;
+	}
+	value = data[0] == 1 ? true : false;
+	return nullptr;
+}
+
 constexpr uint32_t byte_size(uint8_t)
 {
 	return 1;
@@ -413,6 +435,54 @@ inline error::Error deserialize(timestamp& value, Reader& reader)
 	return nullptr;
 }
 
+template <typename T,
+	std::enable_if_t<std::is_enum<T>::value, int> = 0>
+constexpr uint32_t byte_size(const T& t)
+{
+	return 2;
+}
+
+template <typename T,
+	std::enable_if_t<std::is_enum<T>::value, int> = 0>
+inline void serialize(FixedSizeWriter& writer, const T& value)
+{
+	serialize(writer, uint16_t(value));
+}
+
+template <typename T,
+	std::enable_if_t<std::is_enum<T>::value, int> = 0>
+inline error::Error deserialize(T& value, Reader& reader)
+{
+	uint16_t val = 0;
+	auto err = deserialize(val, reader);
+	if (err) {
+		return err;
+	}
+	value = T(val);
+	return nullptr;
+}
+
+template <typename T,
+	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
+constexpr uint32_t byte_size(const T& t)
+{
+	return t.byteSize();
+}
+
+template <typename T,
+	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
+inline void serialize(FixedSizeWriter& writer, const T& value)
+{
+	value.serialize(writer);
+}
+
+template <typename T,
+	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
+inline error::Error deserialize(T& value, Reader& reader)
+{
+	return value.deserialize(reader);
+}
+
 template <typename T>
 inline uint32_t byte_size(const std::vector<T>& value)
 {
@@ -519,51 +589,6 @@ inline uint32_t byte_size(const std::map<K,V>& value)
 		size += byte_size(k) + byte_size(v);
 	}
 	return size;
-}
-
-template <typename T,
-	std::enable_if_t<std::is_enum<T>::value, int> = 0>
-constexpr uint32_t byte_size(const T& t)
-{
-	return 2;
-}
-
-template <typename T,
-	std::enable_if_t<std::is_enum<T>::value, int> = 0>
-inline void serialize(FixedSizeWriter& writer, const T& value)
-{
-	serialize(writer, uint16_t(value));
-}
-
-template <typename T,
-	std::enable_if_t<std::is_enum<T>::value, int> = 0>
-inline error::Error deserialize(T& value, Reader& reader)
-{
-	uint16_t val = 0;
-	auto err = deserialize(val, reader);
-	if (err) {
-		return err;
-	}
-	value = T(val);
-	return nullptr;
-}
-
-template <typename T>
-constexpr uint32_t byte_size(const T& t)
-{
-	return t.byteSize();
-}
-
-template <typename T>
-inline void serialize(FixedSizeWriter& writer, const T& value)
-{
-	value.serialize(writer);
-}
-
-template <typename T>
-inline error::Error deserialize(T& value, Reader& reader)
-{
-	return value.deserialize(reader);
 }
 
 }

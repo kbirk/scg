@@ -32,6 +32,9 @@ var (
 	timestampImportsSTD = []string{
 		"time",
 	}
+	uuidImports = []string{
+		"github.com/google/uuid",
+	}
 	messageImportsSCG = []string{
 		"github.com/kbirk/scg/pkg/serialize",
 	}
@@ -61,6 +64,21 @@ func hasTimestampType(dataType *parse.DataTypeDefinition) bool {
 	return dataType.Type == parse.DataTypeTimestamp
 }
 
+func hasUUIDType(dataType *parse.DataTypeDefinition) bool {
+	if dataType.Type == parse.DataTypeList {
+		return hasUUIDType(dataType.SubType)
+	}
+
+	if dataType.Type == parse.DataTypeMap {
+		if dataType.Key.Type == parse.DataTypeComparableUUID {
+			return true
+		}
+		return hasUUIDType(dataType.SubType)
+	}
+
+	return dataType.Type == parse.DataTypeUUID
+}
+
 func generateImportsGoCode(goBasePackage string, file *parse.File) (string, error) {
 
 	args := ImportArgs{}
@@ -74,6 +92,14 @@ func generateImportsGoCode(goBasePackage string, file *parse.File) (string, erro
 			for _, field := range msg.Fields {
 				if hasTimestampType(field.DataTypeDefinition) {
 					args.STDPackages = append(args.STDPackages, timestampImportsSTD...)
+				}
+			}
+		}
+		// check if uuid type
+		for _, msg := range file.MessageDefinitions {
+			for _, field := range msg.Fields {
+				if hasUUIDType(field.DataTypeDefinition) {
+					args.STDPackages = append(args.STDPackages, uuidImports...)
 				}
 			}
 		}

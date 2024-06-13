@@ -10,6 +10,8 @@ mkdir -p .build && cd .build && cmake ../test/test_cpp && make
 
 # run cpp tests
 ./serialize_tests
+./uuid_tests
+
 
 # ~~~~~~~~~~~~~~~~~~
 

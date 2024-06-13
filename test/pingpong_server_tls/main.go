@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/test/files/output/pingpong"
@@ -26,8 +25,8 @@ type pingpongServer struct {
 func (s *pingpongServer) Ping(ctx context.Context, req *pingpong.PingRequest) (*pingpong.PongResponse, error) {
 	return &pingpong.PongResponse{
 		Pong: pingpong.Pong{
-			Count:     req.Ping.Count + 1,
-			Timestamp: time.Now(),
+			Count:   req.Ping.Count + 1,
+			Payload: req.Ping.Payload,
 		},
 	}, nil
 }

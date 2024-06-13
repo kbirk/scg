@@ -149,12 +149,12 @@ public:
 
 	void serialize(scg::serialize::FixedSizeWriter& writer) const
 	{
-		serializer.serialize(writer, value_);
+		serialize::serialize(writer, value_);
 	}
 
-	void deserialize(scg::serialize::Reader& reader)
+	error::Error deserialize(scg::serialize::Reader& reader)
 	{
-		serializer.deserialize(writer, value_);
+		return serialize::deserialize(value_, reader);
 	}
 
 private:
@@ -181,7 +181,7 @@ strong_typedef<T, Tag> operator-(strong_typedef<T, Tag> lhs, const S& rhs)
 
 template <typename T, class Tag>
 struct std::hash<scg::type::strong_typedef<T, Tag>> {
-	std::size_t operator()(const strong_typedef<T, Tag>& t) const
+	std::size_t operator()(const scg::type::strong_typedef<T, Tag>& t) const
 	{
 		return std::hash<T>()(static_cast<T>(t));
 	}

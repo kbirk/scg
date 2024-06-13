@@ -33,6 +33,9 @@ include_directories(SYSTEM "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/includ
 # Serialization tests
 add_executable(serialize_tests "serialize_tests.cpp")
 
+# UUID tests
+add_executable(uuid_tests "uuid_tests.cpp")
+
 # Client without TLS tests
 add_executable(client_no_tls_tests "client_no_tls_tests.cpp")
 

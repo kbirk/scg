@@ -250,6 +250,8 @@ func mapDataTypeToGoType(dataType parse.DataType) (string, error) {
 		return "string", nil
 	case parse.DataTypeTimestamp:
 		return "time.Time", nil
+	case parse.DataTypeUUID:
+		return "uuid.UUID", nil
 	case parse.DataTypeFloat32:
 		return "float32", nil
 	case parse.DataTypeFloat64:
@@ -309,6 +311,8 @@ func mapDataTypeComparableToGoType(dataType parse.DataTypeComparable) (string, e
 		return "int64", nil
 	case parse.DataTypeComparableString:
 		return "string", nil
+	case parse.DataTypeComparableUUID:
+		return "uuid.UUID", nil
 	case parse.DataTypeComparableFloat32:
 		return "float32", nil
 	case parse.DataTypeComparableFloat64:
@@ -349,6 +353,7 @@ const (
 	byteSizeFloat64TemplateStr   = `serialize.ByteSizeFloat64({{.VariableName}})`
 	byteSizeStringTemplateStr    = `serialize.ByteSizeString({{.VariableName}})`
 	byteSizeTimestampTemplateStr = `serialize.ByteSizeTime({{.VariableName}})`
+	byteSizeUUIDTemplateStr      = `serialize.ByteSizeUUID({{.VariableName}})`
 	byteSizeCustomTemplateStr    = `{{.VariableName}}.ByteSize()`
 	// serialization templates
 	serializeByteTemplateStr      = `serialize.SerializeUInt8(writer, {{.VariableName}})`
@@ -365,6 +370,7 @@ const (
 	serializeFloat64TemplateStr   = `serialize.SerializeFloat64(writer, {{.VariableName}})`
 	serializeStringTemplateStr    = `serialize.SerializeString(writer, {{.VariableName}})`
 	serializeTimestampTemplateStr = `serialize.SerializeTime(writer, {{.VariableName}})`
+	serializeUUIDTemplateStr      = `serialize.SerializeUUID(writer, {{.VariableName}})`
 	serializeCustomTemplateStr    = `{{.VariableName}}.Serialize(writer)`
 	// deserialization templates
 	deserializeByteTemplateStr      = `serialize.DeserializeUInt8(&{{.VariableName}}, reader)`
@@ -381,6 +387,7 @@ const (
 	deserializeFloat64TemplateStr   = `serialize.DeserializeFloat64(&{{.VariableName}}, reader)`
 	deserializeStringTemplateStr    = `serialize.DeserializeString(&{{.VariableName}}, reader)`
 	deserializeTimestampTemplateStr = `serialize.DeserializeTime(&{{.VariableName}}, reader)`
+	deserializeUUIDTemplateStr      = `serialize.DeserializeUUID(&{{.VariableName}}, reader)`
 	deserializeCustomTemplateStr    = `{{.VariableName}}.Deserialize(reader)`
 )
 
@@ -400,6 +407,7 @@ var (
 	byteSizeFloat64Template   = template.Must(template.New("byteSizeFloat64TemplateGo").Parse(byteSizeFloat64TemplateStr))
 	byteSizeStringTemplate    = template.Must(template.New("byteSizeStringTemplateGo").Parse(byteSizeStringTemplateStr))
 	byteSizeTimestampTemplate = template.Must(template.New("byteSizeTimestampTemplateGo").Parse(byteSizeTimestampTemplateStr))
+	byteSizeUUIDTemplate      = template.Must(template.New("byteSizeUUIDTemplateGo").Parse(byteSizeUUIDTemplateStr))
 	byteSizeCustomTemplate    = template.Must(template.New("byteSizeCustomTemplateGo").Parse(byteSizeCustomTemplateStr))
 	// serialization templates
 	serializeByteTemplate      = template.Must(template.New("serializeByteTemplateGo").Parse(serializeByteTemplateStr))
@@ -416,6 +424,7 @@ var (
 	serializeFloat64Template   = template.Must(template.New("serializeFloat64TemplateGo").Parse(serializeFloat64TemplateStr))
 	serializeStringTemplate    = template.Must(template.New("serializeStringTemplateGo").Parse(serializeStringTemplateStr))
 	serializeTimestampTemplate = template.Must(template.New("serializeTimestampTemplateGo").Parse(serializeTimestampTemplateStr))
+	serializeUUIDTemplate      = template.Must(template.New("serializeUUIDTemplateGo").Parse(serializeUUIDTemplateStr))
 	serializeCustomTemplate    = template.Must(template.New("serializeCustomTemplateGo").Parse(serializeCustomTemplateStr))
 	// deserialization templates
 	deserializeByteTemplate      = template.Must(template.New("deserializeByteTemplateGo").Parse(deserializeByteTemplateStr))
@@ -432,6 +441,7 @@ var (
 	deserializeFloat64Template   = template.Must(template.New("deserializeFloat64TemplateGo").Parse(deserializeFloat64TemplateStr))
 	deserializeStringTemplate    = template.Must(template.New("deserializeStringTemplateGo").Parse(deserializeStringTemplateStr))
 	deserializeTimestampTemplate = template.Must(template.New("deserializeTimestampTemplateGo").Parse(deserializeTimestampTemplateStr))
+	deserializeUUIDTemplate      = template.Must(template.New("deserializeUUIDTemplateGo").Parse(deserializeUUIDTemplateStr))
 	deserializeCustomTemplate    = template.Must(template.New("deserializeCustomTemplateGo").Parse(deserializeCustomTemplateStr))
 )
 
@@ -459,6 +469,8 @@ func getDataTypeComparableMethodSuffix(dataType parse.DataTypeComparable) (strin
 		return "Float32", nil
 	case parse.DataTypeComparableFloat64:
 		return "Float64", nil
+	case parse.DataTypeComparableUUID:
+		return "UUID", nil
 	}
 	return "", fmt.Errorf("unrecognized type: %v", dataType)
 }
@@ -504,6 +516,8 @@ func getDataTypeMethodSuffix(dataType parse.DataType) (string, error) {
 		return "Float32", nil
 	case parse.DataTypeFloat64:
 		return "Float64", nil
+	case parse.DataTypeUUID:
+		return "UUID", nil
 	}
 	return "", fmt.Errorf("unrecognized type: %v", dataType)
 }
@@ -775,6 +789,8 @@ func generateKeyFieldByteSizeMethodCall(varName string, dataType parse.DataTypeC
 		tmpl = byteSizeFloat64Template
 	case parse.DataTypeComparableString:
 		tmpl = byteSizeStringTemplate
+	case parse.DataTypeComparableUUID:
+		tmpl = byteSizeUUIDTemplate
 	case parse.DataTypeComparableCustom:
 		tmpl = byteSizeCustomTemplate
 	default:
@@ -821,6 +837,8 @@ func generateKeyFieldSerializationMethodCall(varName string, dataType parse.Data
 		tmpl = serializeFloat64Template
 	case parse.DataTypeComparableString:
 		tmpl = serializeStringTemplate
+	case parse.DataTypeComparableUUID:
+		tmpl = serializeUUIDTemplate
 	case parse.DataTypeComparableCustom:
 		tmpl = serializeCustomTemplate
 	default:
@@ -867,6 +885,8 @@ func generateKeyFieldDeserializationMethodCall(varName string, dataType parse.Da
 		tmpl = deserializeFloat64Template
 	case parse.DataTypeComparableString:
 		tmpl = deserializeStringTemplate
+	case parse.DataTypeComparableUUID:
+		tmpl = deserializeUUIDTemplate
 	case parse.DataTypeComparableCustom:
 		tmpl = deserializeCustomTemplate
 	default:
@@ -919,6 +939,8 @@ func generateFieldByteSizeMethodCall(messageName string, varName string, dataTyp
 		tmpl = byteSizeStringTemplate
 	case parse.DataTypeTimestamp:
 		tmpl = byteSizeTimestampTemplate
+	case parse.DataTypeUUID:
+		tmpl = byteSizeUUIDTemplate
 	case parse.DataTypeCustom:
 		tmpl = byteSizeCustomTemplate
 	case parse.DataTypeMap,
@@ -976,6 +998,8 @@ func generateFieldSerializationMethodCall(messageName string, varName string, da
 		tmpl = serializeStringTemplate
 	case parse.DataTypeTimestamp:
 		tmpl = serializeTimestampTemplate
+	case parse.DataTypeUUID:
+		tmpl = serializeUUIDTemplate
 	case parse.DataTypeCustom:
 		tmpl = serializeCustomTemplate
 	case parse.DataTypeMap,
@@ -1033,6 +1057,8 @@ func generateFieldDeserializationMethodCall(messageName string, varName string, 
 		tmpl = deserializeStringTemplate
 	case parse.DataTypeTimestamp:
 		tmpl = deserializeTimestampTemplate
+	case parse.DataTypeUUID:
+		tmpl = deserializeUUIDTemplate
 	case parse.DataTypeCustom:
 		tmpl = deserializeCustomTemplate
 	case parse.DataTypeMap,

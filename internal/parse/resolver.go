@@ -37,19 +37,6 @@ func cloneTraversed(traversed map[string]bool) map[string]bool {
 	return clone
 }
 
-func getElementType(field *MessageFieldDefinition, dataType *DataTypeDefinition) (*DataTypeDefinition, *ParsingError) {
-	if dataType.Type == DataTypeList || dataType.Type == DataTypeMap {
-		if dataType.SubType == nil {
-			return nil, &ParsingError{
-				Message: "list / map subtype not found",
-				Token:   field.Token,
-			}
-		}
-		return getElementType(field, dataType.SubType)
-	}
-	return dataType, nil
-}
-
 func resolveFileDependencies(traversed map[string]bool, file *File) *ParsingError {
 
 	for _, dep := range file.CustomTypeDependencies {
@@ -179,10 +166,7 @@ func resolveMessageTypes(traversed map[string]bool, parse *Parse, msg *MessageDe
 		switch field.DataTypeDefinition.Type {
 		case DataTypeList:
 			// list
-			elem, perr := getElementType(field, field.DataTypeDefinition)
-			if perr != nil {
-				return perr
-			}
+			elem := field.DataTypeDefinition.GetElementType()
 
 			if elem.Type == DataTypeCustom {
 				// custom
@@ -195,10 +179,7 @@ func resolveMessageTypes(traversed map[string]bool, parse *Parse, msg *MessageDe
 		case DataTypeMap:
 
 			// map
-			value, perr := getElementType(field, field.DataTypeDefinition)
-			if perr != nil {
-				return perr
-			}
+			value := field.DataTypeDefinition.GetElementType()
 
 			key := field.DataTypeDefinition.Key
 			if key.Type == DataTypeComparableCustom {
