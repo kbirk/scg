@@ -39,7 +39,7 @@ func generateEnumCppCode(enum *parse.EnumDefinition) (string, error) {
 	var enumValueArgs []EnumValueArgs
 	for i, v := range enum.ValuesByIndex() {
 		enumValueArgs = append(enumValueArgs, EnumValueArgs{
-			ValueNameUpperCase: strings.ToUpper(v.Name),
+			ValueNameUpperCase: strings.ToUpper(util.EnsureSnakeCase(v.Name)),
 			Index:              i,
 		})
 	}
