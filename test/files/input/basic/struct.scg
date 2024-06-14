@@ -8,6 +8,8 @@ typedef BasicFloat32 = float32;
 
 typedef AnotherID = uint32;
 
+typedef SomeID = uuid;
+
 enum SomeEnum {
 	ValueA = 0;
 	ValueB = 1;

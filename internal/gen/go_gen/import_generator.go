@@ -103,6 +103,12 @@ func generateImportsGoCode(goBasePackage string, file *parse.File) (string, erro
 				}
 			}
 		}
+
+		for _, typedef := range file.Typedefs {
+			if typedef.DataTypeDefinition.Type == parse.DataTypeComparableUUID {
+				args.STDPackages = append(args.STDPackages, uuidImports...)
+			}
+		}
 	}
 
 	if len(file.ServiceDefinitions) > 0 {

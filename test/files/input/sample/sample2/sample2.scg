@@ -4,6 +4,8 @@ typedef MyString = string;
 
 typedef MyInt32 = int32;
 
+typedef AnotherType = uuid;
+
 enum MyEnumType {
 	ValueA = 0;
 	ValueB = 1;
