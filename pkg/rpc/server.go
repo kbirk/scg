@@ -17,9 +17,11 @@ var upgrader = websocket.Upgrader{
 }
 
 type Server struct {
-	conf     ServerConfig
-	server   *http.Server
-	services map[uint64]serverStub
+	conf              ServerConfig
+	server            *http.Server
+	services          map[uint64]serverStub
+	serviceMiddleware map[uint64][]Middleware
+	middleware        []Middleware
 }
 
 type ServerConfig struct {
@@ -31,6 +33,8 @@ type ServerConfig struct {
 type serverStub interface {
 	HandleWrapper(context.Context, uint64, *serialize.Reader) []byte
 }
+
+type Middleware func(context.Context) error
 
 func RespondWithError(requestID uint64, err error) []byte {
 	writer := serialize.NewFixedSizeWriter(ResponseHeaderSize + serialize.ByteSizeString(err.Error()))
@@ -57,7 +61,9 @@ func NewServer(conf ServerConfig) *Server {
 		server: &http.Server{
 			Addr: fmt.Sprintf(":%d", conf.Port),
 		},
-		services: make(map[uint64]serverStub),
+		services:          make(map[uint64]serverStub),
+		middleware:        make([]Middleware, 0),
+		serviceMiddleware: make(map[uint64][]Middleware),
 	}
 
 	mux := http.NewServeMux()
@@ -106,6 +112,20 @@ func (s *Server) RegisterServer(id uint64, service serverStub) error {
 		return fmt.Errorf("service with id %d already registered", id)
 	}
 	s.services[id] = service
+	return nil
+}
+
+func (s *Server) RegisterMiddleware(m Middleware) error {
+	s.middleware = append(s.middleware, m)
+	return nil
+}
+
+func (s *Server) RegisterServerMiddleware(id uint64, m Middleware) error {
+	middleware, ok := s.serviceMiddleware[id]
+	if !ok {
+		middleware = make([]Middleware, 0)
+	}
+	s.serviceMiddleware[id] = append(middleware, m)
 	return nil
 }
 
@@ -176,6 +196,36 @@ func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				s.handleError(err)
 				break
+			}
+
+			// apply global middleware
+			for _, m := range s.middleware {
+				err := m(ctx)
+				if err != nil {
+					bs = RespondWithError(requestID, err)
+					err = conn.WriteMessage(websocket.BinaryMessage, bs)
+					if err != nil {
+						s.handleError(err)
+						break
+					}
+					continue
+				}
+			}
+
+			// apply server specific middleware
+			if middleware, ok := s.serviceMiddleware[serviceID]; ok {
+				for _, m := range middleware {
+					err := m(ctx)
+					if err != nil {
+						bs = RespondWithError(requestID, err)
+						err = conn.WriteMessage(websocket.BinaryMessage, bs)
+						if err != nil {
+							s.handleError(err)
+							break
+						}
+						continue
+					}
+				}
 			}
 
 			// handle the request

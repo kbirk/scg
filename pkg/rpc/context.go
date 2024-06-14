@@ -9,9 +9,17 @@ import (
 type metadataKey struct{}
 
 func NewContextWithMetadata(ctx context.Context, metadata map[string]string) context.Context {
-	existing := ctx.Value(metadataKey{}).(map[string]string)
-	if existing == nil {
-		existing = make(map[string]string)
+	return context.WithValue(ctx, metadataKey{}, metadata)
+}
+
+func AppendMetadataToContext(ctx context.Context, metadata map[string]string) context.Context {
+	i := ctx.Value(metadataKey{})
+	if i == nil {
+		return context.WithValue(ctx, metadataKey{}, metadata)
+	}
+	existing, ok := i.(map[string]string)
+	if !ok {
+		return context.WithValue(ctx, metadataKey{}, metadata)
 	}
 	for k, v := range metadata {
 		existing[k] = v
@@ -70,6 +78,7 @@ func DeserializeContext(ctx *context.Context, reader *serialize.Reader) error {
 			}
 			md[k] = v
 		}
+		*ctx = context.WithValue(*ctx, metadataKey{}, md)
 	}
 	return nil
 }

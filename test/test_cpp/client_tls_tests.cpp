@@ -38,7 +38,7 @@ void test_pingpong_client_tls() {
 	for (uint32_t i=0; i<COUNT; i++) {
 
 		scg::context::Context context;
-		context.put("key", "value");
+		context.put("token", "1234");
 
 		pingpong::NestedPayload nested1;
 		nested1.valString = "nested" + std::to_string(i);

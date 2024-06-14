@@ -15,8 +15,9 @@ const (
 )
 
 var (
-	certFile string
-	keyFile  string
+	certFile   string
+	keyFile    string
+	validToken = "1234"
 )
 
 type pingpongServer struct {
@@ -29,6 +30,24 @@ func (s *pingpongServer) Ping(ctx context.Context, req *pingpong.PingRequest) (*
 			Payload: req.Ping.Payload,
 		},
 	}, nil
+}
+
+func authMiddleware(ctx context.Context) error {
+	md := rpc.GetMetadataFromContext(ctx)
+	if md == nil {
+		return fmt.Errorf("no metadata")
+	}
+
+	token, ok := md["token"]
+	if !ok {
+		return fmt.Errorf("no token")
+	}
+
+	if token != validToken {
+		return fmt.Errorf("invalid token")
+	}
+
+	return nil
 }
 
 func main() {
@@ -55,6 +74,7 @@ func main() {
 		},
 	})
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	pingpong.RegisterPingPongServerMiddleware(server, authMiddleware)
 
 	err := server.ListenAndServeTLS(certFile, keyFile)
 	if err != nil {
