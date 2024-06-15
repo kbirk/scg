@@ -86,11 +86,11 @@ var (
 )
 
 func serviceIDVarName(serviceName string) string {
-	return fmt.Sprintf("%sID", util.EnsureCamelCase(serviceName))
+	return fmt.Sprintf("%sServerID", util.EnsureCamelCase(serviceName))
 }
 
 func methodIDVarName(serviceName string, methodName string) string {
-	return fmt.Sprintf("%s_%sID", util.EnsureCamelCase(serviceName), util.EnsurePascalCase(methodName))
+	return fmt.Sprintf("%sServer_%sID", util.EnsureCamelCase(serviceName), util.EnsurePascalCase(methodName))
 }
 
 func getServerStubStructName(serviceName string) string {
@@ -145,7 +145,7 @@ func generateServerGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		args.ServiceMethods = append(args.ServiceMethods, ServiceMethodArgs{
 			MethodNamePascalCase:     util.EnsurePascalCase(name),
 			MethodNameCamelCase:      util.EnsureCamelCase(name),
-			MethodIDVarName:          methodIDVarName(util.EnsureCamelCase(name), util.EnsurePascalCase(name)),
+			MethodIDVarName:          methodIDVarName(svc.Name, name),
 			MethodID:                 methodID,
 			MethodRequestStructName:  methodArgType,
 			MethodResponseStructName: methodRetType,

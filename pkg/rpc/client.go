@@ -150,8 +150,6 @@ func (c *Client) connectUnsafe() error {
 				return
 			}
 
-			fmt.Println("WE GOT ", requestID)
-
 			c.mu.Lock()
 			ch, ok := c.requests[requestID]
 			delete(c.requests, requestID)

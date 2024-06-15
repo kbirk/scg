@@ -14,7 +14,7 @@ const string TestStringConst = "This string has an \"escaped quoted portion\", h
 
 const SomeID MySomeIDConst = "123e4567-e89b-12d3-a456-426614174000";
 
-const BasicFloat32 FloatConst = 123.456;
+const BasicFloat32 FloatConstID = 123.456;
 
 enum SomeEnum {
 	ValueA = 0;

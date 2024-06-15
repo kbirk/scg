@@ -84,7 +84,7 @@ func generateClientGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		args.ClientMethods = append(args.ClientMethods, ClientMethodArgs{
 			MethodNamePascalCase:     util.EnsurePascalCase(name),
 			MethodNameCamelCase:      util.EnsureCamelCase(name),
-			MethodIDVarName:          methodIDVarName(util.EnsureCamelCase(name), util.EnsurePascalCase(name)),
+			MethodIDVarName:          methodIDVarName(svc.Name, name),
 			MethodID:                 methodID,
 			MethodRequestStructName:  methodArgType,
 			MethodResponseStructName: methodRetType,

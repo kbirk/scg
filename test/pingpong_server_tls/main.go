@@ -32,22 +32,22 @@ func (s *pingpongServer) Ping(ctx context.Context, req *pingpong.PingRequest) (*
 	}, nil
 }
 
-func authMiddleware(ctx context.Context) error {
+func authMiddleware(ctx context.Context) (context.Context, error) {
 	md := rpc.GetMetadataFromContext(ctx)
 	if md == nil {
-		return fmt.Errorf("no metadata")
+		return nil, fmt.Errorf("no metadata")
 	}
 
 	token, ok := md["token"]
 	if !ok {
-		return fmt.Errorf("no token")
+		return nil, fmt.Errorf("no token")
 	}
 
 	if token != validToken {
-		return fmt.Errorf("invalid token")
+		return nil, fmt.Errorf("invalid token")
 	}
 
-	return nil
+	return ctx, nil
 }
 
 func main() {

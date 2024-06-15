@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
+	"github.com/kbirk/scg/test/files/output/basic"
 	"github.com/kbirk/scg/test/files/output/pingpong"
 
 	"github.com/stretchr/testify/assert"
@@ -19,22 +20,22 @@ var (
 	invalidToken = "5678"
 )
 
-func authMiddleware(ctx context.Context) error {
+func authMiddleware(ctx context.Context) (context.Context, error) {
 	md := rpc.GetMetadataFromContext(ctx)
 	if md == nil {
-		return fmt.Errorf("no metadata")
+		return nil, fmt.Errorf("no metadata")
 	}
 
 	token, ok := md["token"]
 	if !ok {
-		return fmt.Errorf("no token")
+		return nil, fmt.Errorf("no token")
 	}
 
 	if token != validToken {
-		return fmt.Errorf("invalid token")
+		return nil, fmt.Errorf("invalid token")
 	}
 
-	return nil
+	return ctx, nil
 }
 
 type pingpongServer struct {
@@ -278,6 +279,149 @@ func TestPingPongAuthFail(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Equal(t, "invalid token", err.Error())
+
+	err = server.Shutdown(context.Background())
+	require.NoError(t, err)
+}
+
+func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Port: 8080,
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+	server.Group(func(s *rpc.Server) {
+		pingpong.RegisterPingPongServer(server, &pingpongServer{})
+		pingpong.RegisterPingPongServerMiddleware(server, authMiddleware)
+	})
+
+	go func() {
+		server.ListenAndServeTLS("../server.crt", "../server.key")
+	}()
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Host: "localhost",
+		Port: 8080,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true, // self signed
+		},
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+
+	c := pingpong.NewPingPongClient(client)
+
+	count := int32(0)
+
+	ctx := rpc.NewContextWithMetadata(context.Background(), map[string]string{
+		"token": "1234",
+	})
+
+	for {
+		resp, err := c.Ping(ctx, &pingpong.PingRequest{
+			Ping: pingpong.Ping{
+				Count: count,
+			},
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, count+1, resp.Pong.Count)
+		count = resp.Pong.Count
+
+		if count > 10 {
+			break
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	err := server.Shutdown(context.Background())
+	require.NoError(t, err)
+}
+
+func TestPingPongDuplicateGroupPanic(t *testing.T) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Port: 8080,
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+
+	defer func() {
+		err := recover()
+		require.NotNil(t, err)
+	}()
+
+	server.Group(func(s *rpc.Server) {
+		pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	})
+	server.Group(func(s *rpc.Server) {
+		pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	})
+}
+
+type testerAServer struct {
+}
+
+func (s *testerAServer) Test(ctx context.Context, req *basic.TestRequestA) (*basic.TestResponseA, error) {
+	return &basic.TestResponseA{
+		A: req.A,
+	}, nil
+}
+
+type testerBServer struct {
+}
+
+func (s *testerBServer) Test(ctx context.Context, req *basic.TestRequestB) (*basic.TestResponseB, error) {
+	return &basic.TestResponseB{
+		B: req.B,
+	}, nil
+}
+
+func TestServerGroupsMiddleware(t *testing.T) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Port: 8080,
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+
+	server.Group(func(s *rpc.Server) {
+		s.RegisterMiddleware(authMiddleware)
+		basic.RegisterTesterAServer(server, &testerAServer{})
+	})
+	server.Group(func(s *rpc.Server) {
+		basic.RegisterTesterBServer(server, &testerBServer{})
+	})
+
+	go func() {
+		server.ListenAndServe()
+	}()
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Host: "localhost",
+		Port: 8080,
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+
+	cA := basic.NewTesterAClient(client)
+	cB := basic.NewTesterBClient(client)
+
+	_, err := cA.Test(context.Background(), &basic.TestRequestA{
+		A: "A",
+	})
+	require.Error(t, err)
+	assert.Equal(t, "no metadata", err.Error())
+
+	resp, err := cB.Test(context.Background(), &basic.TestRequestB{
+		B: "B",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "B", resp.B)
 
 	err = server.Shutdown(context.Background())
 	require.NoError(t, err)

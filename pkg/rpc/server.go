@@ -17,8 +17,14 @@ var upgrader = websocket.Upgrader{
 }
 
 type Server struct {
-	conf              ServerConfig
-	server            *http.Server
+	conf             ServerConfig
+	server           *http.Server
+	groups           []*ServerGroup
+	groupByServiceID map[uint64]*ServerGroup
+	activeGroup      *ServerGroup
+}
+
+type ServerGroup struct {
 	services          map[uint64]serverStub
 	serviceMiddleware map[uint64][]Middleware
 	middleware        []Middleware
@@ -34,7 +40,7 @@ type serverStub interface {
 	HandleWrapper(context.Context, uint64, *serialize.Reader) []byte
 }
 
-type Middleware func(context.Context) error
+type Middleware func(context.Context) (context.Context, error)
 
 func RespondWithError(requestID uint64, err error) []byte {
 	writer := serialize.NewFixedSizeWriter(ResponseHeaderSize + serialize.ByteSizeString(err.Error()))
@@ -54,16 +60,24 @@ func RespondWithMessage(requestID uint64, msg Message) []byte {
 	return writer.Bytes()
 }
 
+func newServerGroup() *ServerGroup {
+	return &ServerGroup{
+		services:          make(map[uint64]serverStub),
+		serviceMiddleware: make(map[uint64][]Middleware),
+	}
+}
+
 func NewServer(conf ServerConfig) *Server {
+
+	defaultGroup := newServerGroup()
 
 	s := &Server{
 		conf: conf,
 		server: &http.Server{
 			Addr: fmt.Sprintf(":%d", conf.Port),
 		},
-		services:          make(map[uint64]serverStub),
-		middleware:        make([]Middleware, 0),
-		serviceMiddleware: make(map[uint64][]Middleware),
+		activeGroup:      defaultGroup,
+		groupByServiceID: make(map[uint64]*ServerGroup),
 	}
 
 	mux := http.NewServeMux()
@@ -72,6 +86,15 @@ func NewServer(conf ServerConfig) *Server {
 
 	return s
 }
+
+func (s *Server) Group(fn func(*Server)) {
+	g := newServerGroup()
+	s.activeGroup = g
+	s.groups = append(s.groups, g)
+	fn(s)
+	s.activeGroup = s.groups[0]
+}
+
 func (s *Server) handleError(err error) {
 	if cErr, ok := err.(*websocket.CloseError); ok {
 		s.logInfo("Client disconnected: " + cErr.Text)
@@ -107,30 +130,80 @@ func (s *Server) logError(msg string) {
 	}
 }
 
-func (s *Server) RegisterServer(id uint64, service serverStub) error {
-	if _, ok := s.services[id]; ok {
-		return fmt.Errorf("service with id %d already registered", id)
+func (s *Server) RegisterServer(id uint64, service serverStub) {
+	_, ok := s.groupByServiceID[id]
+	if ok {
+		panic(fmt.Sprintf("service with id %d already registered", id))
 	}
-	s.services[id] = service
-	return nil
+	s.activeGroup.registerServer(id, service)
+	s.groupByServiceID[id] = s.activeGroup
 }
 
-func (s *Server) RegisterMiddleware(m Middleware) error {
-	s.middleware = append(s.middleware, m)
-	return nil
+func (g *ServerGroup) registerServer(id uint64, service serverStub) {
+	if _, ok := g.services[id]; ok {
+		panic(fmt.Sprintf("service with id %d already registered", id))
+	}
+	g.services[id] = service
 }
 
-func (s *Server) RegisterServerMiddleware(id uint64, m Middleware) error {
-	middleware, ok := s.serviceMiddleware[id]
+func (s *Server) RegisterMiddleware(m Middleware) {
+	s.activeGroup.middleware = append(s.activeGroup.middleware, m)
+}
+
+func (g *ServerGroup) registerMiddleware(m Middleware) {
+	g.middleware = append(g.middleware, m)
+}
+
+func (s *Server) RegisterServerMiddleware(id uint64, m Middleware) {
+	s.activeGroup.registerServerMiddleware(id, m)
+}
+
+func (g *ServerGroup) registerServerMiddleware(id uint64, m Middleware) {
+	middleware, ok := g.serviceMiddleware[id]
 	if !ok {
 		middleware = make([]Middleware, 0)
 	}
-	s.serviceMiddleware[id] = append(middleware, m)
-	return nil
+	g.serviceMiddleware[id] = append(middleware, m)
+}
+
+func (s *Server) applyMiddleware(serviceID uint64, ctx context.Context) (context.Context, error) {
+
+	group, ok := s.groupByServiceID[serviceID]
+	if !ok {
+		return ctx, nil
+	}
+
+	var err error
+
+	for _, m := range group.middleware {
+		ctx, err = m(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	middleware, ok := group.serviceMiddleware[serviceID]
+	if ok {
+		for _, m := range middleware {
+			ctx, err = m(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return ctx, nil
 }
 
 func (s *Server) getServiceByID(id uint64) (serverStub, error) {
-	service, ok := s.services[id]
+	group, ok := s.groupByServiceID[id]
+	if !ok {
+		return nil, fmt.Errorf("service with id %d not found", id)
+	}
+	return group.getServiceByID(id)
+}
+
+func (g *ServerGroup) getServiceByID(id uint64) (serverStub, error) {
+	service, ok := g.services[id]
 	if !ok {
 		return nil, fmt.Errorf("service with id %d not found", id)
 	}
@@ -198,39 +271,16 @@ func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			// apply global middleware
-			for _, m := range s.middleware {
-				err = m(ctx)
-				if err != nil {
-					bs = RespondWithError(requestID, err)
-					err2 := conn.WriteMessage(websocket.BinaryMessage, bs)
-					if err2 != nil {
-						s.handleError(err)
-					}
-					break
-				}
-			}
+			// apply middleware
+			ctx, err = s.applyMiddleware(serviceID, ctx)
 			if err != nil {
+				bs = RespondWithError(requestID, err)
+				err2 := conn.WriteMessage(websocket.BinaryMessage, bs)
+				if err2 != nil {
+					s.handleError(err2)
+				}
+				// TODO: should we kill the connection?
 				continue
-			}
-
-			// apply server specific middleware
-			if middleware, ok := s.serviceMiddleware[serviceID]; ok {
-				var err error
-				for _, m := range middleware {
-					err = m(ctx)
-					if err != nil {
-						bs = RespondWithError(requestID, err)
-						err2 := conn.WriteMessage(websocket.BinaryMessage, bs)
-						if err2 != nil {
-							s.handleError(err2)
-						}
-						break
-					}
-				}
-				if err != nil {
-					continue
-				}
 			}
 
 			// handle the request

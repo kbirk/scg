@@ -1,5 +1,25 @@
 package basic;
 
-service BenchMarker {
-	rpc Benchy(BasicStruct) returns (ComplicatedStruct);
+service TesterA {
+	rpc Test(TestRequestA) returns (TestResponseA);
+}
+
+service TesterB {
+	rpc Test(TestRequestB) returns (TestResponseB);
+}
+
+message TestRequestA {
+	string a = 0;
+}
+
+message TestResponseA {
+	string a = 0;
+}
+
+message TestRequestB {
+	string b = 0;
+}
+
+message TestResponseB {
+	string b = 0;
 }

@@ -31,8 +31,12 @@ func getConstPrefix(typ *parse.DataTypeComparableDefinition, underlyingType *par
 		parse.DataTypeComparableString:
 		return "const", nil
 	case parse.DataTypeComparableUUID:
-	case parse.DataTypeComparableCustom:
 		return "var", nil
+	case parse.DataTypeComparableCustom:
+		if underlyingType == nil {
+			return "", fmt.Errorf("underlying type is nil")
+		}
+		return getConstPrefix(underlyingType, nil)
 	}
 	return "", fmt.Errorf("invalid data type %v", typ.Type)
 }
