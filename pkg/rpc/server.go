@@ -200,31 +200,36 @@ func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
 
 			// apply global middleware
 			for _, m := range s.middleware {
-				err := m(ctx)
+				err = m(ctx)
 				if err != nil {
 					bs = RespondWithError(requestID, err)
-					err = conn.WriteMessage(websocket.BinaryMessage, bs)
-					if err != nil {
+					err2 := conn.WriteMessage(websocket.BinaryMessage, bs)
+					if err2 != nil {
 						s.handleError(err)
-						break
 					}
-					continue
+					break
 				}
+			}
+			if err != nil {
+				continue
 			}
 
 			// apply server specific middleware
 			if middleware, ok := s.serviceMiddleware[serviceID]; ok {
+				var err error
 				for _, m := range middleware {
-					err := m(ctx)
+					err = m(ctx)
 					if err != nil {
 						bs = RespondWithError(requestID, err)
-						err = conn.WriteMessage(websocket.BinaryMessage, bs)
-						if err != nil {
-							s.handleError(err)
-							break
+						err2 := conn.WriteMessage(websocket.BinaryMessage, bs)
+						if err2 != nil {
+							s.handleError(err2)
 						}
-						continue
+						break
 					}
+				}
+				if err != nil {
+					continue
 				}
 			}
 

@@ -11,3 +11,9 @@ enum MyEnumType {
 	ValueB = 1;
 	ValueC = 2;
 }
+
+const uint32 MyUInt32Const = 1234;
+
+const string MyStringConst = "Hello, World!";
+
+# const uuid MyUUIDConst = "12345678-1234-5678-1234-567812345678";

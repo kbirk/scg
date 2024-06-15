@@ -158,7 +158,7 @@ func parseEnumDefinitions(tokens []*Token) (map[string]*EnumDefinition, *Parsing
 		if len(values) == 0 {
 			return nil, &ParsingError{
 				Message: "enum has no values",
-				Token:   token,
+				Token:   match.Captures[1],
 			}
 		}
 

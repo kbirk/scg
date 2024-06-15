@@ -53,6 +53,13 @@ func TestFileTokenizerPretty(t *testing.T) {
 
 		typedef MyID = uint64;
 
+		enum MyEnum {
+			ONE = 1;
+			TWO = 2;
+		}
+
+		const uint32 MyConst = 123;
+
 		# my custom type
 		message CustomType {
 			byte a = 1;
@@ -82,13 +89,15 @@ func TestFileTokenizerPretty(t *testing.T) {
 	tokens, err := tokenizeFile(content)
 	require.Nil(t, err)
 
-	assert.Equal(t, 5, len(tokens))
+	assert.Equal(t, 7, len(tokens))
 
 	assert.Equal(t, PackageTokenType, tokens[0].Type)
 	assert.Equal(t, TypedefTokenType, tokens[1].Type)
-	assert.Equal(t, MessageTokenType, tokens[2].Type)
-	assert.Equal(t, MessageTokenType, tokens[3].Type)
-	assert.Equal(t, ServiceTokenType, tokens[4].Type)
+	assert.Equal(t, EnumTokenType, tokens[2].Type)
+	assert.Equal(t, ConstTokenType, tokens[3].Type)
+	assert.Equal(t, MessageTokenType, tokens[4].Type)
+	assert.Equal(t, MessageTokenType, tokens[5].Type)
+	assert.Equal(t, ServiceTokenType, tokens[6].Type)
 
 	for _, token := range tokens {
 		match := getContentByTokenRange(content, token.LineStart, token.LineEnd, token.LineStartCharacterPosition, token.LineEndCharacterPosition)

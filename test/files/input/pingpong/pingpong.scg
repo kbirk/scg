@@ -35,6 +35,14 @@ enum EnumType {
 	ENUM_TYPE_3 = 2;
 }
 
+message Empty {
+
+}
+
+message NestedEmpty {
+	Empty empty = 0;
+}
+
 message TestPayload {
 	uint8 val_uint8 = 0;
 	uint16 val_uint16 = 1;
@@ -54,4 +62,7 @@ message TestPayload {
 	EnumType val_enum = 15;
 	list<NestedPayload> val_list_payload = 16;
 	map<KeyType, EnumType> val_map_key_enum = 17;
+	Empty val_empty = 18;
+	NestedEmpty val_nested_empty = 19;
+	list<byte> val_byte_array = 20;
 }

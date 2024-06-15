@@ -25,6 +25,7 @@ const messageTemplateStr = `
 struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 	{{.FieldType}} {{.FieldNameCamelCase}};{{end}}
 
+	{{- if gt (len .MessageFields) 0 }}
 	inline std::vector<uint8_t> toJSON() const
 	{
 		nlohmann::json j({ {{- range $index, $element := .MessageFields}}{{if $index}}, {{end}}
@@ -70,7 +71,7 @@ struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 	inline scg::error::Error deserialize(scg::serialize::Reader& reader)
 	{
 		scg::error::Error err;
-		{{range .MessageFields}}err = scg::serialize::deserialize({{.FieldNameCamelCase}}, reader);
+		{{- range .MessageFields}}err = scg::serialize::deserialize({{.FieldNameCamelCase}}, reader);
 		if (err) {
 			return err;
 		}
@@ -84,10 +85,54 @@ struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 		size += scg::serialize::byte_size({{.FieldNameCamelCase}});{{end}}
 		return size;
 	}
+	{{- else}}
+	inline std::vector<uint8_t> toJSON() const
+	{
+		nlohmann::json j;
+		auto str = j.dump();
+		return std::vector<uint8_t>(str.begin(), str.end());
+	}
+
+	inline void fromJSON(const std::vector<uint8_t>& data)
+	{
+	}
+
+	inline std::vector<uint8_t> toBytes() const
+	{
+		return std::vector<uint8_t>();
+	}
+
+	inline scg::error::Error fromBytes(const std::vector<uint8_t>& data)
+	{
+		return nullptr;
+	}
+
+	inline void serialize(scg::serialize::FixedSizeWriter& writer) const
+	{
+	}
+
+	inline scg::error::Error deserialize(scg::serialize::Reader& reader)
+	{
+		return nullptr;
+	}
+
+	inline uint32_t byteSize() const
+	{
+		return 0;
+	}
+	{{end}}
 
 };{{if gt (len .MessageFields) 0}}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE({{.MessageNamePascalCase}}, {{.MessageFieldsCommaSeparated}}){{else}}
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE({{.MessageNamePascalCase}}){{end}}`
+inline void to_json(nlohmann::json& j, const {{.MessageNamePascalCase}}& m) {
+    // For an empty struct, we can just use an empty JSON object.
+    j = nlohmann::json::object();
+}
+
+inline void from_json(const nlohmann::json& j, {{.MessageNamePascalCase}}& m) {
+    // For an empty struct, there's nothing to do.
+}
+{{end}}`
 
 var (
 	messageTemplate = template.Must(template.New("messageTemplateCpp").Parse(messageTemplateStr))

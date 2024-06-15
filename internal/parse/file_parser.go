@@ -30,6 +30,7 @@ type File struct {
 	Package                *PackageDeclaration
 	CustomTypeDependencies map[string]*CustomTypeDependency
 	Typedefs               map[string]*TypedefDeclaration
+	Consts                 map[string]*ConstDeclaration
 	Enums                  map[string]*EnumDefinition
 	ServiceDefinitions     map[string]*ServiceDefinition
 	MessageDefinitions     map[string]*MessageDefinition
@@ -97,6 +98,21 @@ func (f *File) TypedefsSortedByKey() []*TypedefDeclaration {
 	values := make([]*TypedefDeclaration, 0, len(f.Typedefs))
 	for _, k := range keys {
 		values = append(values, f.Typedefs[k])
+	}
+	return values
+}
+
+func (f *File) ConstsSortedByKey() []*ConstDeclaration {
+	keys := make([]string, 0, len(f.Consts))
+	for k := range f.Consts {
+		keys = append(keys, k)
+	}
+
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	values := make([]*ConstDeclaration, 0, len(f.Consts))
+	for _, k := range keys {
+		values = append(values, f.Consts[k])
 	}
 	return values
 }
@@ -380,6 +396,11 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 		return nil, perr
 	}
 
+	consts, perr := parseConstDeclarations(tokens)
+	if perr != nil {
+		return nil, perr
+	}
+
 	typedefs, perr := parseTypedefDeclarations(tokens)
 	if perr != nil {
 		return nil, perr
@@ -398,6 +419,22 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 
 	for _, typdef := range typedefs {
 		typdef.File = f
+	}
+
+	for _, cosntDecl := range consts {
+		cosntDecl.File = f
+
+		// if package is omitted, use the file's package name
+		perr := populateDataTypeComparablePackageIfMissing(pkg.Name, cosntDecl.DataTypeDefinition)
+		if perr != nil {
+			return nil, perr
+		}
+
+		// add custom type dependencies
+		err := addCustomComparableTypeDependency(dependencies, cosntDecl.DataTypeDefinition)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for _, msg := range messageDefinitions {
@@ -479,6 +516,7 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 	f.Package = pkg
 	f.CustomTypeDependencies = externalCustomTypeDependencies
 	f.Enums = enums
+	f.Consts = consts
 	f.Typedefs = typedefs
 	f.MessageDefinitions = messageDefinitions
 	f.ServiceDefinitions = serviceDefinitions

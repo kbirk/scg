@@ -121,6 +121,8 @@ func TestResolverDependencyBetweenFiles2(t *testing.T) {
 
 		typedef BasicString = string;
 
+		const string TestStringConst = "This string has an \"escaped quoted portion\", holy moly!";
+
 		message BasicStruct {
 			uint8 val_uint_8 = 0;
 			int8 val_int_8 = 1;

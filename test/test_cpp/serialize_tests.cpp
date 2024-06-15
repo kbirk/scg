@@ -248,6 +248,9 @@ void test_serialize_pingpong()
 	nested2.valString = "nested again";
 	nested2.valDouble = 123.34563456;
 
+	pingpong::NestedEmpty nested;
+	nested.empty = pingpong::Empty();
+
 	pingpong::TestPayload input;
 	input.valUint8 = 1;
 	input.valUint16 = 256 + 2;
@@ -269,6 +272,9 @@ void test_serialize_pingpong()
 		{pingpong::KeyType("key_1"), pingpong::EnumType::ENUM_TYPE_1},
 		{pingpong::KeyType("key_2"), pingpong::EnumType::ENUM_TYPE_2}
 	};
+	input.valEmpty = pingpong::Empty();
+	input.valNestedEmpty = nested;
+	input.valByteArray = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
 	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
 	scg::serialize::serialize(writer, input);
@@ -300,6 +306,7 @@ void test_serialize_pingpong()
 	TEST_CHECK(output.valMapKeyEnum.size() == 2);
 	TEST_CHECK(output.valMapKeyEnum[pingpong::KeyType("key_1")] == pingpong::EnumType::ENUM_TYPE_1);
 	TEST_CHECK(output.valMapKeyEnum[pingpong::KeyType("key_2")] == pingpong::EnumType::ENUM_TYPE_2);
+	TEST_CHECK(output.valByteArray.size() == input.valByteArray.size());
 }
 
 

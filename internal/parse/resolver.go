@@ -303,5 +303,34 @@ func resolveDefinitions(parse *Parse) *ParsingError {
 		}
 	}
 
+	// for const declarations, resolve and inject the underlying types
+	for _, pkg := range parse.Packages {
+		for _, constDecl := range pkg.Consts {
+			if constDecl.DataTypeDefinition.Type == DataTypeComparableCustom {
+				underlying, ok := pkg.Typedefs[constDecl.DataTypeDefinition.CustomType]
+				if !ok {
+					return &ParsingError{
+						Message:  fmt.Sprintf("typedef %s not found", constDecl.DataTypeDefinition.CustomType),
+						Token:    constDecl.Token,
+						Filename: constDecl.File.Name,
+						Content:  constDecl.File.Content,
+					}
+				}
+
+				// validate the value again
+				err := ValidateConstValues(underlying.DataTypeDefinition.Type, constDecl.Value)
+				if err != nil {
+					return &ParsingError{
+						Message:  fmt.Sprintf("invalid value for const %s: %s", constDecl.Value, err.Error()),
+						Token:    constDecl.Token,
+						Filename: constDecl.File.Name,
+						Content:  constDecl.File.Content,
+					}
+				}
+				constDecl.UnderlyingDataTypeDefinition = underlying.DataTypeDefinition
+			}
+		}
+	}
+
 	return nil
 }

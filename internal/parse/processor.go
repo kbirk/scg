@@ -69,6 +69,7 @@ type Package struct {
 	PackageDependencies    map[string]*PackageDependency
 	Enums                  map[string]*EnumDefinition
 	Typedefs               map[string]*TypedefDeclaration
+	Consts                 map[string]*ConstDeclaration
 	ServiceDefinitions     map[string]*ServiceDefinition
 	MessageDefinitions     map[string]*MessageDefinition
 	serverIDCollisionCheck map[uint64]string
@@ -257,6 +258,7 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 				Declaration:         f.Package,
 				PackageDependencies: map[string]*PackageDependency{},
 				Enums:               map[string]*EnumDefinition{},
+				Consts:              map[string]*ConstDeclaration{},
 				Typedefs:            map[string]*TypedefDeclaration{},
 				MessageDefinitions:  map[string]*MessageDefinition{},
 				ServiceDefinitions:  map[string]*ServiceDefinition{},
@@ -277,13 +279,25 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 			_, ok := parse.Packages[f.Package.Name].Enums[k]
 			if ok {
 				return nil, &ParsingError{
-					Message:  fmt.Sprintf("typedef %s defined multiple times", k),
+					Message:  fmt.Sprintf("enum %s defined multiple times", k),
 					Token:    v.Token,
 					Filename: f.Name,
 					Content:  f.Content,
 				}
 			}
 			parse.Packages[f.Package.Name].Enums[k] = v
+		}
+		for k, v := range f.Consts {
+			_, ok := parse.Packages[f.Package.Name].Consts[k]
+			if ok {
+				return nil, &ParsingError{
+					Message:  fmt.Sprintf("const %s defined multiple times", k),
+					Token:    v.Token,
+					Filename: f.Name,
+					Content:  f.Content,
+				}
+			}
+			parse.Packages[f.Package.Name].Consts[k] = v
 		}
 		for k, v := range f.Typedefs {
 			_, ok := parse.Packages[f.Package.Name].Typedefs[k]

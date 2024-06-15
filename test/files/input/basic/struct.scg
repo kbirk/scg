@@ -10,10 +10,22 @@ typedef AnotherID = uint32;
 
 typedef SomeID = uuid;
 
+const string TestStringConst = "This string has an \"escaped quoted portion\", holy moly!";
+
+const SomeID MySomeIDConst = "123e4567-e89b-12d3-a456-426614174000";
+
+const BasicFloat32 FloatConst = 123.456;
+
 enum SomeEnum {
 	ValueA = 0;
 	ValueB = 1;
 	ValueC = 2;
+}
+
+message EmptyStruct {}
+
+message NestedEmpty {
+	EmptyStruct empty = 0;
 }
 
 message BasicStruct {
@@ -33,6 +45,9 @@ message BasicStruct {
 	list<SomeEnum> val_list_enum = 13;
 	map<SomeEnum, string> val_map_enum_string = 14;
 	map<string, SomeEnum> val_map_string_enum = 15;
+	EmptyStruct val_empty = 16;
+	NestedEmpty val_nested_empty = 17;
+	list<byte> val_byte_array = 18;
 }
 
 message StructA {

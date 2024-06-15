@@ -104,7 +104,7 @@ func parseMethodDefinition(input *Token) (*ServiceMethodDefinition, *ParsingErro
 	if argumentDefinition.Type != DataTypeCustom {
 		return nil, &ParsingError{
 			Message: "invalid method argument type, must be a message type",
-			Token:   input,
+			Token:   argumentType,
 		}
 	}
 
@@ -115,7 +115,7 @@ func parseMethodDefinition(input *Token) (*ServiceMethodDefinition, *ParsingErro
 	if returnDefinition.Type != DataTypeCustom {
 		return nil, &ParsingError{
 			Message: "invalid method return type, must be a message type",
-			Token:   input,
+			Token:   returnType,
 		}
 	}
 

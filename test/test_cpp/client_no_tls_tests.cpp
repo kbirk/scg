@@ -48,6 +48,9 @@ void test_pingpong_client_no_tls() {
 		nested2.valString = "nested again" + std::to_string(i);
 		nested2.valDouble = 123.34563456 + i;
 
+		pingpong::NestedEmpty nested;
+		nested.empty = pingpong::Empty();
+
 		pingpong::TestPayload payload;
 		payload.valUint8 = i + 1;
 		payload.valUint16 = 256 + i + 2;
@@ -69,6 +72,9 @@ void test_pingpong_client_no_tls() {
 			{pingpong::KeyType("key_" + std::to_string(i+1)), pingpong::EnumType::ENUM_TYPE_1},
 			{pingpong::KeyType("key_" +std::to_string(i+2)), pingpong::EnumType::ENUM_TYPE_2}
 		};
+		payload.valEmpty = pingpong::Empty();
+		payload.valNestedEmpty = nested;
+		payload.valByteArray = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
 		pingpong::PingRequest req;
 		req.ping.count = i;

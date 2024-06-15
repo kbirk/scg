@@ -33,6 +33,11 @@ func TestSerializeBasic(t *testing.T) {
 			"a": basic.SomeEnum_ValueA,
 			"b": basic.SomeEnum_ValueB,
 		},
+		ValEmpty: basic.EmptyStruct{},
+		ValNestedEmpty: basic.NestedEmpty{
+			Empty: basic.EmptyStruct{},
+		},
+		ValByteArray: []byte{1, 2, 3},
 	}
 	size := input.ByteSize()
 	writer := serialize.NewFixedSizeWriter(size)
@@ -59,6 +64,7 @@ func TestSerializeBasic(t *testing.T) {
 	assert.Equal(t, input.ValEnum, output.ValEnum)
 	assert.Equal(t, input.ValListEnum, output.ValListEnum)
 	assert.Equal(t, input.ValMapEnumString, output.ValMapEnumString)
+	assert.Equal(t, input.ValByteArray, output.ValByteArray)
 }
 
 func TestSerializeComplicated(t *testing.T) {

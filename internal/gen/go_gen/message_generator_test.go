@@ -36,7 +36,6 @@ func TestGetDataTypeDefinitionMethodSuffix(t *testing.T) {
 			Type:                     parse.DataTypeComparableCustom,
 			CustomType:               "TypedefType",
 			CustomTypePackage:        "other",
-			UnderlyingType:           parse.DataTypeComparableString,
 			ImportedFromOtherPackage: true,
 		},
 		SubType: &parse.DataTypeDefinition{
@@ -74,7 +73,6 @@ func TestGenerateSerializeContainerMethod(t *testing.T) {
 			Type:                     parse.DataTypeComparableCustom,
 			CustomType:               "TypedefType",
 			CustomTypePackage:        "other",
-			UnderlyingType:           parse.DataTypeComparableString,
 			ImportedFromOtherPackage: true,
 		},
 		SubType: &parse.DataTypeDefinition{
@@ -121,7 +119,6 @@ func TestGenerateMessageSerializeMethod(t *testing.T) {
 						Type:                     parse.DataTypeComparableCustom,
 						CustomType:               "TypedefType",
 						CustomTypePackage:        "other",
-						UnderlyingType:           parse.DataTypeComparableString,
 						ImportedFromOtherPackage: true,
 					},
 					SubType: &parse.DataTypeDefinition{

@@ -13,6 +13,7 @@ const (
 	TypedefTokenType
 	EnumTokenType
 	EnumValueTokenType
+	ConstTokenType
 )
 
 type Token struct {

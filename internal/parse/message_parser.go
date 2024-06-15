@@ -64,7 +64,6 @@ type DataTypeComparableDefinition struct {
 	Type                     DataTypeComparable
 	CustomType               string
 	CustomTypePackage        string
-	UnderlyingType           DataTypeComparable
 	ImportedFromOtherPackage bool
 	Token                    *Token
 }

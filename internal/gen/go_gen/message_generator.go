@@ -45,7 +45,7 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromJSON(data []b
 	}
 	return nil
 }
-
+{{- if gt (len .MessageFields) 0 }}
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ToBytes() []byte {
 	size := {{.MessageNameFirstLetter}}.ByteSize()
 	writer := serialize.NewFixedSizeWriter(size)
@@ -56,6 +56,15 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ToBytes() []byte 
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromBytes(bs []byte) error {
 	return {{.MessageNameFirstLetter}}.Deserialize(serialize.NewReader(bs))
 }
+{{- else}}
+func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ToBytes() []byte {
+	return []byte{}
+}
+
+func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromBytes(bs []byte) error {
+	return nil
+}
+{{- end }}
 
 {{.ByteSizeCode}}
 {{.SerializeCode}}
@@ -89,13 +98,13 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ByteSize() int {
 
 const messageSerializeMethodTemplateStr = `
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) Serialize(writer *serialize.FixedSizeWriter) {
-	{{range .FieldSerializeMethodCalls}}
+	{{- range .FieldSerializeMethodCalls}}
 	{{.}}{{end}}
 }`
 
 const messageDeserializeMethodTemplateStr = `
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) Deserialize(reader *serialize.Reader) error {
-	var err error{{range .FieldDeserializeMethodCalls}}
+	{{- if gt (len .FieldDeserializeMethodCalls) 0 }}var err error{{end}}{{range .FieldDeserializeMethodCalls}}
 	err = {{.}}
 	if err != nil {
 		return err

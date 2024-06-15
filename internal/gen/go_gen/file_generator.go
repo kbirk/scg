@@ -7,6 +7,7 @@ import (
 	"text/template"
 
 	"github.com/kbirk/scg/internal/parse"
+	"github.com/pkg/errors"
 )
 
 type FileArgs struct {
@@ -15,6 +16,7 @@ type FileArgs struct {
 	Imports  string
 	Enums    string
 	Typedefs string
+	Consts   string
 	Messages string
 	Servers  string
 	Clients  string
@@ -26,6 +28,7 @@ const fileTemplateStr = `
 {{.Imports}}
 {{.Enums}}
 {{.Typedefs}}
+{{.Consts}}
 {{.Messages}}
 {{.Servers}}
 {{.Clients}}
@@ -70,6 +73,15 @@ func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.Fi
 		typedefCode = append(typedefCode, typdef)
 	}
 
+	var constsCode []string
+	for _, c := range file.ConstsSortedByKey() {
+		consts, err := generateConstGoCode(c)
+		if err != nil {
+			return "", err
+		}
+		constsCode = append(constsCode, consts)
+	}
+
 	var messageCode []string
 	for _, msg := range file.MessagesSortedByKey() {
 		message, err := generateMessageGoCode(msg)
@@ -103,6 +115,7 @@ func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.Fi
 		Imports:  importCode,
 		Enums:    strings.Join(enumCode, "\n"),
 		Typedefs: strings.Join(typedefCode, "\n"),
+		Consts:   strings.Join(constsCode, "\n"),
 		Messages: strings.Join(messageCode, "\n"),
 		Servers:  strings.Join(serverCode, "\n"),
 		Clients:  strings.Join(clientCode, "\n"),
@@ -116,7 +129,7 @@ func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.Fi
 
 	formattedCode, err := format.Source(buf.Bytes())
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "failed to gofmt code:\n"+string(buf.Bytes()))
 	}
 
 	return string(formattedCode), nil

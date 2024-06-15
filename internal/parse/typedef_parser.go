@@ -41,7 +41,7 @@ func parseTypedefDeclarations(tokens []*Token) (map[string]*TypedefDeclaration, 
 		if typ.Type == DataTypeComparableCustom {
 			return nil, &ParsingError{
 				Message: fmt.Sprintf("typedef cannot be %s, must be plain comparable type", typ.CustomType),
-				Token:   token,
+				Token:   match.Captures[1],
 			}
 		}
 

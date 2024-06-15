@@ -18,6 +18,9 @@ var (
 	typedefDeclaration = map[string]TokenType{
 		"typedef": TypedefTokenType,
 	}
+	constDeclaration = map[string]TokenType{
+		"const": ConstTokenType,
+	}
 )
 
 type ParseState struct {
@@ -281,6 +284,124 @@ func (p *TypedefDeclarationParser) Consume(c rune, state *ParseState) (TokenPars
 	return p, nil
 }
 
+type ConstDeclarationParser struct {
+	expectingConstType  bool
+	expectingConstName  bool
+	expectingAssignment bool
+	expectingConstValue bool
+	insideAQuote        bool
+	expectingSemiColon  bool
+}
+
+func (p *ConstDeclarationParser) isThisQuoteEscaped(state *ParseState) bool {
+	// if previous character is a `\` and the one before that is not a `\`, it is escaped
+	if state.currentToken.Content[len(state.currentToken.Content)-2] == '\\' && state.currentToken.Content[len(state.currentToken.Content)-3] != '\\' {
+		return true
+	}
+	return false
+}
+
+func (p *ConstDeclarationParser) Consume(c rune, state *ParseState) (TokenParser, error) {
+	if c == '\n' {
+		state.line++
+		state.character = 0
+		state.inComment = false
+	} else {
+		state.character++
+	}
+	breakWord := false
+	if unicode.IsSpace(c) {
+		// whitespace
+		state.currentToken.Content += string(c)
+		breakWord = true
+
+	} else if c == commentDelimiter || state.inComment {
+		// comment
+		state.inComment = true
+		breakWord = true
+		state.currentToken.Content += " " // replace comment with whitespace
+
+	} else {
+		// character
+		state.currentToken.Content += string(c)
+
+		if c == '"' {
+			if !p.expectingConstValue {
+				return nil, fmt.Errorf("unexpected `\"`")
+			}
+
+			if !p.isThisQuoteEscaped(state) {
+				if !p.insideAQuote {
+					p.insideAQuote = true
+				} else {
+					p.insideAQuote = false
+
+					// treat this as a word break
+					state.word += string(c)
+					state.inWord = true
+				}
+			}
+
+		} else if c == '=' && !p.insideAQuote {
+			if !p.expectingAssignment && !state.inWord {
+				return nil, fmt.Errorf("unexpected '=' operator")
+			}
+
+			p.expectingAssignment = false
+			p.expectingConstValue = true
+
+		} else if c == ';' && !p.insideAQuote {
+			if !p.expectingSemiColon && !state.inWord {
+				return nil, fmt.Errorf("unexpected semi-colon")
+			}
+
+			state.currentToken.LineEnd = state.line
+			state.currentToken.LineEndCharacterPosition = state.character
+
+			state.tokens = append(state.tokens, state.currentToken)
+			state.currentToken = nil
+
+			state.word = ""
+			state.inWord = false
+
+			// done
+			return &KeywordTokenParser{}, nil
+		} else if !p.insideAQuote {
+			if p.expectingAssignment {
+				return nil, fmt.Errorf("unexpected character `%s`", string(c))
+			}
+			if p.expectingSemiColon {
+				return nil, fmt.Errorf("unexpected character `%s`", string(c))
+			}
+			state.word += string(c)
+			state.inWord = true
+		}
+	}
+
+	if breakWord && state.inWord {
+		if p.expectingConstType {
+			p.expectingConstType = false
+			p.expectingConstName = true
+			state.word = ""
+			state.inWord = false
+		} else if p.expectingConstName {
+			p.expectingConstType = false
+			p.expectingAssignment = true
+			state.word = ""
+			state.inWord = false
+		} else if p.expectingConstValue {
+			p.expectingConstValue = false
+			p.expectingSemiColon = true
+			state.word = ""
+			state.inWord = false
+		} else {
+			return nil, fmt.Errorf("unexpected keyword `%s`", state.word)
+		}
+	}
+
+	return p, nil
+}
+
 func (p *KeywordTokenParser) Consume(c rune, state *ParseState) (TokenParser, error) {
 
 	if state.currentToken == nil {
@@ -355,6 +476,15 @@ func (p *KeywordTokenParser) Consume(c rune, state *ParseState) (TokenParser, er
 			state.currentToken.Type = tokenType
 			return &TypedefDeclarationParser{
 				expectingTypedefName: true,
+			}, nil
+		}
+
+		if tokenType, ok = constDeclaration[state.word]; ok {
+			state.word = ""
+			state.inWord = false
+			state.currentToken.Type = tokenType
+			return &ConstDeclarationParser{
+				expectingConstType: true,
 			}, nil
 		}
 
