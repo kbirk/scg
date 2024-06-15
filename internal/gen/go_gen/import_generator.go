@@ -83,7 +83,7 @@ func generateImportsGoCode(goBasePackage string, file *parse.File) (string, erro
 
 	args := ImportArgs{}
 
-	if len(file.MessageDefinitions) > 0 || len(file.Typedefs) > 0 {
+	if len(file.MessageDefinitions) > 0 {
 
 		args.STDPackages = append(args.STDPackages, messageImportsSTD...)
 		args.SCGPackages = append(args.SCGPackages, messageImportsSCG...)
