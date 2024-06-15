@@ -38,6 +38,10 @@ var (
 	messageImportsSCG = []string{
 		"github.com/kbirk/scg/pkg/serialize",
 	}
+	typedefImportsSTD = []string{}
+	typedefImportsSCG = []string{
+		"github.com/kbirk/scg/pkg/serialize",
+	}
 	serviceImportsSTD = []string{
 		"context",
 		"fmt",
@@ -107,6 +111,9 @@ func generateImportsGoCode(goBasePackage string, file *parse.File) (string, erro
 	}
 
 	if len(file.Typedefs) > 0 {
+
+		args.STDPackages = append(args.STDPackages, typedefImportsSTD...)
+		args.SCGPackages = append(args.SCGPackages, typedefImportsSCG...)
 
 		// check if uuid type
 		for _, typedef := range file.Typedefs {
