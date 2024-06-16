@@ -142,6 +142,12 @@ public:
 		return os;
 	}
 
+	inline friend std::istream& operator>>(std::istream& is, strong_typedef<T, Tag>& x)
+	{
+		is >> x.value_;
+		return is;
+	}
+
 	uint32_t byteSize() const
 	{
 		return scg::serialize::byte_size(value_);
@@ -188,3 +194,24 @@ struct std::hash<scg::type::strong_typedef<T, Tag>> {
 };
 
 #define SCG_TYPEDEF(N, T) using N = scg::type::strong_typedef<T, struct N##_>
+
+namespace nlohmann {
+
+	template <typename T, typename Tag>
+	struct adl_serializer<scg::type::strong_typedef<T, Tag>>
+	{
+		static void to_json(json& j, const scg::type::strong_typedef<T, Tag>& type)
+		{
+			std::stringstream ss;
+			ss << type;
+			j = ss.str();
+		}
+
+		static void from_json(const json& j, scg::type::strong_typedef<T, Tag>& type)
+		{
+			auto str = j.get<std::string>();
+			std::stringstream ss(str);
+			ss >> type;
+		}
+	};
+}

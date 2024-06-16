@@ -19,7 +19,7 @@ func TestGenerateFileCpp(t *testing.T) {
 	file, ok := parse.Files["sample0.scg"]
 	require.True(t, ok)
 
-	str, err := generateFileCppCode(pkg, file)
+	str, err := generateFileCppCode("", pkg, file)
 	require.Nil(t, err)
 
 	fmt.Println(str)
@@ -43,10 +43,10 @@ func TestGenerateMultipleFileWithImportCpp(t *testing.T) {
 	file1, ok := parse.Files["sample1/sample1.scg"]
 	require.True(t, ok)
 
-	str0, err := generateFileCppCode(pkg0, file0)
+	str0, err := generateFileCppCode("", pkg0, file0)
 	require.Nil(t, err)
 
-	str1, err := generateFileCppCode(pkg1, file1)
+	str1, err := generateFileCppCode("", pkg1, file1)
 	require.Nil(t, err)
 
 	fmt.Println(str0)

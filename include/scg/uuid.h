@@ -136,6 +136,14 @@ public:
 		return os;
 	}
 
+	inline friend std::istream& operator>>(std::istream& is, uuid& v)
+	{
+		std::string str;
+		is >> str;
+		v.fromString(str);
+		return is;
+	}
+
 	friend std::hash<scg::uuid>;
 
 private:

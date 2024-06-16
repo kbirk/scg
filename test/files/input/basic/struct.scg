@@ -28,6 +28,10 @@ message NestedEmpty {
 	EmptyStruct empty = 0;
 }
 
+message Tricky {
+	SomeID id = 0;
+}
+
 message BasicStruct {
 	uint8 val_uint_8 = 0;
 	int8 val_int_8 = 1;
