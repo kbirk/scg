@@ -83,7 +83,7 @@ func hasUUIDType(dataType *parse.DataTypeDefinition) bool {
 	return dataType.Type == parse.DataTypeUUID
 }
 
-func generateImportsGoCode(goBasePackage string, file *parse.File) (string, error) {
+func generateImportsGoCode(basePackage string, file *parse.File) (string, error) {
 
 	args := ImportArgs{}
 
@@ -132,7 +132,7 @@ func generateImportsGoCode(goBasePackage string, file *parse.File) (string, erro
 	args.SCGPackages = util.RemoveDuplicates(args.SCGPackages)
 
 	for _, dep := range file.GetPackageDependencies() {
-		args.CustomPackages = append(args.CustomPackages, fmt.Sprintf("%s/%s", goBasePackage, convertPackageNameToGoPackage(dep.PackageName)))
+		args.CustomPackages = append(args.CustomPackages, fmt.Sprintf("%s/%s", basePackage, convertPackageNameToGoPackage(dep.PackageName)))
 	}
 
 	buf := &bytes.Buffer{}

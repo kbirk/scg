@@ -23,3 +23,7 @@ message TestRequestB {
 message TestResponseB {
 	string b = 0;
 }
+
+message Another {
+	BasicStruct a = 0;
+}

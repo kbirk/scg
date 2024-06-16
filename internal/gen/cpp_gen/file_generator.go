@@ -34,7 +34,7 @@ var (
 	fileTemplate = template.Must(template.New("fileTemplate").Parse(fileTemplateStr))
 )
 
-func generateFileCppCode(pkg *parse.Package, file *parse.File) (string, error) {
+func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (string, error) {
 
 	headerCode, err := generateHeaderCpp(file)
 	if err != nil {
@@ -43,7 +43,7 @@ func generateFileCppCode(pkg *parse.Package, file *parse.File) (string, error) {
 
 	namespaces := convertPackageNameToCppNamespaces(pkg.Name)
 
-	importCode, err := generateImportsCppCode(file)
+	importCode, err := generateImportsCppCode(baseDir, file)
 	if err != nil {
 		return "", err
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/kbirk/scg/internal/parse"
 )
 
-func GenerateCppCode(outputDir string, p *parse.Parse) error {
+func GenerateCppCode(baseDir string, outputDir string, p *parse.Parse) error {
 	for path, file := range p.Files {
 
 		pkg, ok := p.Packages[file.Package.Name]
@@ -16,7 +16,7 @@ func GenerateCppCode(outputDir string, p *parse.Parse) error {
 			return fmt.Errorf("package not found: %s", file.Package.Name)
 		}
 
-		code, err := generateFileCppCode(pkg, file)
+		code, err := generateFileCppCode(baseDir, pkg, file)
 		if err != nil {
 			return err
 		}

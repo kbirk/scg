@@ -15,14 +15,16 @@ const (
 )
 
 var (
-	input  string
-	output string
+	input   string
+	output  string
+	baseDir string
 )
 
 func main() {
 
 	flag.StringVar(&input, "input", "", "Input dir")
 	flag.StringVar(&output, "output", "", "Output dir")
+	flag.StringVar(&baseDir, "base-dir", "", "Golang base package")
 
 	flag.Parse()
 
@@ -45,7 +47,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = cpp_gen.GenerateCppCode(output, p)
+	err = cpp_gen.GenerateCppCode(baseDir, output, p)
 	if err != nil {
 		os.Stderr.WriteString(red("ERROR: ") + fmt.Sprintf("Failed to generate cpp output: %v\n", err.Error()))
 		os.Exit(1)

@@ -38,7 +38,7 @@ var (
 	fileTemplate = template.Must(template.New("fileTemplate").Parse(fileTemplateStr))
 )
 
-func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.File) (string, error) {
+func generateFileGoCode(basePackage string, pkg *parse.Package, file *parse.File) (string, error) {
 
 	headerCode, err := generateHeaderGo(file)
 	if err != nil {
@@ -50,7 +50,7 @@ func generateFileGoCode(goBasePackage string, pkg *parse.Package, file *parse.Fi
 		return "", err
 	}
 
-	importCode, err := generateImportsGoCode(goBasePackage, file)
+	importCode, err := generateImportsGoCode(basePackage, file)
 	if err != nil {
 		return "", err
 	}

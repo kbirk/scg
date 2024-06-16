@@ -8,7 +8,7 @@ import (
 	"github.com/kbirk/scg/internal/parse"
 )
 
-func GenerateGoCode(goBasePackage, outputDir string, p *parse.Parse) error {
+func GenerateGoCode(basePackage, outputDir string, p *parse.Parse) error {
 	for path, file := range p.Files {
 
 		pkg, ok := p.Packages[file.Package.Name]
@@ -16,7 +16,7 @@ func GenerateGoCode(goBasePackage, outputDir string, p *parse.Parse) error {
 			return fmt.Errorf("package not found: %s", file.Package.Name)
 		}
 
-		code, err := generateFileGoCode(goBasePackage, pkg, file)
+		code, err := generateFileGoCode(basePackage, pkg, file)
 		if err != nil {
 			return err
 		}
