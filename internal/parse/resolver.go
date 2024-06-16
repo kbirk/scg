@@ -39,17 +39,17 @@ func cloneTraversed(traversed map[string]bool) map[string]bool {
 
 func resolveFileDependencies(traversed map[string]bool, file *File) *ParsingError {
 
-	for _, dep := range file.CustomTypeDependencies {
-
-		_, ok := traversed[dep.File.Name]
-		if ok {
-			return &ParsingError{
-				Message: fmt.Sprintf("circular dependency detected between files %s and %s", file.Name, dep.File.Name),
-				Token:   nil,
-			}
+	_, ok := traversed[file.Name]
+	if ok {
+		return &ParsingError{
+			Message: fmt.Sprintf("circular dependency detected between in file %s", file.Name),
+			Token:   nil,
 		}
+	}
 
-		traversed[dep.File.Name] = true
+	traversed[file.Name] = true
+
+	for _, dep := range file.CustomTypeDependencies {
 
 		perr := resolveFileDependencies(cloneTraversed(traversed), dep.File)
 		if perr != nil {

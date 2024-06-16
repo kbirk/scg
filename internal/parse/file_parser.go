@@ -315,8 +315,8 @@ func populateDataTypePackageIfMissing(packageName string, dataType *DataTypeDefi
 
 func addCustomComparableTypeDependency(dependencies map[string]*CustomTypeDependency, dataType *DataTypeComparableDefinition) *ParsingError {
 	if dataType.Type == DataTypeComparableCustom {
-		if _, ok := dependencies[dataType.CustomTypePackage]; !ok {
-			dependencies[dataType.CustomTypePackage] = &CustomTypeDependency{
+		if _, ok := dependencies[dataType.ToString()]; !ok {
+			dependencies[dataType.ToString()] = &CustomTypeDependency{
 				CustomTypePackage: dataType.CustomTypePackage,
 				CustomTypeName:    dataType.CustomType,
 				Token:             dataType.Token,
@@ -361,8 +361,8 @@ func addCustomTypeDependency(dependencies map[string]*CustomTypeDependency, data
 	}
 
 	if dataType.Type == DataTypeCustom {
-		if _, ok := dependencies[dataType.CustomTypePackage]; !ok {
-			dependencies[dataType.CustomTypePackage] = &CustomTypeDependency{
+		if _, ok := dependencies[dataType.ToString()]; !ok {
+			dependencies[dataType.ToString()] = &CustomTypeDependency{
 				CustomTypePackage: dataType.CustomTypePackage,
 				CustomTypeName:    dataType.CustomType,
 				Token:             dataType.Token,

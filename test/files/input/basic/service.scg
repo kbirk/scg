@@ -25,5 +25,5 @@ message TestResponseB {
 }
 
 message Another {
-	BasicStruct a = 0;
+	SomeEnum b = 0;
 }
