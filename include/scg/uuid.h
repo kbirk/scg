@@ -10,6 +10,8 @@
 
 #include "scg/error.h"
 #include "scg/serialize.h"
+#include "scg/writer.h"
+#include "scg/reader.h"
 
 #include "nlohmann/json.hpp"
 
@@ -138,9 +140,10 @@ public:
 
 	inline std::vector<uint8_t> toBytes() const
 	{
-		scg::serialize::FixedSizeWriter writer(byteSize());
+		std::vector<uint8_t> data(byteSize());
+		scg::serialize::WriterView writer(data);
 		serialize(writer);
-		return writer.bytes();
+		return data;
 	}
 
 	inline error::Error fromBytes(const std::vector<uint8_t>& bytes)

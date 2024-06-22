@@ -46,12 +46,14 @@ public:
 		return serialize::byte_size(values_);
 	}
 
-	inline void serialize(serialize::FixedSizeWriter& writer) const
+	template <typename WriterType>
+	inline void serialize(WriterType& writer) const
 	{
 		serialize::serialize(writer, values_);
 	}
 
-	inline error::Error deserialize(serialize::Reader& reader)
+	template <typename ReaderType>
+	inline error::Error deserialize(ReaderType& reader)
 	{
 		return serialize::deserialize(values_, reader);
 	}

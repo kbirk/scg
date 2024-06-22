@@ -3,6 +3,8 @@
 #include <chrono>
 
 #include "scg/serialize.h"
+#include "scg/writer.h"
+#include "scg/reader.h"
 
 #include "nlohmann/json.hpp"
 
@@ -74,8 +76,8 @@ public:
 		auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration_since_epoch);
 		auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch - seconds);
 
-		scg::serialize::serialize(writer, uint64_t(seconds.count()));
-		scg::serialize::serialize(writer, uint64_t(nanoseconds.count()));
+		serialize::serialize(writer, uint64_t(seconds.count()));
+		serialize::serialize(writer, uint64_t(nanoseconds.count()));
 	}
 
 	template <typename ReaderType>
@@ -84,11 +86,11 @@ public:
 		uint64_t seconds = 0;
 		uint64_t nanoseconds = 0;
 
-		auto err = scg::serialize::deserialize(seconds, reader);
+		auto err = serialize::deserialize(seconds, reader);
 		if (err) {
 			return err;
 		}
-		err = scg::serialize::deserialize(nanoseconds, reader);
+		err = serialize::deserialize(nanoseconds, reader);
 		if (err) {
 			return err;
 		}
@@ -99,9 +101,10 @@ public:
 
 	inline std::vector<uint8_t> toBytes() const
 	{
-		scg::serialize::FixedSizeWriter writer(byteSize());
+		std::vector<uint8_t> data(byteSize());
+		scg::serialize::WriterView writer(data);
 		serialize(writer);
-		return writer.bytes();
+		return data;
 	}
 
 	inline error::Error fromBytes(const std::vector<uint8_t>& bytes)

@@ -13,6 +13,8 @@
 
 #include "scg/error.h"
 #include "scg/serialize.h"
+#include "scg/reader.h"
+#include "scg/writer.h"
 #include "scg/const.h"
 #include "scg/context.h"
 #include "scg/logger.h"
