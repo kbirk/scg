@@ -11,6 +11,8 @@
 #include "scg/error.h"
 #include "scg/serialize.h"
 
+#include "nlohmann/json.hpp"
+
 namespace scg {
 
 // RFC 4122 UUID
@@ -116,13 +118,13 @@ public:
 	}
 
 	template <typename WriterType>
-	inline void serialize(WriterType& writer) const
+	void serialize(WriterType& writer) const
 	{
 		writer.write(bytes_, 16);
 	}
 
 	template <typename ReaderType>
-	inline error::Error deserialize(ReaderType& reader)
+	error::Error deserialize(ReaderType& reader)
 	{
 		reader.read(bytes_, 16);
 		if ((bytes_[6] & 0xF0) != 0x40) {
@@ -132,6 +134,19 @@ public:
 			return error::Error("Invalid UUID variant");
 		}
 		return nullptr;
+	}
+
+	inline std::vector<uint8_t> toBytes() const
+	{
+		scg::serialize::FixedSizeWriter writer(byteSize());
+		serialize(writer);
+		return writer.bytes();
+	}
+
+	inline error::Error fromBytes(const std::vector<uint8_t>& bytes)
+	{
+		scg::serialize::ReaderView reader(bytes);
+		return deserialize(reader);
 	}
 
 	friend bool operator==(const uuid& lhs, const uuid& rhs) {

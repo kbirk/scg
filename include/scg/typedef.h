@@ -4,6 +4,8 @@
 
 #include <scg/serialize.h>
 
+#include "nlohmann/json.hpp"
+
 namespace scg {
 namespace type {
 
@@ -148,7 +150,7 @@ public:
 		return is;
 	}
 
-	uint32_t byteSize() const
+	inline uint32_t byteSize() const
 	{
 		return scg::serialize::byte_size(value_);
 	}
@@ -163,6 +165,19 @@ public:
 	error::Error deserialize(ReaderType& reader)
 	{
 		return serialize::deserialize(value_, reader);
+	}
+
+	inline std::vector<uint8_t> toBytes() const
+	{
+		scg::serialize::FixedSizeWriter writer(byteSize());
+		serialize(writer);
+		return writer.bytes();
+	}
+
+	inline error::Error fromBytes(const std::vector<uint8_t>& bytes)
+	{
+		scg::serialize::ReaderView reader(bytes);
+		return deserialize(reader);
 	}
 
 private:

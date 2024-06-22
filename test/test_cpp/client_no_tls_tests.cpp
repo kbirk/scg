@@ -63,7 +63,7 @@ void test_pingpong_client_no_tls() {
 		payload.valFloat = 3.14 + i + 9;
 		payload.valDouble = -3.14159 + i + 10;
 		payload.valString = "hello world " + std::to_string(i + 11);
-		payload.valTimestamp = std::chrono::system_clock::now();
+		payload.valTimestamp = scg::timestamp();
 		payload.valBool = i % 2 == 0;
 		payload.valEnum = pingpong::EnumType::ENUM_TYPE_1;
 		payload.valUuid = scg::uuid::random();

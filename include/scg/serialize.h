@@ -9,7 +9,6 @@
 
 #include "scg/pack.h"
 #include "scg/error.h"
-#include "scg/timestamp.h"
 
 namespace scg {
 namespace serialize {
@@ -480,41 +479,6 @@ inline error::Error deserialize(std::string& value, ReaderType& reader)
 
 	value.resize(len);
 	return reader.read((uint8_t*)value.data(), len);
-}
-
-inline uint32_t byte_size(timestamp value)
-{
-	return 16;
-}
-
-template <typename WriterType>
-inline void serialize(WriterType& writer, timestamp value)
-{
-	auto duration_since_epoch = value.time_since_epoch();
-	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration_since_epoch);
-	auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch - seconds);
-
-	serialize(writer, uint64_t(seconds.count()));
-	serialize(writer, uint64_t(nanoseconds.count()));
-}
-
-template <typename ReaderType>
-inline error::Error deserialize(timestamp& value, ReaderType& reader)
-{
-	uint64_t seconds = 0;
-	uint64_t nanoseconds = 0;
-
-	auto err = deserialize(seconds, reader);
-	if (err) {
-		return err;
-	}
-	err = deserialize(nanoseconds, reader);
-	if (err) {
-		return err;
-	}
-
-	value = timestamp(std::chrono::seconds(seconds) + std::chrono::nanoseconds(nanoseconds));
-	return nullptr;
 }
 
 template <typename T,

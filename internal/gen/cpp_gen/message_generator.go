@@ -43,34 +43,21 @@ struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 
 	inline std::vector<uint8_t> toBytes() const
 	{
-		uint32_t size = 0;{{- range .MessageFields}}
-		size += scg::serialize::byte_size({{.FieldNameCamelCase}});{{end}}
-
-		scg::serialize::FixedSizeWriter writer(size); {{- range .MessageFields}}
-		scg::serialize::serialize(writer, {{.FieldNameCamelCase}});{{end}}
+		scg::serialize::FixedSizeWriter writer(byteSize());
+		serialize(writer);
 		return writer.bytes();
 	}
 
 	inline scg::error::Error fromBytes(const std::vector<uint8_t>& data)
 	{
-		scg::error::Error err;
-		scg::serialize::ReaderView reader(data);{{- range .MessageFields}}
-		err = scg::serialize::deserialize({{.FieldNameCamelCase}}, reader);
-		if (err) {
-			return err;
-		}{{end}}
-		return nullptr;
+		scg::serialize::ReaderView reader(data);
+		return deserialize(reader);
 	}
 
 	inline scg::error::Error fromBytes(const uint8_t* data, uint32_t size)
 	{
-		scg::error::Error err;
-		scg::serialize::ReaderView reader(data, size);{{- range .MessageFields}}
-		err = scg::serialize::deserialize({{.FieldNameCamelCase}}, reader);
-		if (err) {
-			return err;
-		}{{end}}
-		return nullptr;
+		scg::serialize::ReaderView reader(data, size);
+		return deserialize(reader);
 	}
 
 	template <typename WriterType>

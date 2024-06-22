@@ -174,7 +174,7 @@ void test_serialize_string()
 
 void test_serialize_timestamp()
 {
-	scg::timestamp input = std::chrono::system_clock::now();
+	scg::timestamp input;
 
 	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
 	scg::serialize::serialize(writer, input);
@@ -263,7 +263,7 @@ void test_serialize_pingpong()
 	input.valFloat = 3.14 + 9;
 	input.valDouble = -3.14159 + 10;
 	input.valString = "hello world " + std::to_string(11);
-	input.valTimestamp = std::chrono::system_clock::now();
+	input.valTimestamp = scg::timestamp();
 	input.valBool = true;
 	input.valEnum = pingpong::EnumType::ENUM_TYPE_1;
 	input.valUuid = scg::uuid::random();
