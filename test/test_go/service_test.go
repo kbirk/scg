@@ -38,6 +38,10 @@ func authMiddleware(ctx context.Context) (context.Context, error) {
 	return ctx, nil
 }
 
+func alwaysRejectMiddleware(ctx context.Context) (context.Context, error) {
+	return nil, fmt.Errorf("rejected")
+}
+
 type pingpongServer struct {
 }
 
@@ -161,8 +165,8 @@ func TestPingPongTLSAndAuth(t *testing.T) {
 			require.NoError(t, err)
 		},
 	})
+	server.Middleware(authMiddleware)
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
-	pingpong.RegisterPingPongServerMiddleware(server, authMiddleware)
 
 	go func() {
 		server.ListenAndServeTLS("../server.crt", "../server.key")
@@ -251,8 +255,8 @@ func TestPingPongAuthFail(t *testing.T) {
 			require.NoError(t, err)
 		},
 	})
+	server.Middleware(authMiddleware)
 	pingpong.RegisterPingPongServer(server, &pingpongServerFail{})
-	pingpong.RegisterPingPongServerMiddleware(server, authMiddleware)
 
 	go func() {
 		server.ListenAndServe()
@@ -292,8 +296,8 @@ func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 		},
 	})
 	server.Group(func(s *rpc.Server) {
+		server.Middleware(authMiddleware)
 		pingpong.RegisterPingPongServer(server, &pingpongServer{})
-		pingpong.RegisterPingPongServerMiddleware(server, authMiddleware)
 	})
 
 	go func() {
@@ -388,8 +392,8 @@ func TestServerGroupsMiddleware(t *testing.T) {
 		},
 	})
 
-	server.Group(func(s *rpc.Server) {
-		s.RegisterMiddleware(authMiddleware)
+	server.Group(func(server *rpc.Server) {
+		server.Middleware(authMiddleware)
 		basic.RegisterTesterAServer(server, &testerAServer{})
 	})
 	server.Group(func(s *rpc.Server) {
@@ -422,6 +426,61 @@ func TestServerGroupsMiddleware(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "B", resp.B)
+
+	err = server.Shutdown(context.Background())
+	require.NoError(t, err)
+}
+
+func TestServerNestedGroupsMiddleware(t *testing.T) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Port: 8080,
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+
+	server.Group(func(server *rpc.Server) {
+
+		server.Middleware(authMiddleware)
+		basic.RegisterTesterAServer(server, &testerAServer{})
+
+		server.Group(func(s *rpc.Server) {
+
+			server.Middleware(alwaysRejectMiddleware)
+			basic.RegisterTesterBServer(server, &testerBServer{})
+		})
+	})
+
+	go func() {
+		server.ListenAndServe()
+	}()
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Host: "localhost",
+		Port: 8080,
+		ErrHandler: func(err error) {
+			require.NoError(t, err)
+		},
+	})
+
+	cA := basic.NewTesterAClient(client)
+	cB := basic.NewTesterBClient(client)
+
+	_, err := cA.Test(context.Background(), &basic.TestRequestA{
+		A: "A",
+	})
+	require.Error(t, err)
+	assert.Equal(t, "no metadata", err.Error())
+
+	ctx := rpc.NewContextWithMetadata(context.Background(), map[string]string{
+		"token": "1234",
+	})
+
+	_, err = cB.Test(ctx, &basic.TestRequestB{
+		B: "B",
+	})
+	require.Error(t, err)
+	assert.Equal(t, "rejected", err.Error())
 
 	err = server.Shutdown(context.Background())
 	require.NoError(t, err)

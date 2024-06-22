@@ -41,10 +41,6 @@ func Register{{.ServerNamePascalCase}}(server *rpc.Server, {{.ServerNameCamelCas
 	server.RegisterServer({{.ServiceIDVarName}}, &{{.ServerStubStructName}}{ {{.ServerNameCamelCase}} })
 }
 
-func Register{{.ServerNamePascalCase}}Middleware(server *rpc.Server, middleware rpc.Middleware) {
-	server.RegisterServerMiddleware({{.ServiceIDVarName}}, middleware)
-}
-
 type {{.ServerStubStructName}} struct {
 	server {{.ServerNamePascalCase}}
 }

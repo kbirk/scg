@@ -73,8 +73,8 @@ func main() {
 			fmt.Println("Server error handler:", err)
 		},
 	})
+	server.Middleware(authMiddleware)
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
-	pingpong.RegisterPingPongServerMiddleware(server, authMiddleware)
 
 	err := server.ListenAndServeTLS(certFile, keyFile)
 	if err != nil {

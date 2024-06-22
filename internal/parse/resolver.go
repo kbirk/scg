@@ -42,7 +42,7 @@ func resolveFileDependencies(traversed map[string]bool, file *File) *ParsingErro
 	_, ok := traversed[file.Name]
 	if ok {
 		return &ParsingError{
-			Message: fmt.Sprintf("circular dependency detected between in file %s", file.Name),
+			Message: fmt.Sprintf("circular dependency detected in file %s", file.Name),
 			Token:   nil,
 		}
 	}

@@ -58,7 +58,6 @@ func SerializeContext(writer *serialize.FixedSizeWriter, ctx context.Context) {
 }
 
 func DeserializeContext(ctx *context.Context, reader *serialize.Reader) error {
-
 	var size uint32
 	err := serialize.DeserializeUInt32(&size, reader)
 	if err != nil {

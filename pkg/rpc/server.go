@@ -19,15 +19,16 @@ var upgrader = websocket.Upgrader{
 type Server struct {
 	conf             ServerConfig
 	server           *http.Server
-	groups           []*ServerGroup
+	rootGroup        *ServerGroup
 	groupByServiceID map[uint64]*ServerGroup
 	activeGroup      *ServerGroup
 }
 
 type ServerGroup struct {
-	services          map[uint64]serverStub
-	serviceMiddleware map[uint64][]Middleware
-	middleware        []Middleware
+	services   map[uint64]serverStub
+	middleware []Middleware
+	parent     *ServerGroup
+	children   []*ServerGroup
 }
 
 type ServerConfig struct {
@@ -62,21 +63,21 @@ func RespondWithMessage(requestID uint64, msg Message) []byte {
 
 func newServerGroup() *ServerGroup {
 	return &ServerGroup{
-		services:          make(map[uint64]serverStub),
-		serviceMiddleware: make(map[uint64][]Middleware),
+		services: make(map[uint64]serverStub),
 	}
 }
 
 func NewServer(conf ServerConfig) *Server {
 
-	defaultGroup := newServerGroup()
+	rootGroup := newServerGroup()
 
 	s := &Server{
 		conf: conf,
 		server: &http.Server{
 			Addr: fmt.Sprintf(":%d", conf.Port),
 		},
-		activeGroup:      defaultGroup,
+		rootGroup:        rootGroup,
+		activeGroup:      rootGroup,
 		groupByServiceID: make(map[uint64]*ServerGroup),
 	}
 
@@ -89,10 +90,11 @@ func NewServer(conf ServerConfig) *Server {
 
 func (s *Server) Group(fn func(*Server)) {
 	g := newServerGroup()
+	g.parent = s.activeGroup
+	s.activeGroup.children = append(s.activeGroup.children, g)
 	s.activeGroup = g
-	s.groups = append(s.groups, g)
 	fn(s)
-	s.activeGroup = s.groups[0]
+	s.activeGroup = g.parent
 }
 
 func (s *Server) handleError(err error) {
@@ -146,24 +148,12 @@ func (g *ServerGroup) registerServer(id uint64, service serverStub) {
 	g.services[id] = service
 }
 
-func (s *Server) RegisterMiddleware(m Middleware) {
+func (s *Server) Middleware(m Middleware) {
 	s.activeGroup.middleware = append(s.activeGroup.middleware, m)
 }
 
 func (g *ServerGroup) registerMiddleware(m Middleware) {
 	g.middleware = append(g.middleware, m)
-}
-
-func (s *Server) RegisterServerMiddleware(id uint64, m Middleware) {
-	s.activeGroup.registerServerMiddleware(id, m)
-}
-
-func (g *ServerGroup) registerServerMiddleware(id uint64, m Middleware) {
-	middleware, ok := g.serviceMiddleware[id]
-	if !ok {
-		middleware = make([]Middleware, 0)
-	}
-	g.serviceMiddleware[id] = append(middleware, m)
 }
 
 func (s *Server) applyMiddleware(serviceID uint64, ctx context.Context) (context.Context, error) {
@@ -173,24 +163,26 @@ func (s *Server) applyMiddleware(serviceID uint64, ctx context.Context) (context
 		return ctx, nil
 	}
 
-	var err error
+	// apply middleware from parent down
 
-	for _, m := range group.middleware {
-		ctx, err = m(ctx)
-		if err != nil {
-			return nil, err
-		}
+	// get the lineage from this group to the root
+	groups := []*ServerGroup{group}
+	for group.parent != nil {
+		groups = append(groups, group.parent)
+		group = group.parent
 	}
 
-	middleware, ok := group.serviceMiddleware[serviceID]
-	if ok {
-		for _, m := range middleware {
+	// iterate from root to group
+	var err error
+	for i := len(groups) - 1; i >= 0; i-- {
+		for _, m := range groups[i].middleware {
 			ctx, err = m(ctx)
 			if err != nil {
 				return nil, err
 			}
 		}
 	}
+
 	return ctx, nil
 }
 

@@ -15,8 +15,8 @@ func TestGenerateConstsGo(t *testing.T) {
 	require.Nil(t, err)
 
 	for _, pkg := range parse.Packages {
-		for _, typdef := range pkg.Typedefs {
-			str, err := generateTypedefGoCode(typdef)
+		for _, c := range pkg.Consts {
+			str, err := generateConstGoCode(c)
 			require.Nil(t, err)
 
 			fmt.Println(str)
