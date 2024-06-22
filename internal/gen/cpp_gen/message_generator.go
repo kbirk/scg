@@ -38,7 +38,7 @@ struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 	{
 		nlohmann::json j = nlohmann::json::parse(std::string(data.begin(), data.end()));
 		{{range .MessageFields}}j.at("{{.FieldNameCamelCase}}").get_to({{.FieldNameCamelCase}});
-		{{end}}
+		{{- end}}
 	}
 
 	inline std::vector<uint8_t> toBytes() const
@@ -54,29 +54,41 @@ struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 	inline scg::error::Error fromBytes(const std::vector<uint8_t>& data)
 	{
 		scg::error::Error err;
-		scg::serialize::Reader reader(data);{{- range .MessageFields}}
+		scg::serialize::ReaderView reader(data);{{- range .MessageFields}}
 		err = scg::serialize::deserialize({{.FieldNameCamelCase}}, reader);
 		if (err) {
 			return err;
-		}
-		{{end}}
+		}{{end}}
 		return nullptr;
 	}
 
-	inline void serialize(scg::serialize::FixedSizeWriter& writer) const
+	inline scg::error::Error fromBytes(const uint8_t* data, uint32_t size)
 	{
-		{{range .MessageFields}}scg::serialize::serialize(writer, {{.FieldNameCamelCase}});{{end}}
+		scg::error::Error err;
+		scg::serialize::ReaderView reader(data, size);{{- range .MessageFields}}
+		err = scg::serialize::deserialize({{.FieldNameCamelCase}}, reader);
+		if (err) {
+			return err;
+		}{{end}}
+		return nullptr;
 	}
 
-	inline scg::error::Error deserialize(scg::serialize::Reader& reader)
+	template <typename WriterType>
+	inline void serialize(WriterType& writer) const
+	{
+		{{range .MessageFields}}scg::serialize::serialize(writer, {{.FieldNameCamelCase}});
+		{{- end}}
+	}
+
+	template <typename ReaderType>
+	inline scg::error::Error deserialize(ReaderType& reader)
 	{
 		scg::error::Error err;
 		{{- range .MessageFields}}err = scg::serialize::deserialize({{.FieldNameCamelCase}}, reader);
 		if (err) {
 			return err;
 		}
-		{{end}}
-		return nullptr;
+		{{end}}return nullptr;
 	}
 
 	inline uint32_t byteSize() const
@@ -107,11 +119,13 @@ struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 		return nullptr;
 	}
 
-	inline void serialize(scg::serialize::FixedSizeWriter& writer) const
+	template <typename WriterType>
+	inline void serialize(WriterType& writer) const
 	{
 	}
 
-	inline scg::error::Error deserialize(scg::serialize::Reader& reader)
+	template <typename ReaderType>
+	inline scg::error::Error deserialize(ReaderType& reader)
 	{
 		return nullptr;
 	}

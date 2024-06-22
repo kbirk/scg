@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # go tests
 go test -count=1 ./...
 

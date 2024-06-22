@@ -17,9 +17,22 @@ namespace scg {
 class uuid {
 public:
 
-	inline uuid()
+	constexpr uuid(const uint8_t (&bs)[16])
+		: bytes_{
+			bs[0], bs[1], bs[2], bs[3],
+			bs[4], bs[5], bs[6], bs[7],
+			bs[8], bs[9], bs[10], bs[11],
+			bs[12], bs[13], bs[14], bs[15]
+		}
+	{}
+
+	constexpr inline uuid()
+		: bytes_{
+			0,0,0,0,
+			0,0,0,0,
+			0,0,0,0,
+			0,0,0,0}
 	{
-		std::memset(bytes_, 0, 16);
 	}
 
 	inline bool isNull() const
@@ -45,6 +58,7 @@ public:
 		u.bytes_[8] = (u.bytes_[8] & 0x3F) | 0x80;
 		return u;
 	}
+
 
 	inline static std::pair<uuid, error::Error> fromString(const std::string& str)
 	{
@@ -101,12 +115,14 @@ public:
 		return 16;
 	}
 
-	inline void serialize(serialize::FixedSizeWriter& writer) const
+	template <typename WriterType>
+	inline void serialize(WriterType& writer) const
 	{
 		writer.write(bytes_, 16);
 	}
 
-	inline error::Error deserialize(serialize::Reader& reader)
+	template <typename ReaderType>
+	inline error::Error deserialize(ReaderType& reader)
 	{
 		reader.read(bytes_, 16);
 		if ((bytes_[6] & 0xF0) != 0x40) {

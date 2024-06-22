@@ -153,12 +153,14 @@ public:
 		return scg::serialize::byte_size(value_);
 	}
 
-	void serialize(scg::serialize::FixedSizeWriter& writer) const
+	template <typename WriterType>
+	void serialize(WriterType& writer) const
 	{
 		serialize::serialize(writer, value_);
 	}
 
-	error::Error deserialize(scg::serialize::Reader& reader)
+	template <typename ReaderType>
+	error::Error deserialize(ReaderType& reader)
 	{
 		return serialize::deserialize(value_, reader);
 	}

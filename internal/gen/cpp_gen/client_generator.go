@@ -32,6 +32,9 @@ static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}
 class {{.ClientNamePascalCase}}Client {
 public:
 	inline explicit
+	{{.ClientNamePascalCase}}Client(scg::rpc::Client* client) : client_(client) {}
+
+	inline explicit
 	{{.ClientNamePascalCase}}Client(std::shared_ptr<scg::rpc::Client> client) : client_(client) {}
 	{{range .ClientMethods}}
 	inline std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(const scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) const
