@@ -9,41 +9,111 @@
 
 #include "scg/pack.h"
 #include "scg/error.h"
+#include "scg/serialize.h"
 
 namespace scg {
 namespace serialize {
 
-class FixedSizeWriter {
+class IWriter {
 public:
 
-	FixedSizeWriter(uint32_t size)
+	virtual ~IWriter() = default;
+
+	virtual const std::vector<uint8_t>& bytes() const = 0;
+
+	virtual void write(const uint8_t* data, uint32_t n) = 0;
+
+	inline void write(uint8_t data)
+	{
+		write(&data, 1);
+	}
+
+	template <std::size_t N>
+	inline void write(const std::array<uint8_t, N>& data)
+	{
+		write(data.data(), N);
+	}
+
+	template <typename T>
+	inline void write(const T& data)
+	{
+		serialize(*this, data);
+	}
+};
+
+
+class Writer : public IWriter {
+public:
+
+	using IWriter::write;
+
+	inline Writer()
+	{
+		bytes_.reserve(1024);
+	}
+
+	inline explicit Writer(uint32_t size)
 	{
 		bytes_.reserve(size);
 	}
 
-	void write(uint8_t data)
-	{
-		bytes_.push_back(data);
-	}
-
-	template <std::size_t N>
-	void write(const std::array<uint8_t, N>& data)
-	{
-		bytes_.insert(bytes_.end(), data.begin(), data.end());
-	}
-
-	void write(const uint8_t* data, uint32_t n)
+	inline void write(const uint8_t* data, uint32_t n)
 	{
 		bytes_.insert(bytes_.end(), data, data + n);
 	}
 
-	template <typename T>
-	void write(const T& data)
+	inline const std::vector<uint8_t>& bytes() const
 	{
-		serialize(*this, data);
+		return bytes_;
 	}
 
-	const std::vector<uint8_t>& bytes() const
+private:
+
+	std::vector<uint8_t> bytes_;
+};
+
+class WriterView : public IWriter {
+public:
+
+	using IWriter::write;
+
+	inline explicit WriterView(std::vector<uint8_t>& data)
+		: bytes_(data)
+	{
+	}
+
+	inline void write(const uint8_t* data, uint32_t n)
+	{
+		bytes_.insert(bytes_.end(), data, data + n);
+	}
+
+	inline const std::vector<uint8_t>& bytes() const
+	{
+		return bytes_;
+	}
+
+private:
+
+	std::vector<uint8_t>& bytes_;
+};
+
+
+class FixedSizeWriter : public IWriter {
+public:
+
+	using IWriter::write;
+
+	inline explicit FixedSizeWriter(uint32_t size)
+	{
+		bytes_.reserve(size);
+	}
+
+	inline void write(const uint8_t* data, uint32_t n)
+	{
+		bytes_.insert(bytes_.end(), data, data + n);
+	}
+
+	inline const std::vector<uint8_t>& bytes() const
 	{
 		assert(bytes_.size() == bytes_.capacity() && std::string("FixedSizeWriter::bytes() called before all data was written" + (std::to_string(bytes_.size()) + " != " + std::to_string(bytes_.capacity()))).c_str());
 
@@ -54,51 +124,6 @@ private:
 
 	std::vector<uint8_t> bytes_;
 };
-
-
-class WriterView {
-public:
-
-	WriterView(std::vector<uint8_t>& data)
-		: bytes_(data)
-	{
-	}
-
-	void write(uint8_t data)
-	{
-		bytes_[pos_++] = data;
-	}
-
-	template <std::size_t N>
-	void write(const std::array<uint8_t, N>& data)
-	{
-		std::copy(data.begin(), data.end(), bytes_.begin() + pos_);
-		pos_ += N;
-	}
-
-	void write(const uint8_t* data, uint32_t n)
-	{
-		std::copy(data, data + n, bytes_.begin() + pos_);
-		pos_ += n;
-	}
-
-	template <typename T>
-	void write(const T& data)
-	{
-		serialize(*this, data);
-	}
-
-	const std::vector<uint8_t>& bytes() const
-	{
-		return bytes_;
-	}
-
-private:
-
-	std::vector<uint8_t>& bytes_;
-	size_t pos_ = 0;
-};
-
 
 }
 }

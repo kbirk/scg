@@ -8,14 +8,12 @@
 #include <iomanip>
 #include <random>
 
-#include "scg/error.h"
 #include "scg/serialize.h"
-#include "scg/writer.h"
-#include "scg/reader.h"
 
 #include "nlohmann/json.hpp"
 
 namespace scg {
+namespace type {
 
 // RFC 4122 UUID
 class uuid {
@@ -114,44 +112,6 @@ public:
 		return ss.str();
 	}
 
-	inline uint32_t byteSize() const
-	{
-		return 16;
-	}
-
-	template <typename WriterType>
-	void serialize(WriterType& writer) const
-	{
-		writer.write(bytes_, 16);
-	}
-
-	template <typename ReaderType>
-	error::Error deserialize(ReaderType& reader)
-	{
-		reader.read(bytes_, 16);
-		if ((bytes_[6] & 0xF0) != 0x40) {
-			return error::Error("Invalid UUID version");
-		}
-		if ((bytes_[8] & 0xC0) != 0x80) {
-			return error::Error("Invalid UUID variant");
-		}
-		return nullptr;
-	}
-
-	inline std::vector<uint8_t> toBytes() const
-	{
-		std::vector<uint8_t> data(byteSize());
-		scg::serialize::WriterView writer(data);
-		serialize(writer);
-		return data;
-	}
-
-	inline error::Error fromBytes(const std::vector<uint8_t>& bytes)
-	{
-		scg::serialize::ReaderView reader(bytes);
-		return deserialize(reader);
-	}
-
 	friend bool operator==(const uuid& lhs, const uuid& rhs) {
 		return std::equal(lhs.bytes_, lhs.bytes_ + 16, rhs.bytes_);
 	}
@@ -178,41 +138,61 @@ public:
 		return is;
 	}
 
-	friend std::hash<scg::uuid>;
+	friend inline uint32_t byte_size(const uuid& value)
+	{
+		return 16;
+	}
+
+	template <typename WriterType>
+	friend inline void serialize(WriterType& writer, const uuid& value)
+	{
+		writer.write(value.bytes_, 16);
+	}
+
+	template <typename ReaderType>
+	friend inline error::Error deserialize(uuid& value, ReaderType& reader)
+	{
+		reader.read(value.bytes_, 16);
+		if ((value.bytes_[6] & 0xF0) != 0x40) {
+			return error::Error("Invalid UUID version");
+		}
+		if ((value.bytes_[8] & 0xC0) != 0x80) {
+			return error::Error("Invalid UUID variant");
+		}
+		return nullptr;
+	}
+
+	friend std::hash<scg::type::uuid>;
 
 private:
 
 	uint8_t bytes_[16];
 };
 
+// nlohmann json serialization
+
+inline void to_json(nlohmann::json& j, const scg::type::uuid& uuid)
+{
+	j = uuid.toString();
+}
+
+inline void from_json(const nlohmann::json& j, scg::type::uuid& uuid)
+{
+	auto [res, err] = scg::type::uuid::fromString(j.get<std::string>());
+	if (err != nullptr) {
+		throw std::runtime_error(err.message);
+	}
+	uuid = res;
+}
+
+}
 }
 
 template<>
-struct std::hash<scg::uuid> {
-	std::size_t operator()(const scg::uuid& t) const
+struct std::hash<scg::type::uuid> {
+	std::size_t operator()(const scg::type::uuid& t) const
 	{
 		std::string_view sv(reinterpret_cast<const char*>(t.bytes_), 16);
 		return std::hash<std::string_view>{}(sv);
 	}
 };
-
-namespace nlohmann {
-
-	template <>
-	struct adl_serializer<scg::uuid>
-	{
-		static void to_json(json& j, const scg::uuid& uuid)
-		{
-			j = uuid.toString();
-		}
-
-		static void from_json(const json& j, scg::uuid& uuid)
-		{
-			auto [res, err] = scg::uuid::fromString(j.get<std::string>());
-			if (err != nullptr) {
-				throw std::runtime_error(err.message);
-			}
-			uuid = res;
-		}
-	};
-}

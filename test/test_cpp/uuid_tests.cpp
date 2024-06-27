@@ -16,7 +16,7 @@ void test_uuid_is_valid()
 		"171c7ba4-9748-467e-a03b-ea3d24ec6c1c"
 	};
 	for (auto& s : valid) {
-		TEST_CHECK(scg::uuid::isValid(s));
+		TEST_CHECK(scg::type::uuid::isValid(s));
 	}
 
 	auto invalid = std::vector<std::string>{
@@ -32,7 +32,7 @@ void test_uuid_is_valid()
 		" 12345678-1234-4234-1234-123456789abc"
 	};
 	for (auto& s : invalid) {
-		TEST_CHECK(!scg::uuid::isValid(s));
+		TEST_CHECK(!scg::type::uuid::isValid(s));
 	}
 }
 
@@ -46,7 +46,7 @@ void test_uuid_from_string_to_string()
 		"171c7ba4-9748-467e-a03b-ea3d24ec6c1c"
 	};
 	for (auto& s : valid) {
-		auto [u, err] = scg::uuid::fromString(s);
+		auto [u, err] = scg::type::uuid::fromString(s);
 		TEST_CHECK(err == nullptr);
 		TEST_CHECK(u.toString() == s);
 	}
@@ -64,7 +64,7 @@ void test_uuid_from_string_to_string()
 		" 12345678-1234-4234-1234-123456789abc"
 	};
 	for (auto& s : invalid) {
-		auto [u, err] = scg::uuid::fromString(s);
+		auto [u, err] = scg::type::uuid::fromString(s);
 		TEST_CHECK(err != nullptr);
 	}
 }
@@ -80,9 +80,9 @@ void test_uuid_equality()
 	};
 
 	for (uint32_t i=1; i<valid.size(); i++) {
-		auto [u1, err1] = scg::uuid::fromString(valid[i-1]);
+		auto [u1, err1] = scg::type::uuid::fromString(valid[i-1]);
 		TEST_CHECK(err1 == nullptr);
-		auto [u2, err2] = scg::uuid::fromString(valid[i]);
+		auto [u2, err2] = scg::type::uuid::fromString(valid[i]);
 		TEST_CHECK(err2 == nullptr);
 		TEST_CHECK(u1 == u1);
 		TEST_CHECK(u2 == u2);
@@ -92,9 +92,9 @@ void test_uuid_equality()
 
 void test_uuid_random()
 {
-	std::vector<scg::uuid> uuids;
+	std::vector<scg::type::uuid> uuids;
 	for (int i=0; i<1000; i++) {
-		uuids.push_back(scg::uuid::random());
+		uuids.push_back(scg::type::uuid::random());
 	}
 	for (uint32_t i=0; i<uuids.size(); i++) {
 		for (uint32_t j=0; j<uuids.size(); j++) {
@@ -109,17 +109,17 @@ void test_uuid_random()
 
 void test_uuid_is_null()
 {
-	auto uuid1 = scg::uuid();
+	auto uuid1 = scg::type::uuid();
 	TEST_CHECK(uuid1.isNull());
 
-	auto uuid2 = scg::uuid::random();
+	auto uuid2 = scg::type::uuid::random();
 	TEST_CHECK(!uuid2.isNull());
 }
 
 void test_map_usage()
 {
-	std::map<scg::uuid, std::string> m;
-	std::unordered_map<scg::uuid, std::string> um;
+	std::map<scg::type::uuid, std::string> m;
+	std::unordered_map<scg::type::uuid, std::string> um;
 
 	auto valid = std::vector<std::string>{
 		"d4c04150-4e85-4224-a0d7-e06c135e4dc3",
@@ -130,14 +130,14 @@ void test_map_usage()
 	};
 
 	for (auto& s : valid) {
-		auto [u, err] = scg::uuid::fromString(s);
+		auto [u, err] = scg::type::uuid::fromString(s);
 		TEST_CHECK(err == nullptr);
 		m[u] = s;
 		um[u] = s;
 	}
 
 	for (auto& s : valid) {
-		auto [u, err] = scg::uuid::fromString(s);
+		auto [u, err] = scg::type::uuid::fromString(s);
 		TEST_CHECK(err == nullptr);
 		TEST_CHECK(m[u] == s);
 		TEST_CHECK(um[u] == s);

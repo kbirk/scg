@@ -3,6 +3,8 @@
 #include <string>
 #include <map>
 
+#include "scg/error.h"
+
 namespace scg {
 namespace context {
 
@@ -41,21 +43,21 @@ public:
 		return values_;
 	}
 
-	inline uint32_t byteSize() const
+	friend inline uint32_t byte_size(const Context& ctx)
 	{
-		return serialize::byte_size(values_);
+		return serialize::byte_size(ctx.values_);
 	}
 
 	template <typename WriterType>
-	inline void serialize(WriterType& writer) const
+	friend inline void serialize(WriterType& writer, const Context& ctx)
 	{
-		serialize::serialize(writer, values_);
+		serialize::serialize(writer, ctx.values_);
 	}
 
 	template <typename ReaderType>
-	inline error::Error deserialize(ReaderType& reader)
+	friend inline error::Error deserialize(Context& ctx, ReaderType& reader)
 	{
-		return serialize::deserialize(values_, reader);
+		return serialize::deserialize(ctx.values_, reader);
 	}
 
 private:

@@ -25,116 +25,132 @@ const messageTemplateStr = `
 struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
 	{{.FieldType}} {{.FieldNameCamelCase}};{{end}}
 
-	{{- if gt (len .MessageFields) 0 }}
-	inline std::vector<uint8_t> toJSON() const
-	{
-		nlohmann::json j({ {{- range $index, $element := .MessageFields}}{{if $index}}, {{end}}
-			{"{{$element.FieldNameCamelCase}}", {{$element.FieldNameCamelCase}} }{{end}} });
-		auto str = j.dump();
-		return std::vector<uint8_t>(str.begin(), str.end());
-	}
+	inline std::vector<uint8_t> toJSON() const;
+	inline void fromJSON(const std::vector<uint8_t>& data);
 
-	inline void fromJSON(const std::vector<uint8_t>& data)
-	{
-		nlohmann::json j = nlohmann::json::parse(std::string(data.begin(), data.end()));
-		{{range .MessageFields}}j.at("{{.FieldNameCamelCase}}").get_to({{.FieldNameCamelCase}});
-		{{- end}}
-	}
-
-	inline std::vector<uint8_t> toBytes() const
-	{
-		std::vector<uint8_t> data(byteSize());
-		scg::serialize::WriterView writer(data);
-		serialize(writer);
-		return data;
-	}
-
-	inline scg::error::Error fromBytes(const std::vector<uint8_t>& data)
-	{
-		scg::serialize::ReaderView reader(data);
-		return deserialize(reader);
-	}
-
-	inline scg::error::Error fromBytes(const uint8_t* data, uint32_t size)
-	{
-		scg::serialize::ReaderView reader(data, size);
-		return deserialize(reader);
-	}
-
-	template <typename WriterType>
-	inline void serialize(WriterType& writer) const
-	{
-		{{range .MessageFields}}scg::serialize::serialize(writer, {{.FieldNameCamelCase}});
-		{{- end}}
-	}
-
-	template <typename ReaderType>
-	inline scg::error::Error deserialize(ReaderType& reader)
-	{
-		scg::error::Error err;
-		{{- range .MessageFields}}err = scg::serialize::deserialize({{.FieldNameCamelCase}}, reader);
-		if (err) {
-			return err;
-		}
-		{{end}}return nullptr;
-	}
-
-	inline uint32_t byteSize() const
-	{
-		uint32_t size = 0;{{- range .MessageFields}}
-		size += scg::serialize::byte_size({{.FieldNameCamelCase}});{{end}}
-		return size;
-	}
-	{{- else}}
-	inline std::vector<uint8_t> toJSON() const
-	{
-		nlohmann::json j;
-		auto str = j.dump();
-		return std::vector<uint8_t>(str.begin(), str.end());
-	}
-
-	inline void fromJSON(const std::vector<uint8_t>& data)
-	{
-	}
-
-	inline std::vector<uint8_t> toBytes() const
-	{
-		return std::vector<uint8_t>();
-	}
-
-	inline scg::error::Error fromBytes(const std::vector<uint8_t>& data)
-	{
-		return nullptr;
-	}
-
-	template <typename WriterType>
-	inline void serialize(WriterType& writer) const
-	{
-	}
-
-	template <typename ReaderType>
-	inline scg::error::Error deserialize(ReaderType& reader)
-	{
-		return nullptr;
-	}
-
-	inline uint32_t byteSize() const
-	{
-		return 0;
-	}
-	{{end}}
+	inline std::vector<uint8_t> toBytes() const;
+	inline scg::error::Error fromBytes(const std::vector<uint8_t>& data);
+	inline scg::error::Error fromBytes(const uint8_t* data, uint32_t size);
 
 };{{if gt (len .MessageFields) 0}}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE({{.MessageNamePascalCase}}, {{.MessageFieldsCommaSeparated}}){{else}}
 inline void to_json(nlohmann::json& j, const {{.MessageNamePascalCase}}& m) {
-    // For an empty struct, we can just use an empty JSON object.
     j = nlohmann::json::object();
 }
 
 inline void from_json(const nlohmann::json& j, {{.MessageNamePascalCase}}& m) {
-    // For an empty struct, there's nothing to do.
 }
-{{end}}`
+{{end}}
+
+{{if gt (len .MessageFields) 0 }}
+
+template <typename WriterType>
+inline void serialize(WriterType& writer, const {{.MessageNamePascalCase}}& value)
+{
+	{{range .MessageFields}}writer.write(value.{{.FieldNameCamelCase}});
+	{{- end}}
+}
+
+template <typename ReaderType>
+inline scg::error::Error deserialize({{.MessageNamePascalCase}}& value, ReaderType& reader)
+{
+	scg::error::Error err;
+	{{range .MessageFields}}err = reader.read(value.{{.FieldNameCamelCase}});
+	if (err) {
+		return err;
+	}
+	{{end}}return nullptr;
+}
+
+inline uint32_t byte_size(const {{.MessageNamePascalCase}}& value)
+{
+	using scg::serialize::byte_size; // adl trickery
+	uint32_t size = 0;{{- range .MessageFields}}
+	size += byte_size(value.{{.FieldNameCamelCase}});{{end}}
+	return size;
+}
+
+std::vector<uint8_t> {{.MessageNamePascalCase}}::toJSON() const
+{
+	nlohmann::json j({ {{- range $index, $element := .MessageFields}}{{if $index}}, {{end}}
+		{"{{$element.FieldNameCamelCase}}", {{$element.FieldNameCamelCase}} }{{end}} });
+	auto str = j.dump();
+	return std::vector<uint8_t>(str.begin(), str.end());
+}
+
+void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& data)
+{
+	nlohmann::json j = nlohmann::json::parse(std::string(data.begin(), data.end()));
+	{{range .MessageFields}}j.at("{{.FieldNameCamelCase}}").get_to({{.FieldNameCamelCase}});
+	{{end}}
+}
+
+std::vector<uint8_t> {{.MessageNamePascalCase}}::toBytes() const
+{
+	std::vector<uint8_t> data;
+	data.reserve(byte_size(*this));
+	scg::serialize::WriterView writer(data);
+	serialize(writer, *this);
+	return data;
+}
+
+scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const std::vector<uint8_t>& data)
+{
+	scg::serialize::ReaderView reader(data);
+	return deserialize(*this, reader);
+}
+
+scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const uint8_t* data, uint32_t size)
+{
+	scg::serialize::ReaderView reader(data, size);
+	return deserialize(*this, reader);
+}
+
+{{else}}
+
+template <typename WriterType>
+inline void serialize(WriterType& writer, const {{.MessageNamePascalCase}}& value)
+{
+}
+
+template <typename ReaderType>
+inline scg::error::Error deserialize({{.MessageNamePascalCase}}& value, ReaderType& reader)
+{
+	return nullptr;
+}
+
+inline uint32_t byte_size(const {{.MessageNamePascalCase}}& value)
+{
+	return 0;
+}
+
+std::vector<uint8_t> {{.MessageNamePascalCase}}::toJSON() const
+{
+	nlohmann::json j;
+	auto str = j.dump();
+	return std::vector<uint8_t>(str.begin(), str.end());
+}
+
+void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& data)
+{
+}
+
+std::vector<uint8_t> {{.MessageNamePascalCase}}::toBytes() const
+{
+	return std::vector<uint8_t>();
+}
+
+scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const std::vector<uint8_t>& data)
+{
+	return nullptr;
+}
+
+scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const uint8_t* data, uint32_t size)
+{
+	return nullptr;
+}
+{{end}}
+`
 
 var (
 	messageTemplate = template.Must(template.New("messageTemplateCpp").Parse(messageTemplateStr))
@@ -169,7 +185,7 @@ func mapDataTypeComparableToCppType(dataType parse.DataTypeComparable) (string, 
 	case parse.DataTypeComparableString:
 		return "std::string", nil
 	case parse.DataTypeComparableUUID:
-		return "scg::uuid", nil
+		return "scg::type::uuid", nil
 	case parse.DataTypeComparableFloat32:
 		return "float32_t", nil
 	case parse.DataTypeComparableFloat64:
@@ -215,9 +231,9 @@ func mapDataTypeToCppType(dataType parse.DataType) (string, error) {
 	case parse.DataTypeString:
 		return "std::string", nil
 	case parse.DataTypeTimestamp:
-		return "scg::timestamp", nil
+		return "scg::type::timestamp", nil
 	case parse.DataTypeUUID:
-		return "scg::uuid", nil
+		return "scg::type::uuid", nil
 	case parse.DataTypeFloat32:
 		return "float32_t", nil
 	case parse.DataTypeFloat64:

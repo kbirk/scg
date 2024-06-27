@@ -42,7 +42,7 @@ func getConstValue(typ *parse.DataTypeComparableDefinition, underlyingType *pars
 		for i, b := range bytes {
 			hexBytes[i] = fmt.Sprintf("0x%02x", b)
 		}
-		return fmt.Sprintf("scg::uuid({%s})", strings.Join(hexBytes, ", ")), nil
+		return fmt.Sprintf("scg::type::uuid({%s})", strings.Join(hexBytes, ", ")), nil
 	case parse.DataTypeComparableCustom:
 		if underlyingType == nil {
 			return "", fmt.Errorf("underlying type is nil")

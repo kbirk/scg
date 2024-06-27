@@ -47,7 +47,7 @@ public:
 			return res;
 		}
 
-		err = res.first.deserialize(reader);
+		err = reader.read(res.first);
 		if (err) {
 			res.second = err;
 			return res;
@@ -63,7 +63,7 @@ public:
 			return err;
 		}
 
-		return resp->deserialize(reader);
+		return reader.read(*resp);
 	}
 	{{end}}
 

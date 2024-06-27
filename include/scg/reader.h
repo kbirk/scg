@@ -9,38 +9,53 @@
 
 #include "scg/pack.h"
 #include "scg/error.h"
+#include "scg/serialize.h"
 
 namespace scg {
 namespace serialize {
 
-class ReaderView {
+class IReader {
 public:
 
-	ReaderView(const uint8_t* data, uint32_t size)
-		: bytes_(data)
-		, size_(size)
-	{
-	}
+	virtual ~IReader() = default;
 
-	ReaderView(const std::vector<uint8_t>& data)
-		: bytes_(&data[0])
-		, size_(data.size())
-	{
-	}
+	virtual error::Error read(uint8_t* dest, uint32_t n) = 0;
+	virtual error::Error read(std::vector<uint8_t>& dest, uint32_t n) = 0;
 
 	template <std::size_t N>
-	error::Error read(std::array<uint8_t, N>& dest)
+	inline error::Error read(std::array<uint8_t, N>& dest)
 	{
-		if (pos_ + N > size_) {
-			return error::Error("Reader does not contain enough data to fill the argument");
-		}
-
-		std::copy(bytes_ + pos_, bytes_ + pos_ + N, dest.begin());
-		pos_ += N;
-		return nullptr;
+		return read(dest.data(), N);
 	}
 
-	error::Error read(uint8_t* dest, uint32_t n)
+	template <typename T>
+	inline error::Error read(T& data)
+	{
+		return deserialize(data, *this);
+	}
+};
+
+
+class ReaderView : public IReader {
+public:
+
+	using IReader::read;
+
+	inline ReaderView(const uint8_t* data, uint32_t size)
+		: bytes_(data)
+		, size_(size)
+		, pos_(0)
+	{
+	}
+
+	inline explicit ReaderView(const std::vector<uint8_t>& data)
+		: bytes_(&data[0])
+		, size_(data.size())
+		, pos_(0)
+	{
+	}
+
+	inline error::Error read(uint8_t* dest, uint32_t n)
 	{
 		if (pos_ + n > size_) {
 			return error::Error("Reader does not contain enough data to fill the argument");
@@ -51,7 +66,7 @@ public:
 		return nullptr;
 	}
 
-	error::Error read(std::vector<uint8_t>& dest, uint32_t n)
+	inline error::Error read(std::vector<uint8_t>& dest, uint32_t n)
 	{
 		if  (pos_ + n > size_) {
 			return error::Error("Reader does not contain enough data to fill the argument");
@@ -62,40 +77,25 @@ public:
 		return nullptr;
 	}
 
-	template <typename T>
-	error::Error read(T& data)
-	{
-		return deserialize(data, *this);
-	}
-
 private:
 
 	const uint8_t* bytes_;
 	uint32_t size_;
-	size_t pos_ = 0;
+	size_t pos_;
 };
 
-class Reader {
+class Reader : public IReader {
 public:
 
-	Reader(const std::vector<uint8_t>& data)
+	using IReader::read;
+
+	inline explicit Reader(const std::vector<uint8_t>& data)
 		: bytes_(data)
+		, pos_(0)
 	{
 	}
 
-	template <std::size_t N>
-	error::Error read(std::array<uint8_t, N>& dest)
-	{
-		if (pos_ + N > bytes_.size()) {
-			return error::Error("Reader does not contain enough data to fill the argument");
-		}
-
-		std::copy(bytes_.begin() + pos_, bytes_.begin() + pos_ + N, dest.begin());
-		pos_ += N;
-		return nullptr;
-	}
-
-	error::Error read(uint8_t* dest, uint32_t n)
+	inline error::Error read(uint8_t* dest, uint32_t n)
 	{
 		if (pos_ + n > bytes_.size()) {
 			return error::Error("Reader does not contain enough data to fill the argument");
@@ -106,7 +106,7 @@ public:
 		return nullptr;
 	}
 
-	error::Error read(std::vector<uint8_t>& dest, uint32_t n)
+	inline error::Error read(std::vector<uint8_t>& dest, uint32_t n)
 	{
 		if  (pos_ + n > bytes_.size()) {
 			return error::Error("Reader does not contain enough data to fill the argument");
@@ -117,16 +117,10 @@ public:
 		return nullptr;
 	}
 
-	template <typename T>
-	error::Error read(T& data)
-	{
-		return deserialize(data, *this);
-	}
-
 private:
 
 	std::vector<uint8_t> bytes_;
-	size_t pos_ = 0;
+	size_t pos_;
 };
 
 }

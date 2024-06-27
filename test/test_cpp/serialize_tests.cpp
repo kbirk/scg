@@ -7,16 +7,21 @@
 
 #include "pingpong/pingpong.h"
 
+// adl trickery
+using scg::serialize::byte_size;
+using scg::serialize::serialize;
+using scg::serialize::deserialize;
+
 void test_serialize_uint8()
 {
 	uint8_t input = 234U;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	uint8_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -26,12 +31,12 @@ void test_serialize_int8()
 {
 	int8_t input = -123;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	int8_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -41,12 +46,12 @@ void test_serialize_uint16()
 {
 	uint16_t input = 54767U;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	uint16_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -56,12 +61,12 @@ void test_serialize_int16()
 {
 	int16_t input = -31412;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	int16_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -71,12 +76,12 @@ void test_serialize_uint32()
 {
 	uint32_t input = 3454234767;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	uint32_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -86,12 +91,12 @@ void test_serialize_int32()
 {
 	int32_t input = -1454234767;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	int32_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -101,12 +106,12 @@ void test_serialize_uint64()
 {
 	uint64_t input = 3454363453454234767UL;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	uint64_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -116,12 +121,12 @@ void test_serialize_int64()
 {
 	int64_t input = -1454363453454234767L;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	int64_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -131,12 +136,12 @@ void test_serialize_float32()
 {
 	float32_t input = -145234.5634347f;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	float32_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -146,12 +151,12 @@ void test_serialize_float64()
 {
 	float64_t input = -245234534.56343437;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	float64_t output = 0;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -161,12 +166,12 @@ void test_serialize_string()
 {
 	std::string input = "Hello, World! This is my test string 12312341234! \\@#$%@&^&%^\n newline \t _yay 世界";
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	std::string output;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -174,14 +179,14 @@ void test_serialize_string()
 
 void test_serialize_timestamp()
 {
-	scg::timestamp input;
+	scg::type::timestamp input;
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
-	scg::timestamp output;
-	auto err = scg::serialize::deserialize(output, reader);
+	scg::type::timestamp output;
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -189,14 +194,14 @@ void test_serialize_timestamp()
 
 void test_serialize_uuid()
 {
-	scg::uuid input = scg::uuid::random();
+	scg::type::uuid input = scg::type::uuid::random();
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
-	scg::uuid output;
-	auto err = scg::serialize::deserialize(output, reader);
+	scg::type::uuid output;
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -206,12 +211,12 @@ void test_serialize_vector()
 {
 	std::vector<float64_t> input = { 1.0, -2.0, 3.0, -4.0, 5.0 };
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	std::vector<float64_t> output;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -227,12 +232,12 @@ void test_serialize_map()
 		{"five", 5.0}
 	};
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	std::map<std::string, float64_t> output;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(input == output);
@@ -263,10 +268,10 @@ void test_serialize_pingpong()
 	input.valFloat = 3.14 + 9;
 	input.valDouble = -3.14159 + 10;
 	input.valString = "hello world " + std::to_string(11);
-	input.valTimestamp = scg::timestamp();
+	input.valTimestamp = scg::type::timestamp();
 	input.valBool = true;
 	input.valEnum = pingpong::EnumType::ENUM_TYPE_1;
-	input.valUuid = scg::uuid::random();
+	input.valUuid = scg::type::uuid::random();
 	input.valListPayload = {nested1, nested2};
 	input.valMapKeyEnum = {
 		{pingpong::KeyType("key_1"), pingpong::EnumType::ENUM_TYPE_1},
@@ -276,12 +281,12 @@ void test_serialize_pingpong()
 	input.valNestedEmpty = nested;
 	input.valByteArray = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
-	scg::serialize::FixedSizeWriter writer(scg::serialize::byte_size(input));
-	scg::serialize::serialize(writer, input);
+	scg::serialize::FixedSizeWriter writer(byte_size(input));
+	serialize(writer, input);
 
 	scg::serialize::Reader reader(writer.bytes());
 	pingpong::TestPayload output;
-	auto err = scg::serialize::deserialize(output, reader);
+	auto err = deserialize(output, reader);
 	TEST_CHECK(!err);
 
 	TEST_CHECK(output.valUint8 == input.valUint8);

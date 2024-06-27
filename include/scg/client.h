@@ -98,14 +98,16 @@ protected:
 			requestID = requestID_++;
 		}
 
-		serialize::FixedSizeWriter writer(REQUEST_HEADER_SIZE + ctx.byteSize() + msg.byteSize());
+		using scg::serialize::byte_size; // adl trickery
+
+		serialize::FixedSizeWriter writer(REQUEST_HEADER_SIZE + byte_size(ctx) + byte_size(msg));
 
 		writer.write(REQUEST_PREFIX);
-		serialize::serialize(writer, ctx);
-		serialize::serialize(writer, requestID);
-		serialize::serialize(writer, serviceID);
-		serialize::serialize(writer, methodID);
-		serialize::serialize(writer, msg);
+		writer.write(ctx);
+		writer.write(requestID);
+		writer.write(serviceID);
+		writer.write(methodID);
+		writer.write(msg);
 
 		std::lock_guard<std::mutex> lock(mu_);
 

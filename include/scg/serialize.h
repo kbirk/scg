@@ -2,6 +2,9 @@
 
 #include <array>
 #include <map>
+#include <unordered_map>
+#include <set>
+#include <unordered_set>
 #include <string>
 #include <vector>
 #include <cassert>
@@ -315,13 +318,13 @@ inline error::Error deserialize(float64_t& value, ReaderType& reader)
 	return nullptr;
 }
 
-inline uint32_t byte_size(std::string value)
+inline uint32_t byte_size(const std::string& value)
 {
 	return 4 + value.size();
 }
 
 template <typename WriterType>
-inline void serialize(WriterType& writer, std::string value)
+inline void serialize(WriterType& writer, const std::string& value)
 {
 	serialize(writer, uint32_t(value.size()));
 	writer.write((uint8_t*)value.data(), value.size());
@@ -338,6 +341,23 @@ inline error::Error deserialize(std::string& value, ReaderType& reader)
 
 	value.resize(len);
 	return reader.read((uint8_t*)value.data(), len);
+}
+
+inline uint32_t byte_size(const error::Error& value)
+{
+	return byte_size(value.message);
+}
+
+template <typename WriterType>
+inline void serialize(WriterType& writer, const error::Error& value)
+{
+	serialize(writer, value.message);
+}
+
+template <typename ReaderType>
+inline error::Error deserialize(error::Error& value, ReaderType& reader)
+{
+	return deserialize(value.message, reader);
 }
 
 template <typename T,
@@ -371,21 +391,23 @@ template <typename T,
 	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
 constexpr uint32_t byte_size(const T& t)
 {
-	return t.byteSize();
+	static_assert("no `byte_size` override exists for type: " + std::string(typeid(T).name()));
+	return 0;
 }
 
 template <typename WriterType, typename T,
 	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
 inline void serialize(WriterType& writer, const T& value)
 {
-	value.serialize(writer);
+	static_assert("no `serialize` override exists for type: " + std::string(typeid(T).name()));
 }
 
 template <typename ReaderType, typename T,
 	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
 inline error::Error deserialize(T& value, ReaderType& reader)
 {
-	return value.deserialize(reader);
+	static_assert("no `deserialize` override exists for type: " + std::string(typeid(T).name()));
+	return nullptr;
 }
 
 template <typename T>
@@ -494,6 +516,130 @@ inline uint32_t byte_size(const std::map<K,V>& value)
 		size += byte_size(k) + byte_size(v);
 	}
 	return size;
+}
+
+
+template <typename K, typename V, typename WriterType>
+inline void serialize(WriterType& writer, const std::unordered_map<K,V>& value)
+{
+	serialize(writer, uint32_t(value.size()));
+	for (const auto& [key, value] : value) {
+		serialize(writer, key);
+		serialize(writer, value);
+	}
+}
+
+template <typename K, typename V, typename ReaderType>
+inline error::Error deserialize(std::unordered_map<K,V>& value, ReaderType& reader)
+{
+	uint32_t size;
+	auto err = deserialize(size, reader);
+	if (err) {
+		return err;
+	}
+	value.reserve(size);
+
+	for (auto i = uint32_t(0); i < size; i++) {
+		K key;
+		V val;
+		err = deserialize(key, reader);
+		if (err) {
+			return err;
+		}
+		err = deserialize(val, reader);
+		if (err) {
+			return err;
+		}
+		value[key] = val;
+	}
+	return nullptr;
+}
+
+template <typename K, typename V>
+inline uint32_t byte_size(const std::unordered_map<K,V>& value)
+{
+	uint32_t size = 4;
+	for (const auto& [k, v] : value) {
+		size += byte_size(k) + byte_size(v);
+	}
+	return size;
+}
+
+template <typename T>
+inline uint32_t byte_size(const std::set<T>& value)
+{
+	uint32_t size = 4;
+	for (const auto& item : value) {
+		size += byte_size(item);
+	}
+	return size;
+}
+
+template <typename WriterType, typename T>
+inline void serialize(WriterType& writer, const std::set<T>& value)
+{
+	serialize(writer, uint32_t(value.size()));
+	for (const auto& item : value) {
+		serialize(writer, item);
+	}
+}
+
+template <typename ReaderType, typename T>
+inline error::Error deserialize(std::set<T>& value, ReaderType& reader)
+{
+	uint32_t size;
+	auto err = deserialize(size, reader);
+	if (err) {
+		return err;
+	}
+	for (auto i = uint32_t(0); i < size; i++) {
+		T t;
+		err = deserialize(t, reader);
+		if (err) {
+			return err;
+		}
+		value.insert(t);
+	}
+	return nullptr;
+}
+
+template <typename T>
+inline uint32_t byte_size(const std::unordered_set<T>& value)
+{
+	uint32_t size = 4;
+	for (const auto& item : value) {
+		size += byte_size(item);
+	}
+	return size;
+}
+
+template <typename WriterType, typename T>
+inline void serialize(WriterType& writer, const std::unordered_set<T>& value)
+{
+	serialize(writer, uint32_t(value.size()));
+	for (const auto& item : value) {
+		serialize(writer, item);
+	}
+}
+
+template <typename ReaderType, typename T>
+inline error::Error deserialize(std::unordered_set<T>& value, ReaderType& reader)
+{
+	uint32_t size;
+	auto err = deserialize(size, reader);
+	if (err) {
+		return err;
+	}
+	value.reserve(size);
+	for (auto i = uint32_t(0); i < size; i++) {
+		T t;
+		err = deserialize(t, reader);
+		if (err) {
+			return err;
+		}
+		value.insert(t);
+	}
+	return nullptr;
 }
 
 }

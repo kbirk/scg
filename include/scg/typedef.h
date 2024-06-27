@@ -2,7 +2,7 @@
 
 #include <functional>
 
-#include <scg/serialize.h>
+#include "scg/serialize.h"
 
 #include "nlohmann/json.hpp"
 
@@ -150,35 +150,24 @@ public:
 		return is;
 	}
 
-	inline uint32_t byteSize() const
+	friend inline uint32_t byte_size(const strong_typedef<T, Tag>& value)
 	{
-		return scg::serialize::byte_size(value_);
+		using scg::serialize::byte_size; // adl trickery
+		return byte_size(value.value_);
 	}
 
 	template <typename WriterType>
-	void serialize(WriterType& writer) const
+	friend inline void serialize(WriterType& writer, const strong_typedef<T, Tag>& value)
 	{
-		serialize::serialize(writer, value_);
+		using scg::serialize::serialize;  // adl trickery
+		serialize(writer, value.value_);
 	}
 
 	template <typename ReaderType>
-	error::Error deserialize(ReaderType& reader)
+	friend inline error::Error deserialize(strong_typedef<T, Tag>& value, ReaderType& reader)
 	{
-		return serialize::deserialize(value_, reader);
-	}
-
-	inline std::vector<uint8_t> toBytes() const
-	{
-		std::vector<uint8_t> data(byteSize());
-		scg::serialize::WriterView writer(data);
-		serialize(writer);
-		return data;
-	}
-
-	inline error::Error fromBytes(const std::vector<uint8_t>& bytes)
-	{
-		scg::serialize::ReaderView reader(bytes);
-		return deserialize(reader);
+		using scg::serialize::deserialize;  // adl trickery
+		return deserialize(value.value_, reader);
 	}
 
 private:
@@ -200,6 +189,24 @@ strong_typedef<T, Tag> operator-(strong_typedef<T, Tag> lhs, const S& rhs)
 	return lhs;
 }
 
+// nlohmann json serialization
+
+template <typename T, typename Tag>
+inline void to_json(nlohmann::json& j, const scg::type::strong_typedef<T, Tag>& type)
+{
+	std::stringstream ss;
+	ss << type;
+	j = ss.str();
+}
+
+template <typename T, typename Tag>
+inline void from_json(const nlohmann::json& j, scg::type::strong_typedef<T, Tag>& type)
+{
+	auto str = j.get<std::string>();
+	std::stringstream ss(str);
+	ss >> type;
+}
+
 }
 }
 
@@ -212,24 +219,3 @@ struct std::hash<scg::type::strong_typedef<T, Tag>> {
 };
 
 #define SCG_TYPEDEF(N, T) using N = scg::type::strong_typedef<T, struct N##_>
-
-namespace nlohmann {
-
-	template <typename T, typename Tag>
-	struct adl_serializer<scg::type::strong_typedef<T, Tag>>
-	{
-		static void to_json(json& j, const scg::type::strong_typedef<T, Tag>& type)
-		{
-			std::stringstream ss;
-			ss << type;
-			j = ss.str();
-		}
-
-		static void from_json(const json& j, scg::type::strong_typedef<T, Tag>& type)
-		{
-			auto str = j.get<std::string>();
-			std::stringstream ss(str);
-			ss >> type;
-		}
-	};
-}
