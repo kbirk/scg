@@ -11,6 +11,7 @@ import (
 
 type EnumValueArgs struct {
 	ValueNamePascalCase string
+	ValueString         string
 	Index               int
 }
 
@@ -37,8 +38,22 @@ func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Deserialize(reader 
 	return serialize.Deserialize{{.EnumUnderlyingTypePascalCase}}((*{{.EnumUnderlyingType}})({{.EnumNameNameFirstLetter}}), reader)
 }
 
-const ({{- range .EnumValueArgs}}
-	{{$.EnumNamePascalCase}}_{{.ValueNamePascalCase}} {{$.EnumNamePascalCase}} = {{.Index}}{{end}}
+const (
+{{- range .EnumValueArgs}}
+	{{$.EnumNamePascalCase}}_{{.ValueNamePascalCase}} {{$.EnumNamePascalCase}} = {{.Index}}
+{{- end}}
+{{- range .EnumValueArgs}}
+	{{$.EnumNamePascalCase}}_{{.ValueNamePascalCase}}_String = "{{.ValueString}}"
+{{- end}}
+)
+
+var (
+	{{.EnumNamePascalCase}}_ToString = map[{{.EnumNamePascalCase}}]string{ {{- range .EnumValueArgs}}
+		{{$.EnumNamePascalCase}}_{{.ValueNamePascalCase}}: {{$.EnumNamePascalCase}}_{{.ValueNamePascalCase}}_String,{{end}}
+	}
+	{{.EnumNamePascalCase}}String_ToEnum = map[string]{{.EnumNamePascalCase}}{ {{- range .EnumValueArgs}}
+		{{$.EnumNamePascalCase}}_{{.ValueNamePascalCase}}_String:{{$.EnumNamePascalCase}}_{{.ValueNamePascalCase}},{{end}}
+	}
 )
 `
 
@@ -67,6 +82,7 @@ func generateEnumGoCode(enum *parse.EnumDefinition) (string, error) {
 	for i, v := range enum.ValuesByIndex() {
 		enumValueArgs = append(enumValueArgs, EnumValueArgs{
 			ValueNamePascalCase: util.EnsurePascalCase(v.Name),
+			ValueString:         v.Value,
 			Index:               i,
 		})
 	}

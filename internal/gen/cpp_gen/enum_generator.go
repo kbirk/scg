@@ -12,17 +12,32 @@ import (
 
 type EnumValueArgs struct {
 	ValueNameUpperCase string
+	ValueString        string
 	Index              int
 }
 
 type EnumArgs struct {
 	EnumNamePascalCase string
+	EnumNameUpperCase  string
 	EnumValueArgs      []EnumValueArgs
 }
 
 const enumTemplateStr = `
-enum class {{.EnumNamePascalCase}} { {{- range .EnumValueArgs}}
+enum class {{.EnumNamePascalCase}} {
+{{- range .EnumValueArgs}}
 	{{.ValueNameUpperCase}} = {{.Index}},{{end}}
+};
+
+{{- range .EnumValueArgs}}
+constexpr const char* {{.ValueNameUpperCase}}_STRING = "{{.ValueString}}";{{end}}
+
+static const std::unordered_map<std::string, {{.EnumNamePascalCase}}> {{.EnumNameUpperCase}}_STRING_TO_ENUM = {
+{{range .EnumValueArgs}}	{ {{.ValueNameUpperCase}}_STRING, {{$.EnumNamePascalCase}}::{{.ValueNameUpperCase}} },
+{{end -}}
+};
+static const std::unordered_map<{{.EnumNamePascalCase}}, std::string> {{.EnumNameUpperCase}}_ENUM_TO_STRING = {
+{{range .EnumValueArgs}}	{ {{$.EnumNamePascalCase}}::{{.ValueNameUpperCase}}, {{.ValueNameUpperCase}}_STRING },
+{{end -}}
 };
 `
 
@@ -40,12 +55,14 @@ func generateEnumCppCode(enum *parse.EnumDefinition) (string, error) {
 	for i, v := range enum.ValuesByIndex() {
 		enumValueArgs = append(enumValueArgs, EnumValueArgs{
 			ValueNameUpperCase: strings.ToUpper(util.EnsureSnakeCase(v.Name)),
+			ValueString:        v.Value,
 			Index:              i,
 		})
 	}
 
 	args := EnumArgs{
 		EnumNamePascalCase: util.EnsurePascalCase(enum.Name),
+		EnumNameUpperCase:  strings.ToUpper(util.EnsureSnakeCase(enum.Name)),
 		EnumValueArgs:      enumValueArgs,
 	}
 

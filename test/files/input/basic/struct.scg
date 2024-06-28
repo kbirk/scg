@@ -17,9 +17,9 @@ const SomeID MySomeIDConst = "123e4567-e89b-12d3-a456-426614174000";
 const BasicFloat32 FloatConstID = 123.456;
 
 enum SomeEnum {
-	ValueA = 0;
-	ValueB = 1;
-	ValueC = 2;
+	ValueA "value_a" = 0;
+	ValueB "VALUE_B" = 1;
+	ValueC "valueC" = 2;
 }
 
 message EmptyStruct {}

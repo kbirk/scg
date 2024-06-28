@@ -97,6 +97,28 @@ private:
 	std::vector<uint8_t>& bytes_;
 };
 
+class StreamWriter : scg::serialize::IWriter {
+public:
+
+	using scg::serialize::IWriter::write;
+
+	StreamWriter(std::ostream& stream)
+		: stream_(stream)
+	{}
+
+	const std::vector<uint8_t>& bytes() const
+	{
+		assert(false && "StreamWriter::bytes() called on a StreamWriter");
+	}
+
+	void write(const uint8_t* data, uint32_t n)
+	{
+		stream_.write(reinterpret_cast<const char*>(data), n);
+	}
+
+private:
+	std::ostream& stream_;
+};
 
 class FixedSizeWriter : public IWriter {
 public:

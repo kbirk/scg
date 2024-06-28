@@ -123,5 +123,38 @@ private:
 	size_t pos_;
 };
 
+class StreamReader : scg::serialize::IReader {
+public:
+
+	using scg::serialize::IReader::read;
+
+	StreamReader(std::istream& stream)
+		: stream_(stream)
+	{}
+
+	error::Error read(uint8_t* dest, uint32_t n)
+	{
+		// check that it has enough bytes
+		stream_.read((char*)dest, n);
+		if (stream_.fail()) {
+			return error::Error("Failed to read " + std::to_string(n) + " bytes from stream");
+		}
+		return nullptr;
+	}
+
+	error::Error read(std::vector<uint8_t>& dest, uint32_t n)
+	{
+		dest.resize(n, 0);
+		stream_.read((char*)(&dest[0]), n);
+		if (stream_.fail()) {
+			return error::Error("Failed to read " + std::to_string(n) + " bytes from stream");
+		}
+		return nullptr;
+	}
+
+private:
+	std::istream& stream_;
+};
+
 }
 }

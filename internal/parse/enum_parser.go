@@ -10,12 +10,13 @@ import (
 
 var (
 	enumRegex      = regexp.MustCompile(`(?s)enum\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
-	enumValueRegex = regexp.MustCompile(`^(.+?)\s*=\s*(.+?)\s*;*$`)
+	enumValueRegex = regexp.MustCompile(`^(.+?)(?:\s+"([a-zA-Z][a-zA-Z_0-9]*)")?\s*=\s*(.+?)\s*;*$`)
 	enumNameRegex  = regexp.MustCompile(`^[a-zA-Z][a-zA-Z_0-9]*$`)
 )
 
 type EnumValueDefinition struct {
 	Name  string
+	Value string
 	Index uint32
 	Token *Token
 }
@@ -54,7 +55,15 @@ func parseValueDefinition(input *Token) (*EnumValueDefinition, *ParsingError) {
 		}
 	}
 
-	indexMatch := match.Captures[1]
+	stringValueMatch := match.Captures[1]
+	stringValue := ""
+	if stringValueMatch.Content != "" {
+		stringValue = stringValueMatch.Content
+	} else {
+		stringValue = name
+	}
+
+	indexMatch := match.Captures[2]
 	index, err := strconv.Atoi(indexMatch.Content)
 	if err != nil {
 		return nil, &ParsingError{
@@ -66,6 +75,7 @@ func parseValueDefinition(input *Token) (*EnumValueDefinition, *ParsingError) {
 	return &EnumValueDefinition{
 		Name:  name,
 		Index: uint32(index),
+		Value: stringValue,
 		Token: input,
 	}, nil
 }
@@ -175,6 +185,16 @@ func parseEnumDefinitions(tokens []*Token) (map[string]*EnumDefinition, *Parsing
 					Token:   value,
 				}
 			}
+
+			for _, existingValue := range enum.Values {
+				if existingValue.Name == valueDefinition.Name {
+					return nil, &ParsingError{
+						Message: fmt.Sprintf("duplicate enum string value definition %s", valueDefinition.Name),
+						Token:   value,
+					}
+				}
+			}
+
 			enum.Values[valueDefinition.Name] = valueDefinition
 		}
 
