@@ -28,11 +28,11 @@ func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Ptr() *{{.Typ
 	return (*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}})
 }
 
-func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Value() (driver.Value, error) {
+func ({{.TypedefNameNameFirstLetter}} {{.TypedefNamePascalCase}}) Value() (driver.Value, error) {
 {{if .IsUUID}}
-	return (*uuid.UUID)({{.TypedefNameNameFirstLetter}}).Value()
+	return (*uuid.UUID)(&{{.TypedefNameNameFirstLetter}}).Value()
 {{else}}
-	return (*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}), nil
+	return {{.TypedefUnderlyingType}}({{.TypedefNameNameFirstLetter}}), nil
 {{end}}
 }
 

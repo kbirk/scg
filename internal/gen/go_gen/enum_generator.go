@@ -38,8 +38,8 @@ func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Deserialize(reader 
 	return serialize.Deserialize{{.EnumUnderlyingTypePascalCase}}((*{{.EnumUnderlyingType}})({{.EnumNameNameFirstLetter}}), reader)
 }
 
-func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Value() (driver.Value, error) {
-	return {{.EnumNamePascalCase}}_ToString[*{{.EnumNameNameFirstLetter}}], nil
+func ({{.EnumNameNameFirstLetter}} {{.EnumNamePascalCase}}) Value() (driver.Value, error) {
+	return {{.EnumNamePascalCase}}_ToString[{{.EnumNameNameFirstLetter}}], nil
 }
 
 func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Scan(src interface{}) error {
