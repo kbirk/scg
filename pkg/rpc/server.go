@@ -38,16 +38,13 @@ type ServerConfig struct {
 }
 
 type serverStub interface {
-	HandleWrapper(context.Context, uint64, *serialize.Reader) []byte
+	HandleWrapper(context.Context, []Middleware, uint64, *serialize.Reader) []byte
 }
 
-type Middleware func(context.Context) (context.Context, error)
+type Handler func(context.Context, Message) (Message, error)
+type Middleware func(context.Context, Message, Handler) (Message, error)
 
-func RespondWithError(server *Server, requestID uint64, err error) []byte {
-	if server.conf.ErrHandler != nil {
-		server.conf.ErrHandler(err)
-	}
-
+func RespondWithError(requestID uint64, err error) []byte {
 	writer := serialize.NewFixedSizeWriter(ResponseHeaderSize + serialize.ByteSizeString(err.Error()))
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
@@ -56,7 +53,7 @@ func RespondWithError(server *Server, requestID uint64, err error) []byte {
 	return writer.Bytes()
 }
 
-func RespondWithMessage(server *Server, requestID uint64, msg Message) []byte {
+func RespondWithMessage(requestID uint64, msg Message) []byte {
 	writer := serialize.NewFixedSizeWriter(ResponseHeaderSize + msg.ByteSize())
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
@@ -160,14 +157,11 @@ func (g *ServerGroup) registerMiddleware(m Middleware) {
 	g.middleware = append(g.middleware, m)
 }
 
-func (s *Server) applyMiddleware(serviceID uint64, ctx context.Context) (context.Context, error) {
-
+func (s *Server) getMiddlewareStackForServiceID(serviceID uint64) ([]Middleware, error) {
 	group, ok := s.groupByServiceID[serviceID]
 	if !ok {
-		return ctx, nil
+		return nil, fmt.Errorf("service with id %d not found", serviceID)
 	}
-
-	// apply middleware from parent down
 
 	// get the lineage from this group to the root
 	groups := []*ServerGroup{group}
@@ -176,18 +170,41 @@ func (s *Server) applyMiddleware(serviceID uint64, ctx context.Context) (context
 		group = group.parent
 	}
 
-	// iterate from root to group
-	var err error
+	// build from root to leaf
+	var middleware []Middleware
 	for i := len(groups) - 1; i >= 0; i-- {
-		for _, m := range groups[i].middleware {
-			ctx, err = m(ctx)
-			if err != nil {
-				return nil, err
-			}
+		middleware = append(middleware, groups[i].middleware...)
+	}
+
+	return middleware, nil
+}
+
+func buildHandlerFunction(middleware []Middleware, final Handler) Handler {
+
+	// apply middleware from parent down
+
+	// start with the final handler
+	chain := final
+
+	// loop backwards through the middleware slice
+	for i := len(middleware) - 1; i >= 0; i-- {
+		// capture the current middleware handler
+		m := middleware[i]
+
+		// wrap the current chain with the current middleware
+		next := chain
+		chain = func(ctx context.Context, req Message) (Message, error) {
+			return m(ctx, req, next)
 		}
 	}
 
-	return ctx, nil
+	// return the fully chained handler
+	return chain
+}
+
+func (s *Server) ApplyHandlerChain(ctx context.Context, req Message, middleware []Middleware, final Handler) (Message, error) {
+	fn := buildHandlerFunction(middleware, final)
+	return fn(ctx, req)
 }
 
 func (s *Server) getServiceByID(id uint64) (serverStub, error) {
@@ -267,20 +284,15 @@ func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			// apply middleware
-			ctx, err = s.applyMiddleware(serviceID, ctx)
+			// gather middleware for the call
+			middleware, err := s.getMiddlewareStackForServiceID(serviceID)
 			if err != nil {
-				bs = RespondWithError(s, requestID, err)
-				err2 := conn.WriteMessage(websocket.BinaryMessage, bs)
-				if err2 != nil {
-					s.handleError(err2)
-				}
-				// TODO: should we kill the connection?
-				continue
+				s.handleError(err)
+				break
 			}
 
 			// handle the request
-			bs = service.HandleWrapper(ctx, requestID, reader)
+			bs = service.HandleWrapper(ctx, middleware, requestID, reader)
 
 			// send response
 			err = conn.WriteMessage(websocket.BinaryMessage, bs)

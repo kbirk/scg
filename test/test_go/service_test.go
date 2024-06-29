@@ -20,7 +20,7 @@ var (
 	invalidToken = "5678"
 )
 
-func authMiddleware(ctx context.Context) (context.Context, error) {
+func authMiddleware(ctx context.Context, req rpc.Message, next rpc.Handler) (rpc.Message, error) {
 	md := rpc.GetMetadataFromContext(ctx)
 	if md == nil {
 		return nil, fmt.Errorf("no metadata")
@@ -35,10 +35,10 @@ func authMiddleware(ctx context.Context) (context.Context, error) {
 		return nil, fmt.Errorf("invalid token")
 	}
 
-	return ctx, nil
+	return next(ctx, req)
 }
 
-func alwaysRejectMiddleware(ctx context.Context) (context.Context, error) {
+func alwaysRejectMiddleware(ctx context.Context, req rpc.Message, next rpc.Handler) (rpc.Message, error) {
 	return nil, fmt.Errorf("rejected")
 }
 
@@ -217,7 +217,7 @@ func TestPingPongFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
-			assert.Equal(t, "unable to ping the pong", err.Error())
+			require.NoError(t, err)
 		},
 	})
 	pingpong.RegisterPingPongServer(server, &pingpongServerFail{})
@@ -252,7 +252,7 @@ func TestPingPongAuthFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
-			assert.Equal(t, "invalid token", err.Error())
+			require.NoError(t, err)
 		},
 	})
 	server.Middleware(authMiddleware)
@@ -388,7 +388,7 @@ func TestServerGroupsMiddleware(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
-			assert.Equal(t, "no metadata", err.Error())
+			require.NoError(t, err)
 		},
 	})
 
@@ -435,7 +435,7 @@ func TestServerNestedGroupsMiddleware(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
-			assert.True(t, "no metadata" == err.Error() || "rejected" == err.Error())
+			require.NoError(t, err)
 		},
 	})
 

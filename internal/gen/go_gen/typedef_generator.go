@@ -18,6 +18,15 @@ type TypedefArgs struct {
 const typedefTemplateStr = `
 type {{.TypedefNamePascalCase}} {{.TypedefUnderlyingType}}
 
+func New{{.TypedefNamePascalCase}}(value {{.TypedefUnderlyingType}}) *{{.TypedefNamePascalCase}} {
+	{{.TypedefNameNameFirstLetter}} := {{.TypedefNamePascalCase}}(value)
+	return &{{.TypedefNameNameFirstLetter}}
+}
+
+func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Ptr() *{{.TypedefUnderlyingType}} {
+	return (*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}})
+}
+
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) ByteSize() int {
 	return serialize.ByteSize{{.TypedefUnderlyingTypePascalCase}}(*(*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}))
 }

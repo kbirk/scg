@@ -47,33 +47,37 @@ type {{.ServerStubStructName}} struct {
 }
 
 {{range .ServiceMethods}}
-func (s *{{$.ServerStubStructName}}) handle{{.MethodNamePascalCase}}(ctx context.Context, requestID uint64, reader *serialize.Reader) []byte {
+func (s *{{$.ServerStubStructName}}) handle{{.MethodNamePascalCase}}(ctx context.Context, middleware []rpc.Middleware, requestID uint64, reader *serialize.Reader) []byte {
 	req := &{{.MethodRequestStructName}}{}
 	err := req.Deserialize(reader)
 	if err != nil {
-		return rpc.RespondWithError(s.server, requestID, err)
+		return rpc.RespondWithError(requestID, err)
 	}
 
-	resp, err := s.impl.{{.MethodNamePascalCase}}(ctx, req)
+	handler := func (ctx context.Context, req rpc.Message) (rpc.Message, error) {
+		return s.impl.{{.MethodNamePascalCase}}(ctx, req.(*{{.MethodRequestStructName}}))
+	}
+
+	resp, err := s.server.ApplyHandlerChain(ctx, req, middleware, handler)
 	if err != nil {
-		return rpc.RespondWithError(s.server, requestID, err)
+		return rpc.RespondWithError(requestID, err)
 	}
 
-	return rpc.RespondWithMessage(s.server, requestID, resp)
+	return rpc.RespondWithMessage(requestID, resp)
 }
 {{end}}
-func (s *{{$.ServerStubStructName}}) HandleWrapper(ctx context.Context, requestID uint64, reader *serialize.Reader) []byte {
+func (s *{{$.ServerStubStructName}}) HandleWrapper(ctx context.Context, middleware []rpc.Middleware, requestID uint64, reader *serialize.Reader) []byte {
 	var methodID uint64
 	err := serialize.DeserializeUInt64(&methodID, reader)
 	if err != nil {
-		return rpc.RespondWithError(s.server, requestID, err)
+		return rpc.RespondWithError(requestID, err)
 	}
 
 	switch methodID { {{- range .ServiceMethods}}
 	case {{.MethodIDVarName}}:
-		return s.handle{{.MethodNamePascalCase}}(ctx, requestID, reader){{end}}
+		return s.handle{{.MethodNamePascalCase}}(ctx, middleware, requestID, reader){{end}}
 	default:
-		return rpc.RespondWithError(s.server, requestID, fmt.Errorf("unrecognized methodID %d", methodID))
+		return rpc.RespondWithError(requestID, fmt.Errorf("unrecognized methodID %d", methodID))
 	}
 }
 `
