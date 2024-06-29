@@ -38,6 +38,20 @@ func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Deserialize(reader 
 	return serialize.Deserialize{{.EnumUnderlyingTypePascalCase}}((*{{.EnumUnderlyingType}})({{.EnumNameNameFirstLetter}}), reader)
 }
 
+func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Scan(src interface{}) error {
+    switch src := src.(type) {
+    case {{.EnumUnderlyingType}}:
+        *{{.EnumNameNameFirstLetter}}  = {{.EnumNamePascalCase}}(src)
+        return nil
+    case nil:
+		var def {{.EnumNamePascalCase}}
+        *{{.EnumNameNameFirstLetter}} = def
+        return nil
+    default:
+        return fmt.Errorf("cannot scan type %T into type {{.EnumNamePascalCase}}", src)
+    }
+}
+
 const (
 {{- range .EnumValueArgs}}
 	{{$.EnumNamePascalCase}}_{{.ValueNamePascalCase}} {{$.EnumNamePascalCase}} = {{.Index}}

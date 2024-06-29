@@ -38,7 +38,9 @@ var (
 	messageImportsSCG = []string{
 		"github.com/kbirk/scg/pkg/serialize",
 	}
-	typedefImportsSTD = []string{}
+	typedefImportsSTD = []string{
+		"fmt",
+	}
 	typedefImportsSCG = []string{
 		"github.com/kbirk/scg/pkg/serialize",
 	}

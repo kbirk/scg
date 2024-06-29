@@ -27,6 +27,20 @@ func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Ptr() *{{.Typ
 	return (*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}})
 }
 
+func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Scan(src interface{}) error {
+    switch src := src.(type) {
+    case {{.TypedefUnderlyingType}}:
+        *{{.TypedefNameNameFirstLetter}}  = {{.TypedefNamePascalCase}}(src)
+        return nil
+    case nil:
+		var def {{.TypedefNamePascalCase}}
+        *{{.TypedefNameNameFirstLetter}} = def
+        return nil
+    default:
+        return fmt.Errorf("cannot scan type %T into type {{.TypedefNamePascalCase}}", src)
+    }
+}
+
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) ByteSize() int {
 	return serialize.ByteSize{{.TypedefUnderlyingTypePascalCase}}(*(*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}))
 }

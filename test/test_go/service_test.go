@@ -63,7 +63,7 @@ func (s *pingpongServerFail) Ping(ctx context.Context, req *pingpong.PingRequest
 func TestPingPong(t *testing.T) {
 
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -76,7 +76,7 @@ func TestPingPong(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -110,7 +110,7 @@ func TestPingPong(t *testing.T) {
 
 func TestPingPongTLS(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -123,7 +123,7 @@ func TestPingPongTLS(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8000,
 		TLSConfig: &tls.Config{
 			InsecureSkipVerify: true, // self signed
 		},
@@ -160,7 +160,7 @@ func TestPingPongTLS(t *testing.T) {
 
 func TestPingPongTLSAndAuth(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -174,7 +174,7 @@ func TestPingPongTLSAndAuth(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8000,
 		TLSConfig: &tls.Config{
 			InsecureSkipVerify: true, // self signed
 		},
@@ -215,7 +215,7 @@ func TestPingPongTLSAndAuth(t *testing.T) {
 
 func TestPingPongFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -228,7 +228,7 @@ func TestPingPongFail(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -250,7 +250,7 @@ func TestPingPongFail(t *testing.T) {
 
 func TestPingPongAuthFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -264,7 +264,7 @@ func TestPingPongAuthFail(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -290,7 +290,7 @@ func TestPingPongAuthFail(t *testing.T) {
 
 func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -306,7 +306,7 @@ func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8000,
 		TLSConfig: &tls.Config{
 			InsecureSkipVerify: true, // self signed
 		},
@@ -347,7 +347,7 @@ func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 
 func TestPingPongDuplicateGroupPanic(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -386,7 +386,7 @@ func (s *testerBServer) Test(ctx context.Context, req *basic.TestRequestB) (*bas
 
 func TestServerGroupsMiddleware(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -406,7 +406,7 @@ func TestServerGroupsMiddleware(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -433,7 +433,7 @@ func TestServerGroupsMiddleware(t *testing.T) {
 
 func TestServerNestedGroupsMiddleware(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -457,7 +457,7 @@ func TestServerNestedGroupsMiddleware(t *testing.T) {
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Host: "localhost",
-		Port: 8080,
+		Port: 8000,
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},

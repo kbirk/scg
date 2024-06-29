@@ -26,7 +26,7 @@ void test_pingpong_client_tls() {
 	};
 
 	scg::rpc::ClientConfig config;
-	config.uri = "localhost:8080";
+	config.uri = "localhost:8000";
 	config.logging = logging;
 
 	auto client = std::make_shared<scg::rpc::ClientTLS>(config);
