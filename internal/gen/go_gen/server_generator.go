@@ -38,11 +38,12 @@ type {{.ServerNamePascalCase}} interface { {{- range .ServiceMethods}}
 }
 
 func Register{{.ServerNamePascalCase}}(server *rpc.Server, {{.ServerNameCamelCase}} {{.ServerNamePascalCase}}) {
-	server.RegisterServer({{.ServiceIDVarName}}, &{{.ServerStubStructName}}{ {{.ServerNameCamelCase}} })
+	server.RegisterServer({{.ServiceIDVarName}}, &{{.ServerStubStructName}}{ server, {{.ServerNameCamelCase}} })
 }
 
 type {{.ServerStubStructName}} struct {
-	server {{.ServerNamePascalCase}}
+	server *rpc.Server
+	impl {{.ServerNamePascalCase}}
 }
 
 {{range .ServiceMethods}}
@@ -50,29 +51,29 @@ func (s *{{$.ServerStubStructName}}) handle{{.MethodNamePascalCase}}(ctx context
 	req := &{{.MethodRequestStructName}}{}
 	err := req.Deserialize(reader)
 	if err != nil {
-		return rpc.RespondWithError(requestID, err)
+		return rpc.RespondWithError(s.server, requestID, err)
 	}
 
-	resp, err := s.server.{{.MethodNamePascalCase}}(ctx, req)
+	resp, err := s.impl.{{.MethodNamePascalCase}}(ctx, req)
 	if err != nil {
-		return rpc.RespondWithError(requestID, err)
+		return rpc.RespondWithError(s.server, requestID, err)
 	}
 
-	return rpc.RespondWithMessage(requestID, resp)
+	return rpc.RespondWithMessage(s.server, requestID, resp)
 }
 {{end}}
 func (s *{{$.ServerStubStructName}}) HandleWrapper(ctx context.Context, requestID uint64, reader *serialize.Reader) []byte {
 	var methodID uint64
 	err := serialize.DeserializeUInt64(&methodID, reader)
 	if err != nil {
-		return rpc.RespondWithError(requestID, err)
+		return rpc.RespondWithError(s.server, requestID, err)
 	}
 
 	switch methodID { {{- range .ServiceMethods}}
 	case {{.MethodIDVarName}}:
 		return s.handle{{.MethodNamePascalCase}}(ctx, requestID, reader){{end}}
 	default:
-		return rpc.RespondWithError(requestID, fmt.Errorf("unrecognized methodID %d", methodID))
+		return rpc.RespondWithError(s.server, requestID, fmt.Errorf("unrecognized methodID %d", methodID))
 	}
 }
 `

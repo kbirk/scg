@@ -39,6 +39,11 @@ static const std::unordered_map<{{.EnumNamePascalCase}}, std::string> {{.EnumNam
 {{range .EnumValueArgs}}	{ {{$.EnumNamePascalCase}}::{{.ValueNameUpperCase}}, {{.ValueNameUpperCase}}_STRING },
 {{end -}}
 };
+
+inline std::ostream& operator<<(std::ostream& os, const {{.EnumNamePascalCase}}& value) {
+	os << {{.EnumNameUpperCase}}_ENUM_TO_STRING.at(value);
+	return os;
+}
 `
 
 var (

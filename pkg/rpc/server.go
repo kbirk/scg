@@ -43,7 +43,11 @@ type serverStub interface {
 
 type Middleware func(context.Context) (context.Context, error)
 
-func RespondWithError(requestID uint64, err error) []byte {
+func RespondWithError(server *Server, requestID uint64, err error) []byte {
+	if server.conf.ErrHandler != nil {
+		server.conf.ErrHandler(err)
+	}
+
 	writer := serialize.NewFixedSizeWriter(ResponseHeaderSize + serialize.ByteSizeString(err.Error()))
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
@@ -52,7 +56,7 @@ func RespondWithError(requestID uint64, err error) []byte {
 	return writer.Bytes()
 }
 
-func RespondWithMessage(requestID uint64, msg Message) []byte {
+func RespondWithMessage(server *Server, requestID uint64, msg Message) []byte {
 	writer := serialize.NewFixedSizeWriter(ResponseHeaderSize + msg.ByteSize())
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
@@ -266,7 +270,7 @@ func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
 			// apply middleware
 			ctx, err = s.applyMiddleware(serviceID, ctx)
 			if err != nil {
-				bs = RespondWithError(requestID, err)
+				bs = RespondWithError(s, requestID, err)
 				err2 := conn.WriteMessage(websocket.BinaryMessage, bs)
 				if err2 != nil {
 					s.handleError(err2)

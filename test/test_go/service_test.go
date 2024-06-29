@@ -217,7 +217,7 @@ func TestPingPongFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
-			require.NoError(t, err)
+			assert.Equal(t, "unable to ping the pong", err.Error())
 		},
 	})
 	pingpong.RegisterPingPongServer(server, &pingpongServerFail{})
@@ -252,7 +252,7 @@ func TestPingPongAuthFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
-			require.NoError(t, err)
+			assert.Equal(t, "invalid token", err.Error())
 		},
 	})
 	server.Middleware(authMiddleware)
@@ -388,7 +388,7 @@ func TestServerGroupsMiddleware(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
-			require.NoError(t, err)
+			assert.Equal(t, "no metadata", err.Error())
 		},
 	})
 
@@ -435,7 +435,7 @@ func TestServerNestedGroupsMiddleware(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Port: 8080,
 		ErrHandler: func(err error) {
-			require.NoError(t, err)
+			assert.True(t, "no metadata" == err.Error() || "rejected" == err.Error())
 		},
 	})
 

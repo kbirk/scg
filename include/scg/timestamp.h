@@ -98,6 +98,14 @@ public:
 		return nullptr;
 	}
 
+	friend std::ostream& operator<<(std::ostream& os, const timestamp& value)
+	{
+		auto time_t_c = std::chrono::system_clock::to_time_t(value.timepoint_);
+		auto tm = *std::localtime(&time_t_c);
+		os << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+		return os;
+	}
+
 private:
 
 	std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> timepoint_;
