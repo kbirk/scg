@@ -13,6 +13,7 @@ type TypedefArgs struct {
 	TypedefNameNameFirstLetter      string
 	TypedefUnderlyingType           string
 	TypedefUnderlyingTypePascalCase string
+	IsUUID                          bool
 }
 
 const typedefTemplateStr = `
@@ -28,10 +29,17 @@ func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Ptr() *{{.Typ
 }
 
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Value() (driver.Value, error) {
-	return  (*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}), nil
+{{if .IsUUID}}
+	return (*uuid.UUID)({{.TypedefNameNameFirstLetter}}).Value()
+{{else}}
+	return (*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}), nil
+{{end}}
 }
 
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Scan(src interface{}) error {
+{{if .IsUUID}}
+	return (*uuid.UUID)({{.TypedefNameNameFirstLetter}}).Scan(src)
+{{else}}
 	switch src := src.(type) {
 	case {{.TypedefUnderlyingType}}:
 		*{{.TypedefNameNameFirstLetter}}  = {{.TypedefNamePascalCase}}(src)
@@ -43,6 +51,7 @@ func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Scan(src inte
 	default:
 		return fmt.Errorf("cannot scan type %T into type {{.TypedefNamePascalCase}}", src)
 	}
+{{end}}
 }
 
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) ByteSize() int {
@@ -79,6 +88,7 @@ func generateTypedefGoCode(typdef *parse.TypedefDeclaration) (string, error) {
 		TypedefNameNameFirstLetter:      util.FirstLetterAsLowercase(typdef.Name),
 		TypedefUnderlyingType:           typeName,
 		TypedefUnderlyingTypePascalCase: typeNamePascalCase,
+		IsUUID:                          typdef.DataTypeDefinition.Type == parse.DataTypeComparableUUID,
 	}
 
 	buf := &bytes.Buffer{}
