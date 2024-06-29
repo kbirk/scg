@@ -39,9 +39,17 @@ var (
 		"github.com/kbirk/scg/pkg/serialize",
 	}
 	typedefImportsSTD = []string{
+		"database/sql/driver",
 		"fmt",
 	}
 	typedefImportsSCG = []string{
+		"github.com/kbirk/scg/pkg/serialize",
+	}
+	enumImportsSTD = []string{
+		"database/sql/driver",
+		"fmt",
+	}
+	enumImportsSCG = []string{
 		"github.com/kbirk/scg/pkg/serialize",
 	}
 	serviceImportsSTD = []string{
@@ -123,6 +131,11 @@ func generateImportsGoCode(basePackage string, file *parse.File) (string, error)
 				args.STDPackages = append(args.STDPackages, uuidImports...)
 			}
 		}
+	}
+
+	if len(file.Enums) > 0 {
+		args.STDPackages = append(args.STDPackages, enumImportsSTD...)
+		args.SCGPackages = append(args.SCGPackages, enumImportsSCG...)
 	}
 
 	if len(file.ServiceDefinitions) > 0 {

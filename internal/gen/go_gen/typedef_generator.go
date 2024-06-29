@@ -27,18 +27,22 @@ func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Ptr() *{{.Typ
 	return (*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}})
 }
 
+func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Value() (driver.Value, error) {
+	return  (*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}), nil
+}
+
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Scan(src interface{}) error {
-    switch src := src.(type) {
-    case {{.TypedefUnderlyingType}}:
-        *{{.TypedefNameNameFirstLetter}}  = {{.TypedefNamePascalCase}}(src)
-        return nil
-    case nil:
+	switch src := src.(type) {
+	case {{.TypedefUnderlyingType}}:
+		*{{.TypedefNameNameFirstLetter}}  = {{.TypedefNamePascalCase}}(src)
+		return nil
+	case nil:
 		var def {{.TypedefNamePascalCase}}
-        *{{.TypedefNameNameFirstLetter}} = def
-        return nil
-    default:
-        return fmt.Errorf("cannot scan type %T into type {{.TypedefNamePascalCase}}", src)
-    }
+		*{{.TypedefNameNameFirstLetter}} = def
+		return nil
+	default:
+		return fmt.Errorf("cannot scan type %T into type {{.TypedefNamePascalCase}}", src)
+	}
 }
 
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) ByteSize() int {
