@@ -26,8 +26,8 @@ func authMiddleware(ctx context.Context, req rpc.Message, next rpc.Handler) (rpc
 		return nil, fmt.Errorf("no metadata")
 	}
 
-	token, ok := md["token"]
-	if !ok {
+	token, ok, err := md.GetString("token")
+	if err != nil || !ok {
 		return nil, fmt.Errorf("no token")
 	}
 
@@ -195,9 +195,10 @@ func TestPingPongTLSAndAuth(t *testing.T) {
 
 	count := int32(0)
 
-	ctx := rpc.NewContextWithMetadata(context.Background(), map[string]string{
-		"token": "1234",
-	})
+	md := rpc.NewMetadata()
+	md.PutString("token", validToken)
+
+	ctx := rpc.NewContextWithMetadata(context.Background(), md)
 
 	for {
 		resp, err := c.Ping(ctx, &pingpong.PingRequest{
@@ -280,9 +281,10 @@ func TestPingPongAuthFail(t *testing.T) {
 
 	c := pingpong.NewPingPongClient(client)
 
-	ctx := rpc.NewContextWithMetadata(context.Background(), map[string]string{
-		"token": invalidToken,
-	})
+	md := rpc.NewMetadata()
+	md.PutString("token", invalidToken)
+
+	ctx := rpc.NewContextWithMetadata(context.Background(), md)
 
 	_, err := c.Ping(ctx, &pingpong.PingRequest{
 		Ping: pingpong.Ping{
@@ -327,9 +329,10 @@ func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 
 	count := int32(0)
 
-	ctx := rpc.NewContextWithMetadata(context.Background(), map[string]string{
-		"token": "1234",
-	})
+	md := rpc.NewMetadata()
+	md.PutString("token", validToken)
+
+	ctx := rpc.NewContextWithMetadata(context.Background(), md)
 
 	for {
 		resp, err := c.Ping(ctx, &pingpong.PingRequest{
@@ -480,9 +483,10 @@ func TestServerNestedGroupsMiddleware(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "no metadata", err.Error())
 
-	ctx := rpc.NewContextWithMetadata(context.Background(), map[string]string{
-		"token": "1234",
-	})
+	md := rpc.NewMetadata()
+	md.PutString("token", validToken)
+
+	ctx := rpc.NewContextWithMetadata(context.Background(), md)
 
 	_, err = cB.Test(ctx, &basic.TestRequestB{
 		B: "B",

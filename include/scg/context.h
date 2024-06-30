@@ -3,6 +3,7 @@
 #include <string>
 #include <map>
 
+#include "scg/serialize.h"
 #include "scg/error.h"
 
 namespace scg {
@@ -20,49 +21,95 @@ public:
 		return Context();
 	}
 
-	inline void put(const std::string& key, const std::string& val)
+	inline void put(const std::string& key, const std::vector<uint8_t>& val)
 	{
 		values_[key] = val;
 	}
 
-	inline void put(const std::map<std::string, std::string>& values)
+	inline void put(const std::string& key, const char* val)
 	{
-		values_.insert(values.begin(), values.end());
+		using scg::serialize::serialize;
+		using scg::serialize::byte_size;
+
+		std::string str(val);
+
+		auto size = byte_size(str);
+
+		std::vector<uint8_t> data;
+		data.reserve(size);
+		scg::serialize::WriterView writer(data);
+		serialize(writer, str);
+
+		put(key, data);
 	}
 
-	inline std::string get(const std::string& key)
+	template <typename T>
+	inline void put(const std::string& key, const T& val)
 	{
+		using scg::serialize::serialize;
+		using scg::serialize::byte_size;
+
+		auto size = byte_size(val);
+
+		std::vector<uint8_t> data;
+		data.reserve(size);
+		scg::serialize::WriterView writer(data);
+		serialize(writer, val);
+
+		put(key, data);
+	}
+
+	inline scg::error::Error get(std::string& t, const std::string& key)
+	{
+		using scg::serialize::deserialize;
+
 		if (values_.find(key) == values_.end()) {
-			return "";
+			return scg::error::Error("Key `" + key + "` not found");
 		}
-		return values_[key];
+		auto& bs = values_[key];
+		scg::serialize::ReaderView reader(bs);
+		return deserialize(t, reader);
 	}
 
-	inline std::map<std::string, std::string> get()
+	template <typename T>
+	inline scg::error::Error get(T& t, const std::string& key)
 	{
-		return values_;
+		using scg::serialize::deserialize;
+
+		if (values_.find(key) == values_.end()) {
+			return scg::error::Error("Key `" + key + "` not found");
+		}
+		auto& bs = values_[key];
+		scg::serialize::ReaderView reader(bs);
+		return deserialize(t, reader);
 	}
 
 	friend inline uint32_t byte_size(const Context& ctx)
 	{
-		return serialize::byte_size(ctx.values_);
+		using scg::serialize::byte_size;
+
+		return byte_size(ctx.values_);
 	}
 
 	template <typename WriterType>
 	friend inline void serialize(WriterType& writer, const Context& ctx)
 	{
-		serialize::serialize(writer, ctx.values_);
+		using scg::serialize::serialize;
+
+		serialize(writer, ctx.values_);
 	}
 
 	template <typename ReaderType>
 	friend inline error::Error deserialize(Context& ctx, ReaderType& reader)
 	{
-		return serialize::deserialize(ctx.values_, reader);
+		using scg::serialize::deserialize;
+
+		return deserialize(ctx.values_, reader);
 	}
 
 private:
 
-	std::map<std::string, std::string> values_;
+	std::map<std::string, std::vector<uint8_t>> values_;
 };
 
 }

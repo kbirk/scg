@@ -38,8 +38,8 @@ func authMiddleware(ctx context.Context, req rpc.Message, next rpc.Handler) (rpc
 		return nil, fmt.Errorf("no metadata")
 	}
 
-	token, ok := md["token"]
-	if !ok {
+	token, ok, err := md.GetString("token")
+	if err != nil || !ok {
 		return nil, fmt.Errorf("no token")
 	}
 
