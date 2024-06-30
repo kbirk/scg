@@ -82,6 +82,12 @@ func TestPingPong(t *testing.T) {
 		},
 	})
 
+	middlewareCount := 0
+	client.Middleware(func(ctx context.Context, req rpc.Message, next rpc.Handler) (rpc.Message, error) {
+		middlewareCount++
+		return next(ctx, req)
+	})
+
 	c := pingpong.NewPingPongClient(client)
 
 	count := int32(0)
@@ -103,6 +109,8 @@ func TestPingPong(t *testing.T) {
 
 		time.Sleep(50 * time.Millisecond)
 	}
+
+	assert.Equal(t, 11, middlewareCount)
 
 	err := server.Shutdown(context.Background())
 	require.NoError(t, err)

@@ -55,10 +55,14 @@ func (s *{{$.ServerStubStructName}}) handle{{.MethodNamePascalCase}}(ctx context
 	}
 
 	handler := func (ctx context.Context, req rpc.Message) (rpc.Message, error) {
-		return s.impl.{{.MethodNamePascalCase}}(ctx, req.(*{{.MethodRequestStructName}}))
+		r, ok := req.(*{{.MethodRequestStructName}})
+		if !ok {
+			return nil, fmt.Errorf("invalid request type %T", req)
+		}
+		return s.impl.{{.MethodNamePascalCase}}(ctx, r)
 	}
 
-	resp, err := s.server.ApplyHandlerChain(ctx, req, middleware, handler)
+	resp, err := rpc.ApplyHandlerChain(ctx, req, middleware, handler)
 	if err != nil {
 		return rpc.RespondWithError(requestID, err)
 	}

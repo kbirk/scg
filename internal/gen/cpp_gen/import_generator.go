@@ -32,6 +32,7 @@ var (
 	}
 	messageIncludes = []string{
 		"scg/typedef.h",
+		"scg/message.h",
 		"scg/serialize.h",
 		"scg/reader.h",
 		"scg/writer.h",

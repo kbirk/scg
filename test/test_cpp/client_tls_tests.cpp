@@ -31,6 +31,12 @@ void test_pingpong_client_tls() {
 
 	auto client = std::make_shared<scg::rpc::ClientTLS>(config);
 
+	uint32_t middlewareCount = 0;
+	client->middleware([&middlewareCount](scg::context::Context& ctx, const scg::type::Message& req, scg::middleware::Handler next) -> std::pair<scg::type::Message*, scg::error::Error> {
+		middlewareCount++;
+		return next(ctx, req);
+	});
+
 	pingpong::PingPongClient pingPongClient(client);
 
 	uint32_t COUNT = 10;
@@ -112,6 +118,8 @@ void test_pingpong_client_tls() {
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	}
+
+	TEST_CHECK(middlewareCount == COUNT);
 }
 
 // helper method to reduce redundant test typing

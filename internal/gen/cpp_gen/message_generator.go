@@ -22,7 +22,7 @@ type MessageArgs struct {
 }
 
 const messageTemplateStr = `
-struct {{.MessageNamePascalCase}} { {{- range .MessageFields}}
+struct {{.MessageNamePascalCase}} : scg::type::Message { {{- range .MessageFields}}
 	{{.FieldType}} {{.FieldNameCamelCase}};{{end}}
 
 	inline std::vector<uint8_t> toJSON() const;

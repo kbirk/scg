@@ -37,33 +37,31 @@ public:
 	inline explicit
 	{{.ClientNamePascalCase}}Client(std::shared_ptr<scg::rpc::Client> client) : client_(client) {}
 	{{range .ClientMethods}}
-	inline std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(const scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) const
+	inline std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) const
 	{
-		std::pair<{{.MethodResponseStructName}}, scg::error::Error> res;
-
-		auto [reader, err] = client_->call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req);
-		if (err) {
-			res.second = err;
-			return res;
-		}
-
-		err = reader.read(res.first);
-		if (err) {
-			res.second = err;
-			return res;
-		}
-
-		return res;
+		{{.MethodResponseStructName}} resp;
+		auto err = {{.MethodNameCamelCase}}(&resp, ctx, req);
+		return std::pair(resp, err);
 	}
 
-	inline scg::error::Error {{.MethodNameCamelCase}}({{.MethodResponseStructName}}* resp, const scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) const
+	inline scg::error::Error {{.MethodNameCamelCase}}({{.MethodResponseStructName}}* resp, scg::context::Context& c, const {{.MethodRequestStructName}}& req) const
 	{
-		auto [reader, err] = client_->call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req);
-		if (err) {
-			return err;
-		}
+		auto handler = [this, req, resp](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<scg::type::Message*, scg::error::Error> {
+			auto [reader, err] = client_->call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req);
+			if (err) {
+				return std::pair(nullptr, err);
+			}
 
-		return reader.read(*resp);
+			err = reader.read(*resp);
+			if (err) {
+				return std::pair(nullptr, err);
+			}
+
+			return std::pair(resp, nullptr);
+		};
+
+		auto& middleware = client_->middleware();
+		return scg::middleware::applyHandlerChain(c, req, middleware, handler).second;
 	}
 	{{end}}
 

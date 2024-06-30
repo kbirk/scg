@@ -38,17 +38,31 @@ func New{{.ClientNamePascalCase}}Client(client *rpc.Client) *{{.ClientNamePascal
 
 {{range .ClientMethods}}
 func (c *{{$.ClientNamePascalCase}}Client) {{.MethodNamePascalCase}}(ctx context.Context, req *{{.MethodRequestStructName}}) (*{{.MethodResponseStructName}}, error) {
-	reader, err := c.client.Call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req)
-	if err != nil {
-		return nil, err
+
+	handler := func (ctx context.Context, req rpc.Message) (rpc.Message, error) {
+		reader, err := c.client.Call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req)
+		if err != nil {
+			return nil, err
+		}
+
+		resp := &{{.MethodResponseStructName}}{}
+		err = resp.Deserialize(reader)
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
 	}
 
-	resp := &{{.MethodResponseStructName}}{}
-	err = resp.Deserialize(reader)
+	middleware := c.client.GetMiddleware()
+	resp, err := rpc.ApplyHandlerChain(ctx, req, middleware, handler)
 	if err != nil {
 		return nil, err
 	}
-	return resp, nil
+	r, ok := resp.(*{{.MethodResponseStructName}})
+	if !ok {
+		return nil, fmt.Errorf("invalid response type %T", resp)
+	}
+	return r, nil
 }
 {{end}}
 `

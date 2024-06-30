@@ -18,6 +18,7 @@
 #include "scg/const.h"
 #include "scg/context.h"
 #include "scg/logger.h"
+#include "scg/middleware.h"
 
 namespace scg {
 namespace rpc {
@@ -68,6 +69,16 @@ public:
 		// TODO: respect any deadlines / timeouts on the context
 
 		return receiveMessage(future);
+	}
+
+	const std::vector<scg::middleware::Middleware>& middleware()
+	{
+		return middleware_;
+	}
+
+	void middleware(scg::middleware::Middleware middleware)
+	{
+		middleware_.push_back(middleware);
 	}
 
 protected:
@@ -287,6 +298,8 @@ protected:
 	ConnectionStatus status_;
 	std::promise<error::Error> promise_;
 	websocketpp::connection_hdl handle_;
+
+	std::vector<scg::middleware::Middleware> middleware_;
 
 	uint64_t requestID_;
 	std::map<uint64_t, std::shared_ptr<std::promise<serialize::Reader>>> requests_;

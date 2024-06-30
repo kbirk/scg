@@ -27,6 +27,7 @@ type ClientConfig struct {
 	Port       int
 	TLSConfig  *tls.Config
 	ErrHandler func(error)
+	middleware []Middleware
 	Logger     log.Logger
 }
 
@@ -41,6 +42,14 @@ func NewClient(conf ClientConfig) *Client {
 		requestID: seedRequestID(),
 		requests:  make(map[uint64]chan *serialize.Reader),
 	}
+}
+
+func (c *Client) Middleware(middleware Middleware) {
+	c.conf.middleware = append(c.conf.middleware, middleware)
+}
+
+func (c *Client) GetMiddleware() []Middleware {
+	return c.conf.middleware
 }
 
 func (c *Client) handleError(err error) error {
