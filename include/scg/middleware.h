@@ -14,7 +14,7 @@ namespace middleware {
 using Handler = std::function<std::pair<scg::type::Message*, scg::error::Error>(scg::context::Context&, const scg::type::Message&)>;
 using Middleware = std::function<std::pair<scg::type::Message*, scg::error::Error>(scg::context::Context&, const scg::type::Message&, Handler)>;
 
-Handler buildHandlerFunction(const std::vector<Middleware>& middleware, Handler final) {
+inline Handler buildHandlerFunction(const std::vector<Middleware>& middleware, Handler final) {
     // start with the final handler
     Handler chain = final;
 
@@ -34,7 +34,7 @@ Handler buildHandlerFunction(const std::vector<Middleware>& middleware, Handler 
     return chain;
 }
 
-std::pair<scg::type::Message*, scg::error::Error> applyHandlerChain(scg::context::Context& ctx, const scg::type::Message& req, const std::vector<Middleware>& middleware, Handler final) {
+inline std::pair<scg::type::Message*, scg::error::Error> applyHandlerChain(scg::context::Context& ctx, const scg::type::Message& req, const std::vector<Middleware>& middleware, Handler final) {
     Handler fn = buildHandlerFunction(middleware, final);
     return fn(ctx, req);
 }
