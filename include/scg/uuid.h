@@ -153,11 +153,14 @@ public:
 	friend inline error::Error deserialize(uuid& value, ReaderType& reader)
 	{
 		reader.read(value.bytes_, 16);
+		if (value.isNull()) {
+			return nullptr;
+		}
 		if ((value.bytes_[6] & 0xF0) != 0x40) {
-			return error::Error("Invalid UUID version");
+			return error::Error("Invalid UUID version: " + value.toString());
 		}
 		if ((value.bytes_[8] & 0xC0) != 0x80) {
-			return error::Error("Invalid UUID variant");
+			return error::Error("Invalid UUID variant: " + value.toString());
 		}
 		return nullptr;
 	}

@@ -13,6 +13,7 @@ import (
 type MessageFieldArgs struct {
 	FieldNameCamelCase string
 	FieldType          string
+	FieldDefaultValue  string
 }
 
 type MessageArgs struct {
@@ -23,7 +24,11 @@ type MessageArgs struct {
 
 const messageTemplateStr = `
 struct {{.MessageNamePascalCase}} : scg::type::Message { {{- range .MessageFields}}
-	{{.FieldType}} {{.FieldNameCamelCase}};{{end}}
+{{- if ne .FieldDefaultValue ""}}
+	{{.FieldType}} {{.FieldNameCamelCase}} = {{.FieldDefaultValue}};
+{{- else}}
+	{{.FieldType}} {{.FieldNameCamelCase}};
+{{- end}}{{- end}}
 
 	inline std::vector<uint8_t> toJSON() const;
 	inline void fromJSON(const std::vector<uint8_t>& data);
@@ -243,6 +248,30 @@ func mapDataTypeToCppType(dataType parse.DataType) (string, error) {
 	return "", fmt.Errorf("unrecognized type: %v", dataType)
 }
 
+func mapDataTypeToCppDefaultValue(dataType parse.DataType) (string, error) {
+
+	switch dataType {
+	case parse.DataTypeByte,
+		parse.DataTypeUInt8,
+		parse.DataTypeUInt16,
+		parse.DataTypeUInt32,
+		parse.DataTypeUInt64,
+		parse.DataTypeInt8,
+		parse.DataTypeInt16,
+		parse.DataTypeInt32,
+		parse.DataTypeInt64:
+		return "0", nil
+	case parse.DataTypeBool:
+		return "false", nil
+	case parse.DataTypeFloat32:
+		return "0.0f", nil
+	case parse.DataTypeFloat64:
+		return "0.0", nil
+	}
+
+	return "", fmt.Errorf("unrecognized type: %v", dataType)
+}
+
 func mapDataTypeDefinitionToCppType(dataType *parse.DataTypeDefinition) (string, error) {
 
 	switch dataType.Type {
@@ -273,14 +302,31 @@ func mapDataTypeDefinitionToCppType(dataType *parse.DataTypeDefinition) (string,
 	return mapDataTypeToCppType(dataType.Type)
 }
 
+func mapDataTypeDefinitionToDefaultValue(dataType *parse.DataTypeDefinition) (string, error) {
+
+	switch dataType.Type {
+	case parse.DataTypeMap,
+		parse.DataTypeList,
+		parse.DataTypeCustom,
+		parse.DataTypeString,
+		parse.DataTypeTimestamp,
+		parse.DataTypeUUID:
+		return "", nil
+	}
+
+	return mapDataTypeToCppDefaultValue(dataType.Type)
+}
+
 func getMessageFieldArg(field *parse.MessageFieldDefinition) (MessageFieldArgs, error) {
-	goType, err := mapDataTypeDefinitionToCppType(field.DataTypeDefinition)
+	cppType, err := mapDataTypeDefinitionToCppType(field.DataTypeDefinition)
 	if err != nil {
 		return MessageFieldArgs{}, err
 	}
+	defaultValue, err := mapDataTypeDefinitionToDefaultValue(field.DataTypeDefinition)
 	return MessageFieldArgs{
 		FieldNameCamelCase: util.EnsureCamelCase(field.Name),
-		FieldType:          goType,
+		FieldType:          cppType,
+		FieldDefaultValue:  defaultValue,
 	}, nil
 }
 
