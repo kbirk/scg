@@ -1,12 +1,29 @@
 #pragma once
 
 #include <cstdint>
+#include <cmath>
 
 typedef float float32_t;
 typedef double float64_t;
 
 namespace scg {
 namespace serialize {
+
+inline constexpr uint32_t bits_to_bytes(uint32_t x) {
+    return static_cast<uint32_t>(std::ceil(x / 8.0f));
+}
+
+inline constexpr uint32_t bytes_to_bits(uint32_t x) {
+    return x << 3; // same as (x * 8)
+}
+
+inline constexpr uint32_t get_byte_offset(uint32_t x) {
+    return x >> 3; // same as (x / 8)
+}
+
+inline constexpr uint8_t get_bit_offset(uint32_t x) {
+    return x & 0x7; // same as (x % 8)
+}
 
 /**
  * Bit packing macros

@@ -63,33 +63,43 @@ public:
 		timepoint_ = tp;
 	}
 
-	friend inline uint32_t byte_size(const timestamp& value)
+	friend inline uint32_t bit_size(const timestamp& value)
 	{
-		return 16;
+		using scg::serialize::bit_size;
+
+		auto duration_since_epoch = value.timepoint_.time_since_epoch();
+		auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration_since_epoch);
+		auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch - seconds);
+
+		return bit_size(uint64_t(seconds.count())) + bit_size(uint64_t(nanoseconds.count()));
 	}
 
 	template <typename WriterType>
 	friend inline void serialize(WriterType& writer, const timestamp& value)
 	{
+		using scg::serialize::serialize;
+
 		auto duration_since_epoch = value.timepoint_.time_since_epoch();
 		auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration_since_epoch);
 		auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration_since_epoch - seconds);
 
-		serialize::serialize(writer, uint64_t(seconds.count()));
-		serialize::serialize(writer, uint64_t(nanoseconds.count()));
+		serialize(writer, uint64_t(seconds.count()));
+		serialize(writer, uint64_t(nanoseconds.count()));
 	}
 
 	template <typename ReaderType>
 	friend inline error::Error deserialize(timestamp& value, ReaderType& reader)
 	{
+		using scg::serialize::deserialize;
+
 		uint64_t seconds = 0;
 		uint64_t nanoseconds = 0;
 
-		auto err = serialize::deserialize(seconds, reader);
+		auto err = deserialize(seconds, reader);
 		if (err) {
 			return err;
 		}
-		err = serialize::deserialize(nanoseconds, reader);
+		err = deserialize(nanoseconds, reader);
 		if (err) {
 			return err;
 		}

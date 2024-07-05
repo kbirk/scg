@@ -150,10 +150,10 @@ public:
 		return is;
 	}
 
-	friend inline uint32_t byte_size(const strong_typedef<T, Tag>& value)
+	friend inline uint32_t bit_size(const strong_typedef<T, Tag>& value)
 	{
-		using scg::serialize::byte_size; // adl trickery
-		return byte_size(value.value_);
+		using scg::serialize::bit_size; // adl trickery
+		return bit_size(value.value_);
 	}
 
 	template <typename WriterType>

@@ -15,13 +15,6 @@ namespace rpc {
 		0x72, 0x65, 0x73, 0x70,
 		0x6F, 0x6E, 0x73, 0x65};
 
-	constexpr uint32_t PREFIX_SIZE        = 16;
-	constexpr uint32_t REQUEST_ID_SIZE    = 8;
-	constexpr uint32_t SERVICE_ID_SIZE    = 8;
-	constexpr uint32_t METHOD_ID_SIZE     = 8;
-	constexpr uint32_t RESPONSE_TYPE_SIZE = 1;
-	constexpr uint32_t REQUEST_HEADER_SIZE = PREFIX_SIZE + REQUEST_ID_SIZE + SERVICE_ID_SIZE + METHOD_ID_SIZE;
-
 	constexpr uint8_t ERROR_RESPONSE = 0x01;
 	constexpr uint8_t MESSAGE_RESPONSE = 0x02;
 }
