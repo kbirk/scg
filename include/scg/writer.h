@@ -62,44 +62,9 @@ public:
 		writeBits(bs, num_bits_to_write);
 	}
 
-	inline void writeBits(uint16_t val, uint32_t num_bits_to_write)
-	{
-		std::array<uint8_t, 2> bs = {
-			static_cast<uint8_t>(val >> 8),
-			static_cast<uint8_t>(val)
-		};
-		writeBits(bs, num_bits_to_write);
-	}
-
-	inline void writeBits(uint32_t val, uint32_t num_bits_to_write)
-	{
-		std::array<uint8_t, 4> bs = {
-			static_cast<uint8_t>(val >> 24),
-			static_cast<uint8_t>(val >> 16),
-			static_cast<uint8_t>(val >> 8),
-			static_cast<uint8_t>(val)
-		};
-		writeBits(bs, num_bits_to_write);
-	}
-
-	inline void writeBits(uint64_t val, uint32_t num_bits_to_write)
-	{
-		std::array<uint8_t, 8> bs = {
-			static_cast<uint8_t>(val >> 56),
-			static_cast<uint8_t>(val >> 48),
-			static_cast<uint8_t>(val >> 40),
-			static_cast<uint8_t>(val >> 32),
-			static_cast<uint8_t>(val >> 24),
-			static_cast<uint8_t>(val >> 16),
-			static_cast<uint8_t>(val >> 8),
-			static_cast<uint8_t>(val)
-		};
-		writeBits(bs, num_bits_to_write);
-	}
-
 protected:
 
-	virtual void writeBit(uint32_t byteIndex, uint8_t mask) = 0;
+	virtual void writeBit(uint32_t destByteIndex, uint8_t bitMask) = 0;
 
 	uint32_t numBitsWritten_ = 0;
 };

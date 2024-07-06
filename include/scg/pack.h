@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cmath>
 
+#include "scg/error.h"
+
 typedef float float32_t;
 typedef double float64_t;
 
@@ -10,19 +12,165 @@ namespace scg {
 namespace serialize {
 
 inline constexpr uint32_t bits_to_bytes(uint32_t x) {
-    return static_cast<uint32_t>(std::ceil(x / 8.0f));
+	return static_cast<uint32_t>(std::ceil(x / 8.0f));
 }
 
 inline constexpr uint32_t bytes_to_bits(uint32_t x) {
-    return x << 3; // same as (x * 8)
+	return x << 3; // same as (x * 8)
 }
 
 inline constexpr uint32_t get_byte_offset(uint32_t x) {
-    return x >> 3; // same as (x / 8)
+	return x >> 3; // same as (x / 8)
 }
 
 inline constexpr uint8_t get_bit_offset(uint32_t x) {
-    return x & 0x7; // same as (x % 8)
+	return x & 0x7; // same as (x % 8)
+}
+
+inline uint32_t var_uint_bit_size(uint64_t val, uint32_t num_bytes)
+{
+	uint32_t size = 0;
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		if (val != 0) {
+			size += 9;
+		} else {
+			size += 1;
+			break;
+		}
+		val >>= 8;
+	}
+	return size;
+}
+
+template <typename WriterType>
+inline void var_encode_uint(WriterType& writer, uint64_t val, uint32_t num_bytes)
+{
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		if (val != 0) {
+			writer.writeBits(uint8_t(1), 1);
+			writer.writeBits(val & 0xFF, 8);
+		} else {
+			writer.writeBits(uint8_t(0), 1);
+			break;
+		}
+		val >>= 8;
+	}
+}
+
+template <typename ReaderType>
+inline error::Error var_decode_uint(uint64_t& val, ReaderType& reader, uint32_t num_bytes)
+{
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		uint8_t flag = 0;
+		auto err = reader.readBits(flag, 1);
+		if (err) {
+			return err;
+		}
+
+		if (!flag) {
+			break;
+		}
+
+		uint8_t byte = 0;
+
+		err = reader.readBits(byte, 8);
+		if (err) {
+			return err;
+		}
+
+		val |= static_cast<uint64_t>(byte) << (8 * i);
+	}
+	return nullptr;
+}
+
+inline uint32_t var_int_bit_size(int64_t val, uint32_t num_bytes)
+{
+	uint32_t size = 0;
+	// use zigzag encoding
+	size += 1;
+
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		if (val != 0) {
+			size += 1;
+			if (i == num_bytes-1) {
+				size += 7;
+			} else {
+				size += 8;
+			}
+		} else {
+			size += 1;
+			break;
+		}
+		val >>= 8;
+	}
+	return size;
+}
+
+template <typename WriterType>
+inline void var_encode_int(WriterType& writer, int64_t val, uint32_t num_bytes)
+{
+	// use zigzag encoding
+	if (val < 0) {
+		writer.writeBits(uint8_t(1), 1);
+		val = -val;
+	} else {
+		writer.writeBits(uint8_t(0), 1);
+	}
+
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		if (val != 0) {
+			writer.writeBits(uint8_t(1), 1);
+			if (i == num_bytes-1) {
+				writer.writeBits(val & 0xFF, 7);
+			} else {
+				writer.writeBits(val & 0xFF, 8);
+			}
+		} else {
+			writer.writeBits(uint8_t(0), 1);
+			break;
+		}
+		val >>= 8;
+	}
+}
+
+template <typename ReaderType>
+inline error::Error var_decode_int(int64_t& val, ReaderType& reader, uint32_t num_bytes)
+{
+	// use zigzag encoding
+	uint8_t sign = 0;
+	auto err = reader.readBits(sign, 1);
+	if (err) {
+		return err;
+	}
+
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		uint8_t flag = 0;
+		auto err = reader.readBits(flag, 1);
+		if (err) {
+		return err;
+		}
+
+		if (!flag) {
+			break;
+		}
+		uint8_t byte = 0;
+		if (i == num_bytes-1) {
+			err = reader.readBits(byte, 7);
+		} else {
+			err = reader.readBits(byte, 8);
+		}
+		if (err) {
+			return err;
+		}
+
+		val |= static_cast<int64_t>(byte) << (8 * i);
+	}
+
+	if (sign) {
+		val = -val;
+	}
+
+	return nullptr;
 }
 
 /**

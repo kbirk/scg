@@ -66,59 +66,6 @@ public:
 		return nullptr;
 	}
 
-	error::Error readBits(uint16_t& val, uint32_t num_bits_to_read)
-	{
-		std::array<uint8_t, 2> bs = {0,0};
-		auto err = readBits(bs, num_bits_to_read);
-		if (err) {
-			return err;
-		}
-
-		val =
-			(static_cast<uint16_t>(bs[0]) << 8) |
-			bs[1];
-
-		return nullptr;
-	}
-
-	error::Error readBits(uint32_t& val, uint32_t num_bits_to_read)
-	{
-		std::array<uint8_t, 4> bs = {0,0,0,0};
-		auto err = readBits(bs, num_bits_to_read);
-		if (err) {
-			return err;
-		}
-
-		val =
-			(static_cast<uint32_t>(bs[0]) << 24) |
-			(static_cast<uint32_t>(bs[1]) << 16) |
-			(static_cast<uint32_t>(bs[2]) << 8) |
-			bs[3];
-
-		return nullptr;
-	}
-
-	error::Error readBits(uint64_t& val, uint32_t num_bits_to_read)
-	{
-		std::array<uint8_t, 8> bs = {0,0,0,0,0,0,0,0};
-		auto err = readBits(bs, num_bits_to_read);
-		if (err) {
-			return err;
-		}
-
-		val =
-			(static_cast<uint64_t>(bs[0]) << 56) |
-			(static_cast<uint64_t>(bs[1]) << 48) |
-			(static_cast<uint64_t>(bs[2]) << 40) |
-			(static_cast<uint64_t>(bs[3]) << 32) |
-			(static_cast<uint64_t>(bs[4]) << 24) |
-			(static_cast<uint64_t>(bs[5]) << 16) |
-			(static_cast<uint64_t>(bs[6]) << 8) |
-			bs[7];
-
-		return nullptr;
-	}
-
 protected:
 
 	virtual error::Error readByte(uint8_t& val, uint32_t byteIndex) = 0;

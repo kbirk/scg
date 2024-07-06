@@ -58,53 +58,65 @@ inline error::Error deserialize(uint8_t& value, ReaderType& reader)
 
 inline constexpr uint32_t bit_size(uint16_t value)
 {
-	return 16;
+	return var_uint_bit_size(value, 2);
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, uint16_t value)
 {
-	writer.writeBits(value, 16);
+	var_encode_uint(writer, value, 2);
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(uint16_t& value, ReaderType& reader)
 {
-	return reader.readBits(value, 16);
+	uint64_t val = 0;
+	auto err = var_decode_uint(val, reader, 2);
+	if (err) {
+		return err;
+	}
+	value = val;
+	return nullptr;
 }
 
 inline constexpr uint32_t bit_size(uint32_t value)
 {
-	return 32;
+	return var_uint_bit_size(value, 4);
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, uint32_t value)
 {
-	writer.writeBits(value, 32);
+	var_encode_uint(writer, value, 4);
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(uint32_t& value, ReaderType& reader)
 {
-	return reader.readBits(value, 32);
+	uint64_t val = 0;
+	auto err = var_decode_uint(val, reader, 4);
+	if (err) {
+		return err;
+	}
+	value = val;
+	return nullptr;
 }
 
 inline constexpr uint32_t bit_size(uint64_t value)
 {
-	return 64;
+	return var_uint_bit_size(value, 8);
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, uint64_t value)
 {
-	writer.writeBits(value, 64);
+	var_encode_uint(writer, value, 8);
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(uint64_t& value, ReaderType& reader)
 {
-	return reader.readBits(value, 64);
+	return var_decode_uint(value, reader, 8);
 }
 
 inline constexpr uint32_t bit_size(int8_t value)
@@ -137,86 +149,65 @@ inline error::Error deserialize(int8_t& value, ReaderType& reader)
 
 inline constexpr uint32_t bit_size(int16_t value)
 {
-	return bit_size(uint16_t(value));
+	return var_int_bit_size(value, 2);
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, int16_t value)
 {
-	serialize(writer, uint16_t(value));
+	var_encode_int(writer, value, 2);
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(int16_t& value, ReaderType& reader)
 {
-	uint16_t ui = 0;
-	auto err = deserialize(ui, reader);
+	int64_t val = 0;
+	auto err = var_decode_int(val, reader, 2);
 	if (err) {
 		return err;
 	}
-	// change unsigned to signed
-	if (ui <= 0x7fffu) {
-		value = ui;
-	} else {
-		value = -1 - (int16_t)(0xffffu - ui);
-	}
+	value = val;
 	return nullptr;
 }
 
 inline constexpr uint32_t bit_size(int32_t value)
 {
-	return bit_size(uint32_t(value));
+	return var_int_bit_size(value, 4);
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, int32_t value)
 {
-	serialize(writer, uint32_t(value));
+	var_encode_int(writer, value, 4);
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(int32_t& value, ReaderType& reader)
 {
-	uint32_t ui = 0;
-	auto err = deserialize(ui, reader);
+	int64_t val = 0;
+	auto err = var_decode_int(val, reader, 4);
 	if (err) {
 		return err;
 	}
-	// change unsigned to signed
-	if (ui <= 0x7fffffffu) {
-		value = ui;
-	} else {
-		value = -1 - (int32_t)(0xffffffffu - ui);
-	}
+	value = val;
 	return nullptr;
 }
 
 inline constexpr uint32_t bit_size(int64_t value)
 {
-	return bit_size(uint64_t(value));
+	return var_int_bit_size(value, 8);
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, int64_t value)
 {
-	serialize(writer, uint64_t(value));
+	var_encode_int(writer, value, 8);
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(int64_t& value, ReaderType& reader)
 {
-	uint64_t ui = 0;
-	auto err = deserialize(ui, reader);
-	if (err) {
-		return err;
-	}
-	// change unsigned numbers to signed
-	if (ui <= 0x7fffffffffffffffu) {
-		value = ui;
-	} else {
-		value = -1 - (int64_t)(0xffffffffffffffffu - ui);
-	}
-	return nullptr;
+	return var_decode_int(value, reader, 8);
 }
 
 inline constexpr uint32_t bit_size(float32_t value)

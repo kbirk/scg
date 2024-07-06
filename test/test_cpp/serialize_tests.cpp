@@ -12,7 +12,7 @@ using scg::serialize::bit_size;
 using scg::serialize::serialize;
 using scg::serialize::deserialize;
 
-constexpr int32_t NUM_STEPS = 256;
+constexpr int32_t NUM_STEPS = 1024;
 
 void test_serialize_uint8()
 {
@@ -27,8 +27,6 @@ void test_serialize_uint8()
 		uint8_t output = 0;
 		auto err = deserialize(output, reader);
 		TEST_CHECK(!err);
-
-		std::cout << "read: " << int(output) << std::endl;
 
 		TEST_CHECK(input == output);
 	}
@@ -54,8 +52,7 @@ void test_serialize_int8()
 
 void test_serialize_uint16()
 {
-	uint16_t MAX = UINT16_MAX;
-	uint16_t STEP = MAX / NUM_STEPS;
+	uint16_t STEP = UINT16_MAX / NUM_STEPS;
 	for (uint32_t i=0; i<NUM_STEPS; i++) {
 		uint16_t input = i * STEP;
 
@@ -73,9 +70,7 @@ void test_serialize_uint16()
 
 void test_serialize_int16()
 {
-	int16_t MIN = INT16_MIN;
-	int16_t MAX = INT16_MAX;
-	int16_t STEP = (MAX - MIN) / 20;
+	int16_t STEP = UINT16_MAX / 20;
 	for (int32_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
 		int16_t input = i * STEP;
 
@@ -93,8 +88,7 @@ void test_serialize_int16()
 
 void test_serialize_uint32()
 {
-	uint32_t MAX = UINT32_MAX;
-	uint32_t STEP = MAX / NUM_STEPS;
+	uint32_t STEP = UINT32_MAX / NUM_STEPS;
 	for (uint32_t i=0; i<NUM_STEPS; i++) {
 		uint32_t input = i * STEP;
 
@@ -112,9 +106,7 @@ void test_serialize_uint32()
 
 void test_serialize_int32()
 {
-	int32_t MIN = INT32_MIN;
-	int32_t MAX = INT32_MAX;
-	int32_t STEP = (MAX - MIN) / 20;
+	int32_t STEP = UINT32_MAX / NUM_STEPS;
 	for (int32_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
 		int32_t input = i * STEP;
 
@@ -132,8 +124,7 @@ void test_serialize_int32()
 
 void test_serialize_uint64()
 {
-	uint64_t MAX = UINT64_MAX;
-	uint64_t STEP = MAX / NUM_STEPS;
+	uint64_t STEP = UINT32_MAX / NUM_STEPS;
 	for (uint32_t i=0; i<NUM_STEPS; i++) {
 		uint64_t input = i * STEP;
 
@@ -151,9 +142,7 @@ void test_serialize_uint64()
 
 void test_serialize_int64()
 {
-	int64_t MIN = INT64_MIN;
-	int64_t MAX = INT64_MAX;
-	int64_t STEP = (MAX - MIN) / 20;
+	int64_t STEP = UINT64_MAX / NUM_STEPS;
 	for (int32_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
 		int64_t input = i * STEP;
 
@@ -171,10 +160,9 @@ void test_serialize_int64()
 
 void test_serialize_float32()
 {
-	float32_t MIN = -1000000.12345f;
-	float32_t MAX = 1000000.12345f;
-	float32_t STEP = (MAX - MIN) / 20.789f;
-	for (float32_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
+	float32_t MAX = 123456.12345f;
+	float32_t STEP = MAX / NUM_STEPS;
+	for (int32_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
 		float32_t input = i * STEP;
 
 		scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(bit_size(input)));
@@ -191,10 +179,9 @@ void test_serialize_float32()
 
 void test_serialize_float64()
 {
-	float64_t MIN = -1000000000.123456789f;
-	float64_t MAX = 1000000000.123456789f;
-	float64_t STEP = (MAX - MIN) / 20.98765432f;
-	for (float64_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
+	float64_t MAX = 123456789.123456789f;
+	float64_t STEP = MAX / NUM_STEPS;
+	for (int32_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
 		float64_t input = i * STEP;
 
 		scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(bit_size(input)));
