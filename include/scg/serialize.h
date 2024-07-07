@@ -293,8 +293,8 @@ inline error::Error deserialize(std::string& value, ReaderType& reader)
 			return err;
 		}
 		value[i] = c;
-
 	}
+
 	return nullptr;
 }
 
@@ -574,9 +574,9 @@ inline error::Error deserialize(std::unordered_set<T>& value, ReaderType& reader
 template <typename T, size_t N>
 inline uint32_t bit_size(const std::array<T, N>& value)
 {
-	uint32_t size = bit_size(uint32_t(value.size()));
-	for (const auto& item : value) {
-		size += bit_size(item);
+	uint32_t size = 0;
+	for (uint32_t i = 0; i < N; i++) {
+		size += bit_size(value[i]);
 	}
 	return size;
 }
@@ -584,23 +584,17 @@ inline uint32_t bit_size(const std::array<T, N>& value)
 template <typename WriterType, typename T, size_t N>
 inline void serialize(WriterType& writer, const std::array<T, N>& value)
 {
-	serialize(writer, uint32_t(value.size()));
-	for (const auto& item : value) {
-		serialize(writer, item);
+	for (uint32_t i = 0; i < N; i++) {
+		serialize(writer, value[i]);
 	}
 }
 
 template <typename ReaderType, typename T, size_t N>
 inline error::Error deserialize(std::array<T, N>& value, ReaderType& reader)
 {
-	uint32_t size;
-	auto err = deserialize(size, reader);
-	if (err) {
-		return err;
-	}
-	for (auto i = uint32_t(0); i < size; i++) {
+	for (auto i = uint32_t(0); i < N; i++) {
 		T t;
-		err = deserialize(t, reader);
+		auto err = deserialize(t, reader);
 		if (err) {
 			return err;
 		}

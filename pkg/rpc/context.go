@@ -27,8 +27,8 @@ func (m *Metadata) PutBytes(key string, value []byte) {
 }
 
 func (m *Metadata) PutString(key string, value string) {
-	size := serialize.ByteSizeString(value)
-	writer := serialize.NewFixedSizeWriter(size)
+	size := serialize.BitSizeString(value)
+	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
 	serialize.SerializeString(writer, value)
 	m.vals[key] = writer.Bytes()
 }
@@ -96,16 +96,17 @@ func GetMetadataFromContext(ctx context.Context) *Metadata {
 	return nil
 }
 
-func ByteSizeContext(ctx context.Context) int {
+func BitSizeContext(ctx context.Context) int {
 	md := GetMetadataFromContext(ctx)
 	if md == nil {
-		return serialize.ByteSizeUInt32(0)
+		return serialize.BitSizeUInt32(0)
 	}
 
-	size := serialize.ByteSizeUInt32(uint32(len(md.vals)))
+	size := serialize.BitSizeUInt32(uint32(len(md.vals)))
 	for k, v := range md.vals {
-		size += serialize.ByteSizeString(k)
-		size += serialize.ByteSizeUInt32(uint32(len(v))) + len(v)
+		size += serialize.BitSizeString(k)
+		size += serialize.BitSizeUInt32(uint32(len(v)))
+		size += len(v) * 8
 	}
 	return size
 }
@@ -122,7 +123,9 @@ func SerializeContext(writer *serialize.FixedSizeWriter, ctx context.Context) {
 		serialize.SerializeString(writer, k)
 
 		serialize.SerializeUInt32(writer, uint32(len(v)))
-		writer.Write(v)
+		for _, b := range v {
+			writer.WriteBits(b, 8)
+		}
 	}
 }
 
@@ -147,9 +150,12 @@ func DeserializeContext(ctx *context.Context, reader *serialize.Reader) error {
 				return err
 			}
 
-			val, err := reader.Read(int(size))
-			if err != nil {
-				return err
+			val := make([]byte, size)
+			for i := 0; i < int(size); i++ {
+				err := reader.ReadBits(&val[i], 8)
+				if err != nil {
+					return err
+				}
 			}
 
 			md.PutBytes(k, val)

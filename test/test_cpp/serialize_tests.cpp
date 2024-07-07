@@ -14,11 +14,33 @@ using scg::serialize::deserialize;
 
 constexpr int32_t NUM_STEPS = 1024;
 
+void test_serialize_context()
+{
+	scg::context::Context input;
+	input.put("key1", "value1");
+
+	scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(bit_size(input)));
+	serialize(writer, input);
+
+	scg::serialize::Reader reader(writer.bytes());
+	scg::context::Context output;
+	auto err = deserialize(output, reader);
+	TEST_CHECK(!err);
+
+	std::string str1;
+	TEST_CHECK(input.get(str1, "key1") == nullptr);
+
+	std::string str2;
+	TEST_CHECK(output.get(str2, "key1") == nullptr);
+
+	TEST_CHECK(str1 == str2);
+}
+
 void test_serialize_uint8()
 {
-	uint8_t STEP = 1;
+	uint8_t NUM_STEPS = UINT8_MAX;
 	for (uint32_t i=0; i<NUM_STEPS; i++) {
-		uint8_t input = i * STEP;
+		uint8_t input = i;
 
 		scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(bit_size(input)));
 		serialize(writer, input);
@@ -34,9 +56,10 @@ void test_serialize_uint8()
 
 void test_serialize_int8()
 {
-	int8_t STEP = 1;
-	for (int32_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
-		int8_t input = i * STEP;
+	uint8_t MIN = INT8_MIN;
+	uint8_t MAX = INT8_MAX;
+	for (int32_t i=MIN; i<MAX; i++) {
+		int8_t input = i;
 
 		scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(bit_size(input)));
 		serialize(writer, input);
@@ -52,9 +75,9 @@ void test_serialize_int8()
 
 void test_serialize_uint16()
 {
-	uint16_t STEP = UINT16_MAX / NUM_STEPS;
+	uint16_t NUM_STEPS = UINT16_MAX;
 	for (uint32_t i=0; i<NUM_STEPS; i++) {
-		uint16_t input = i * STEP;
+		uint16_t input = i;
 
 		scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(bit_size(input)));
 		serialize(writer, input);
@@ -70,9 +93,10 @@ void test_serialize_uint16()
 
 void test_serialize_int16()
 {
-	int16_t STEP = UINT16_MAX / 20;
-	for (int32_t i=-NUM_STEPS/2; i<NUM_STEPS/2; i++) {
-		int16_t input = i * STEP;
+	uint16_t MIN = INT16_MIN;
+	uint16_t MAX = INT16_MAX;
+	for (int32_t i=MIN; i<MAX; i++) {
+		int16_t input = i;
 
 		scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(bit_size(input)));
 		serialize(writer, input);
@@ -369,6 +393,7 @@ TEST_LIST = {
 	TEST(test_serialize_vector),
 	TEST(test_serialize_map),
 	TEST(test_serialize_pingpong),
+	TEST(test_serialize_context),
 
 	{ NULL, NULL }
 };

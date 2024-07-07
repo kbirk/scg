@@ -83,91 +83,63 @@ inline error::Error var_decode_uint(uint64_t& val, ReaderType& reader, uint32_t 
 	return nullptr;
 }
 
+
+inline uint64_t zigzagEncode(int64_t val)
+{
+	return (static_cast<uint64_t>(val) << 1) ^ static_cast<uint64_t>(val>>63);
+}
+
+inline int64_t zigzagDecode(uint64_t encoded )
+{
+	return static_cast<int64_t>((encoded >> 1) ^ (-(encoded & 1)));
+}
+
 inline uint32_t var_int_bit_size(int64_t val, uint32_t num_bytes)
 {
-	uint32_t size = 0;
-	// use zigzag encoding
-	size += 1;
-
-	for (uint32_t i = 0; i < num_bytes; ++i) {
-		if (val != 0) {
-			size += 1;
-			if (i == num_bytes-1) {
-				size += 7;
-			} else {
-				size += 8;
-			}
-		} else {
-			size += 1;
-			break;
-		}
-		val >>= 8;
+	uint64_t uv = 0;
+	if (val < 0) {
+		uv = zigzagEncode(val);
+	} else {
+		uv = val;
 	}
-	return size;
+
+	return 1 + var_uint_bit_size(uv, num_bytes);
 }
 
 template <typename WriterType>
 inline void var_encode_int(WriterType& writer, int64_t val, uint32_t num_bytes)
 {
-	// use zigzag encoding
+	uint64_t uv = 0;
 	if (val < 0) {
+		uv = zigzagEncode(val);
 		writer.writeBits(uint8_t(1), 1);
-		val = -val;
 	} else {
+		uv = val;
 		writer.writeBits(uint8_t(0), 1);
 	}
 
-	for (uint32_t i = 0; i < num_bytes; ++i) {
-		if (val != 0) {
-			writer.writeBits(uint8_t(1), 1);
-			if (i == num_bytes-1) {
-				writer.writeBits(val & 0xFF, 7);
-			} else {
-				writer.writeBits(val & 0xFF, 8);
-			}
-		} else {
-			writer.writeBits(uint8_t(0), 1);
-			break;
-		}
-		val >>= 8;
-	}
+	var_encode_uint(writer, uv, num_bytes);
 }
 
 template <typename ReaderType>
 inline error::Error var_decode_int(int64_t& val, ReaderType& reader, uint32_t num_bytes)
 {
-	// use zigzag encoding
 	uint8_t sign = 0;
 	auto err = reader.readBits(sign, 1);
 	if (err) {
 		return err;
 	}
 
-	for (uint32_t i = 0; i < num_bytes; ++i) {
-		uint8_t flag = 0;
-		auto err = reader.readBits(flag, 1);
-		if (err) {
+	uint64_t uv = 0;
+	err = var_decode_uint(uv, reader, num_bytes);
+	if (err) {
 		return err;
-		}
-
-		if (!flag) {
-			break;
-		}
-		uint8_t byte = 0;
-		if (i == num_bytes-1) {
-			err = reader.readBits(byte, 7);
-		} else {
-			err = reader.readBits(byte, 8);
-		}
-		if (err) {
-			return err;
-		}
-
-		val |= static_cast<int64_t>(byte) << (8 * i);
 	}
 
 	if (sign) {
-		val = -val;
+		val = zigzagDecode(uv);
+	} else {
+		val = uv;
 	}
 
 	return nullptr;

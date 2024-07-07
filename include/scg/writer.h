@@ -27,15 +27,13 @@ public:
 		serialize(*this, data);
 	}
 
-	template <size_t N>
-	inline void writeBits(const std::array<uint8_t, N>& val, uint32_t num_bits_to_write)
+	inline void writeBits(uint8_t val, uint32_t num_bits_to_write)
 	{
 		uint32_t total_bits_to_write = num_bits_to_write;
 
 		while (num_bits_to_write > 0) {
 			uint32_t dst_byte_index = get_byte_offset(numBitsWritten_);
 			uint8_t dst_bit_index =  get_bit_offset(numBitsWritten_);
-			uint32_t src_byte_index = get_byte_offset(total_bits_to_write - num_bits_to_write);
 			uint8_t src_bit_index = get_bit_offset(total_bits_to_write - num_bits_to_write);
 
 			assert((src_bit_index <= 7) && "Invalid bit index");
@@ -43,23 +41,16 @@ public:
 
 			uint8_t src_mask = 1 << src_bit_index;
 			uint8_t dst_mask = 1 << dst_bit_index;
-			uint8_t val_byte = val[src_byte_index];
 
-			if (val_byte & src_mask) {
+			if (val & src_mask) {
 				writeBit(dst_byte_index, dst_mask);
+			} else {
+				writeBit(dst_byte_index, 0x00); // in case it needs to grow
 			}
 
 			numBitsWritten_++;
 			num_bits_to_write--;
 		}
-	}
-
-	inline void writeBits(uint8_t val, uint32_t num_bits_to_write)
-	{
-		std::array<uint8_t, 1> bs = {
-			val
-		};
-		writeBits(bs, num_bits_to_write);
 	}
 
 protected:

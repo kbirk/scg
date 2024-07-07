@@ -156,6 +156,10 @@ protected:
 		std::string errMsg;
 		serialize::deserialize(errMsg, reader);
 
+		if (errMsg == "") {
+			errMsg = "Unknown error";
+		}
+
 		return std::make_pair(serialize::Reader({}), error::Error(errMsg));
 	}
 
@@ -203,6 +207,7 @@ protected:
 
 		if (prefix != RESPONSE_PREFIX) {
 			client->get_elog().write(websocketpp::log::elevel::fatal, "received message with invalid prefix, closing connection");
+			// TODO: resolve the promise with an error
 			disconnect();
 			return;
 		}
@@ -216,7 +221,7 @@ protected:
 		if (iter != requests_.end()) {
 			iter->second->set_value(reader);
 		} else {
-			client->get_elog().write(websocketpp::log::elevel::fatal, "received message with invalid prefix, closing connection");
+			client->get_elog().write(websocketpp::log::elevel::fatal, "received message with unknown request id, closing connection");
 			disconnect();
 			return;
 		}

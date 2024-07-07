@@ -16,17 +16,12 @@ var (
 )
 
 const (
-	PrefixSize         = 16
-	RequestIDSize      = 8
-	ServiceIDSize      = 8
-	MethodIDSize       = 8
-	ResponseTypeSize   = 1
-	RequestHeaderSize  = PrefixSize + RequestIDSize + ServiceIDSize + MethodIDSize
-	ResponseHeaderSize = PrefixSize + RequestIDSize + ResponseTypeSize
+	ErrorResponse   = uint8(0x01)
+	MessageResponse = uint8(0x02)
 )
 
 type Message interface {
-	ByteSize() int
+	BitSize() int
 	ToJSON() ([]byte, error)
 	FromJSON([]byte) error
 	ToBytes() []byte
@@ -35,21 +30,23 @@ type Message interface {
 	Deserialize(*serialize.Reader) error
 }
 
-const (
-	ErrorResponse   = uint8(0x01)
-	MessageResponse = uint8(0x02)
-)
+func BitSizePrefix() int {
+	return 16 * 8
+}
 
 func SerializePrefix(writer *serialize.FixedSizeWriter, data [16]byte) {
-	bs := writer.Next(16)
-	copy(bs, data[:])
+	for _, b := range data {
+		writer.WriteBits(b, 8)
+	}
 }
 
 func DeserializePrefix(data *[16]byte, reader *serialize.Reader) error {
-	bs, err := reader.Read(16)
-	if err != nil {
-		return err
+	for i := 0; i < 16; i++ {
+		var b byte
+		if err := reader.ReadBits(&b, 8); err != nil {
+			return err
+		}
+		data[i] = b
 	}
-	copy((*data)[:], bs)
 	return nil
 }

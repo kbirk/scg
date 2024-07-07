@@ -5,8 +5,8 @@ import (
 )
 
 type FixedSizeWriter struct {
-	bytes []byte
-	wpos  int
+	bytes          []byte
+	numBitsWritten uint32
 }
 
 func NewFixedSizeWriter(size int) *FixedSizeWriter {
@@ -15,30 +15,46 @@ func NewFixedSizeWriter(size int) *FixedSizeWriter {
 	}
 }
 
-func (w *FixedSizeWriter) Next(n int) []byte {
-	if w.wpos+n > len(w.bytes) {
-		panic(fmt.Sprintf("not enough space, need %d bytes but only %d available", n, len(w.bytes)-w.wpos))
-	}
-	slice := w.bytes[w.wpos : w.wpos+n]
-	w.wpos += n
-	return slice
-}
+func (w *FixedSizeWriter) WriteBits(val uint8, numBitsToWrite uint32) {
+	totalBitsToWrite := numBitsToWrite
 
-func (w *FixedSizeWriter) Write(bs []byte) {
-	n := len(bs)
-	slice := w.Next(n)
-	copy(slice, bs)
+	for numBitsToWrite > 0 {
+		dstByteIndex := getByteOffset(w.numBitsWritten)
+		dstBitIndex := getBitOffset(w.numBitsWritten)
+		srcBitIndex := getBitOffset(totalBitsToWrite - numBitsToWrite)
+
+		if srcBitIndex > 7 {
+			panic("Invalid source bit index")
+		}
+		if dstBitIndex > 7 {
+			panic("Invalid destination bit index")
+		}
+		if dstByteIndex >= uint32(len(w.bytes)) {
+			panic(fmt.Sprintf("Invalid destination byte index: %d >= %d", dstByteIndex, len(w.bytes)))
+		}
+
+		srcMask := uint8(1) << srcBitIndex
+		dstMask := uint8(1) << dstBitIndex
+
+		if val&srcMask != 0 {
+			w.bytes[dstByteIndex] |= dstMask
+		}
+
+		w.numBitsWritten++
+		numBitsToWrite--
+	}
 }
 
 func (w *FixedSizeWriter) Bytes() []byte {
-	if w.wpos != len(w.bytes) {
-		panic(fmt.Sprintf("leftover space, missing %d bytes", +len(w.bytes)-w.wpos))
+	if BitsToBytes(int(w.numBitsWritten)) != len(w.bytes) {
+		panic(fmt.Sprintf("leftover space, missing %d bytes, using only %d of %d", +len(w.bytes)-BitsToBytes(int(w.numBitsWritten)), BitsToBytes(int(w.numBitsWritten)), len(w.bytes)))
 	}
-	return w.bytes[:w.wpos]
+	return w.bytes
 }
 
 type Writer struct {
-	bytes []byte
+	bytes          []byte
+	numBitsWritten uint32
 }
 
 func NewWriter(bs []byte) *Writer {
@@ -47,15 +63,36 @@ func NewWriter(bs []byte) *Writer {
 	}
 }
 
-func (w *Writer) Next(n int) []byte {
-	w.bytes = append(w.bytes, make([]byte, n)...)
-	return w.bytes[len(w.bytes)-n:]
-}
+func (w *Writer) WriteBits(val uint8, numBitsToWrite uint32) {
+	totalBitsToWrite := numBitsToWrite
 
-func (w *Writer) Write(bs []byte) {
-	n := len(bs)
-	slice := w.Next(n)
-	copy(slice, bs)
+	for numBitsToWrite > 0 {
+		dstByteIndex := getByteOffset(w.numBitsWritten)
+		dstBitIndex := getBitOffset(w.numBitsWritten)
+		srcBitIndex := getBitOffset(totalBitsToWrite - numBitsToWrite)
+
+		if srcBitIndex > 7 {
+			panic("Invalid source bit index")
+		}
+		if dstBitIndex > 7 {
+			panic("Invalid destination bit index")
+		}
+		if dstByteIndex >= uint32(len(w.bytes)) {
+			w.bytes = append(w.bytes, 0)
+		}
+
+		srcMask := uint8(1) << srcBitIndex
+		dstMask := uint8(1) << dstBitIndex
+
+		if val&srcMask != 0 {
+			w.bytes[dstByteIndex] |= dstMask
+		} else {
+			w.bytes[dstByteIndex] |= 0x00
+		}
+
+		w.numBitsWritten++
+		numBitsToWrite--
+	}
 }
 
 func (w *Writer) Bytes() []byte {

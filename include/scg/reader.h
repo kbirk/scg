@@ -25,15 +25,15 @@ public:
 		return deserialize(data, *this);
 	}
 
-	template <size_t N>
-	error::Error readBits(std::array<uint8_t, N>& val, uint32_t num_bits_to_read)
+	error::Error readBits(uint8_t& val, uint32_t num_bits_to_read)
 	{
 		uint32_t total_bits_to_read = num_bits_to_read;
+
+		val = 0;
 
 		while (num_bits_to_read > 0) {
 			uint32_t src_byteIndex = get_byte_offset(numBitsRead_);
 			uint8_t src_bit_index =  get_bit_offset(numBitsRead_);
-			uint32_t dst_byteIndex = get_byte_offset(total_bits_to_read - num_bits_to_read);
 			uint8_t dst_bit_index = get_bit_offset(total_bits_to_read - num_bits_to_read);
 			uint32_t src_mask = 1 << src_bit_index;
 			uint32_t dst_mask = 1 << dst_bit_index;
@@ -44,24 +44,13 @@ public:
 				return err;
 			}
 			if (val_byte & src_mask) {
-				val[dst_byteIndex] |= dst_mask;
-			}
+				val |= dst_mask;
+			}/* else {
+				val &= ~dst_mask;
+			}*/
 			numBitsRead_++;
 			num_bits_to_read--;
 		}
-
-		return nullptr;
-	}
-
-	error::Error readBits(uint8_t& val, uint32_t num_bits_to_read)
-	{
-		std::array<uint8_t, 1> bs = {0};
-		auto err = readBits(bs, num_bits_to_read);
-		if (err) {
-			return err;
-		}
-
-		val = bs[0];
 
 		return nullptr;
 	}
@@ -95,7 +84,7 @@ protected:
 	error::Error readByte(uint8_t& val, uint32_t byteIndex)
 	{
 		if (byteIndex >= size_) {
-			return error::Error("Reader does not contain enough data to fill the argument");
+			return error::Error("ReaderView does not contain enough data to fill the argument: " + std::to_string(byteIndex) + " >= " + std::to_string(size_) + " bytes");
 		}
 		val = bytes_[byteIndex];
 		return nullptr;
@@ -120,7 +109,7 @@ protected:
 	error::Error readByte(uint8_t& val, uint32_t byteIndex)
 	{
 		if (byteIndex >= bytes_.size()) {
-			return error::Error("Reader does not contain enough data to fill the argument");
+			return error::Error("Reader does not contain enough data to fill the argument: " + std::to_string(byteIndex) + " >= " + std::to_string(bytes_.size()) + " bytes");
 		}
 		val = bytes_[byteIndex];
 		return nullptr;

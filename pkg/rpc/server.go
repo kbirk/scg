@@ -42,7 +42,13 @@ type serverStub interface {
 }
 
 func RespondWithError(requestID uint64, err error) []byte {
-	writer := serialize.NewFixedSizeWriter(ResponseHeaderSize + serialize.ByteSizeString(err.Error()))
+	writer := serialize.NewFixedSizeWriter(
+		serialize.BitsToBytes(
+			BitSizePrefix() +
+				serialize.BitSizeUInt64(requestID) +
+				serialize.BitSizeUInt8(ErrorResponse) +
+				serialize.BitSizeString(err.Error())))
+
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
 	serialize.SerializeUInt8(writer, ErrorResponse)
@@ -51,7 +57,13 @@ func RespondWithError(requestID uint64, err error) []byte {
 }
 
 func RespondWithMessage(requestID uint64, msg Message) []byte {
-	writer := serialize.NewFixedSizeWriter(ResponseHeaderSize + msg.ByteSize())
+	writer := serialize.NewFixedSizeWriter(
+		serialize.BitsToBytes(
+			BitSizePrefix() +
+				serialize.BitSizeUInt64(requestID) +
+				serialize.BitSizeUInt8(MessageResponse) +
+				msg.BitSize()))
+
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
 	serialize.SerializeUInt8(writer, MessageResponse)

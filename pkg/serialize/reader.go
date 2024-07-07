@@ -5,28 +5,39 @@ import (
 )
 
 type Reader struct {
-	bytes []byte
-	pos   int
+	bytes       []byte
+	numBitsRead uint32
 }
 
 func NewReader(data []byte) *Reader {
 	return &Reader{
 		bytes: data,
-		pos:   0,
 	}
 }
 
-func (b *Reader) Read(n int) ([]byte, error) {
-	if n < 0 {
-		// return remaining
-		b.pos = len(b.bytes)
-		return b.bytes[b.pos:], nil
+func (r *Reader) ReadBits(data *byte, numBitsToRead uint32) error {
+	totalBitsToRead := numBitsToRead
+
+	*data = 0
+
+	for numBitsToRead > 0 {
+		srcByteIndex := getByteOffset(r.numBitsRead)
+		srcBitIndex := getBitOffset(r.numBitsRead)
+		dstBitIndex := getBitOffset(totalBitsToRead - numBitsToRead)
+		srcMask := uint32(1) << srcBitIndex
+		dstMask := uint32(1) << dstBitIndex
+
+		if srcByteIndex >= uint32(len(r.bytes)) {
+			return fmt.Errorf("Reader does not contain enough data to fill the argument, num bytes available: %d, num bytes needed: %d", len(r.bytes), srcByteIndex+1)
+		}
+		valByte := r.bytes[srcByteIndex]
+
+		if valByte&byte(srcMask) != 0 {
+			*data |= byte(dstMask)
+		}
+		r.numBitsRead++
+		numBitsToRead--
 	}
 
-	if b.pos+n > len(b.bytes) {
-		return nil, fmt.Errorf("not enough data, attempting to read %d bytes but only %d remain in buffer", n, len(b.bytes)-b.pos)
-	}
-	data := b.bytes[b.pos : b.pos+n]
-	b.pos += n
-	return data, nil
+	return nil
 }

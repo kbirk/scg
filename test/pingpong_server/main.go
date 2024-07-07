@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/kbirk/scg/pkg/rpc"
@@ -16,6 +17,8 @@ type pingpongServer struct {
 }
 
 func (s *pingpongServer) Ping(ctx context.Context, req *pingpong.PingRequest) (*pingpong.PongResponse, error) {
+	js, _ := json.MarshalIndent(req.Ping, "", "  ")
+	fmt.Println("Received ping:", string(js))
 	return &pingpong.PongResponse{
 		Pong: pingpong.Pong{
 			Count:   req.Ping.Count + 1,
@@ -33,6 +36,7 @@ func main() {
 	})
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
+	fmt.Println("Starting server on port", port)
 	err := server.ListenAndServe()
 	if err != nil {
 		fmt.Println(err)
