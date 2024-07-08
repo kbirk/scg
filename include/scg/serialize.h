@@ -212,48 +212,81 @@ inline error::Error deserialize(int64_t& value, ReaderType& reader)
 
 inline constexpr uint32_t bit_size(float32_t value)
 {
-	return bit_size(pack754_32(value));
+	return bytes_to_bits(4);
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, float32_t value)
 {
-	serialize(writer, pack754_32(value));
+	uint32_t packed = pack754_32(value);
+	writer.writeBits(packed >> 24, 8);
+	writer.writeBits(packed >> 16, 8);
+	writer.writeBits(packed >> 8, 8);
+	writer.writeBits(packed, 8);
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(float32_t& value, ReaderType& reader)
 {
-	uint32_t ui = 0;
-	auto err = deserialize(ui, reader);
-	if (err) {
-		return err;
-	}
-	value = unpack754_32(ui);
+	std::array<uint8_t, 4> bytes;
+	reader.readBits(bytes[0], 8);
+	reader.readBits(bytes[1], 8);
+	reader.readBits(bytes[2], 8);
+	reader.readBits(bytes[3], 8);
+
+	uint32_t packed =
+		(static_cast<uint32_t>(bytes[0]) << 24) |
+		(static_cast<uint32_t>(bytes[1]) << 16) |
+		(static_cast<uint32_t>(bytes[2]) << 8) |
+		bytes[3];
+	value = unpack754_32(packed);
 
 	return nullptr;
 }
 
 inline constexpr uint32_t bit_size(float64_t value)
 {
-	return bit_size(pack754_64(value));
+	return bytes_to_bits(8);
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, float64_t value)
 {
-	serialize(writer, pack754_64(value));
+	uint64_t packed = pack754_64(value);
+	writer.writeBits(packed >> 56, 8);
+	writer.writeBits(packed >> 48, 8);
+	writer.writeBits(packed >> 40, 8);
+	writer.writeBits(packed >> 32, 8);
+	writer.writeBits(packed >> 24, 8);
+	writer.writeBits(packed >> 16, 8);
+	writer.writeBits(packed >> 8, 8);
+	writer.writeBits(packed, 8);
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(float64_t& value, ReaderType& reader)
 {
-	uint64_t ui = 0;
-	auto err = deserialize(ui, reader);
-	if (err) {
-		return err;
-	}
-	value = unpack754_64(ui);
+	std::array<uint8_t, 8> bytes;
+	reader.readBits(bytes[0], 8);
+	reader.readBits(bytes[1], 8);
+	reader.readBits(bytes[2], 8);
+	reader.readBits(bytes[3], 8);
+	reader.readBits(bytes[4], 8);
+	reader.readBits(bytes[5], 8);
+	reader.readBits(bytes[6], 8);
+	reader.readBits(bytes[7], 8);
+
+	uint64_t packed =
+		(static_cast<uint64_t>(bytes[0]) << 56) |
+		(static_cast<uint64_t>(bytes[1]) << 48) |
+		(static_cast<uint64_t>(bytes[2]) << 40) |
+		(static_cast<uint64_t>(bytes[3]) << 32) |
+		(static_cast<uint64_t>(bytes[4]) << 24) |
+		(static_cast<uint64_t>(bytes[5]) << 16) |
+		(static_cast<uint64_t>(bytes[6]) << 8) |
+		bytes[7];
+	value = unpack754_64(packed);
+
 	return nullptr;
 }
 

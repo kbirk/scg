@@ -246,37 +246,71 @@ func DeserializeInt64(data *int64, reader *Reader) error {
 }
 
 func BitSizeFloat32(data float32) int {
-	return BitSizeUInt32(Pack754_32(data))
+	return BytesToBits(4)
 }
 
 func SerializeFloat32(writer *FixedSizeWriter, data float32) {
-	SerializeUInt32(writer, Pack754_32(data))
+	packed := Pack754_32(data)
+	writer.WriteBits(uint8(packed>>24), 8)
+	writer.WriteBits(uint8(packed>>16), 8)
+	writer.WriteBits(uint8(packed>>8), 8)
+	writer.WriteBits(uint8(packed), 8)
 }
 
 func DeserializeFloat32(data *float32, reader *Reader) error {
-	var packed uint32
-	err := DeserializeUInt32(&packed, reader)
-	if err != nil {
-		return err
-	}
+
+	var a, b, c, d uint8
+	reader.ReadBits(&a, 8)
+	reader.ReadBits(&b, 8)
+	reader.ReadBits(&c, 8)
+	reader.ReadBits(&d, 8)
+
+	packed :=
+		(uint32(a) << 24) |
+			(uint32(b) << 16) |
+			(uint32(c) << 8) |
+			uint32(d)
 	*data = Unpack754_32(packed)
 	return nil
 }
 
 func BitSizeFloat64(data float64) int {
-	return BitSizeUInt64(Pack754_64(data))
+	return BytesToBits(8)
 }
 
 func SerializeFloat64(writer *FixedSizeWriter, data float64) {
-	SerializeUInt64(writer, Pack754_64(data))
+	packed := Pack754_64(data)
+	writer.WriteBits(uint8(packed>>56), 8)
+	writer.WriteBits(uint8(packed>>48), 8)
+	writer.WriteBits(uint8(packed>>40), 8)
+	writer.WriteBits(uint8(packed>>32), 8)
+	writer.WriteBits(uint8(packed>>24), 8)
+	writer.WriteBits(uint8(packed>>16), 8)
+	writer.WriteBits(uint8(packed>>8), 8)
+	writer.WriteBits(uint8(packed), 8)
 }
 
 func DeserializeFloat64(data *float64, reader *Reader) error {
-	var packed uint64
-	err := DeserializeUInt64(&packed, reader)
-	if err != nil {
-		return err
-	}
+
+	var a, b, c, d, e, f, g, h uint8
+	reader.ReadBits(&a, 8)
+	reader.ReadBits(&b, 8)
+	reader.ReadBits(&c, 8)
+	reader.ReadBits(&d, 8)
+	reader.ReadBits(&e, 8)
+	reader.ReadBits(&f, 8)
+	reader.ReadBits(&g, 8)
+	reader.ReadBits(&h, 8)
+
+	packed :=
+		(uint64(a) << 56) |
+			(uint64(b) << 48) |
+			(uint64(c) << 40) |
+			(uint64(d) << 32) |
+			(uint64(e) << 24) |
+			(uint64(f) << 16) |
+			(uint64(g) << 8) |
+			uint64(h)
 	*data = Unpack754_64(packed)
 	return nil
 }
