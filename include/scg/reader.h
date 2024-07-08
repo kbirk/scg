@@ -45,9 +45,7 @@ public:
 			}
 			if (val_byte & src_mask) {
 				val |= dst_mask;
-			}/* else {
-				val &= ~dst_mask;
-			}*/
+			}
 			numBitsRead_++;
 			num_bits_to_read--;
 		}
@@ -66,6 +64,9 @@ protected:
 
 class ReaderView : public IReader {
 public:
+
+	using IReader::read;
+	using IReader::readBits;
 
 	inline ReaderView(const uint8_t* data, uint32_t size)
 		: bytes_(data)
@@ -99,6 +100,9 @@ private:
 class Reader : public IReader {
 public:
 
+	using IReader::read;
+	using IReader::readBits;
+
 	inline explicit Reader(const std::vector<uint8_t>& data)
 		: bytes_(data)
 	{
@@ -123,6 +127,9 @@ private:
 class StreamReader : scg::serialize::IReader {
 public:
 
+	using IReader::read;
+	using IReader::readBits;
+
 	StreamReader(std::istream& stream)
 		: stream_(stream)
 	{
@@ -133,6 +140,7 @@ protected:
 	error::Error readByte(uint8_t& val, uint32_t byteIndex)
 	{
 		if (byteIndex > currentIndex_) {
+			assert((byteIndex == currentIndex_ + 1) && "StreamReader::readByte: byteIndex must be incremented by 1");
 			currentIndex_ = byteIndex;
 
 			stream_.read(reinterpret_cast<char*>(&currentByte_), 1);
@@ -140,6 +148,8 @@ protected:
 				return error::Error("Failed to read byte from stream");
 			}
 		}
+
+		val = currentByte_;
 		return nullptr;
 	}
 

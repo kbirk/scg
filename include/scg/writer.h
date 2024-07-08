@@ -100,6 +100,7 @@ class WriterView : public IWriter {
 public:
 
 	using IWriter::write;
+	using scg::serialize::IWriter::writeBits;
 
 	inline explicit WriterView(std::vector<uint8_t>& data)
 		: bytes_(data)
@@ -130,6 +131,7 @@ class StreamWriter : scg::serialize::IWriter {
 public:
 
 	using scg::serialize::IWriter::write;
+	using scg::serialize::IWriter::writeBits;
 
 	StreamWriter(std::ostream& stream)
 		: stream_(stream)
@@ -145,13 +147,14 @@ protected:
 	inline void writeBit(uint32_t byteIndex, uint8_t mask)
 	{
 		if (byteIndex > currentByteIndex_) {
+			assert((byteIndex == currentByteIndex_ + 1) && "StreamWriter::writeBit() called with a byte index that is not the next byte in the stream");
 			currentByte_ = 0;
 			currentByteIndex_ = byteIndex;
 		}
 
 		currentByte_ |= mask;
 
-		stream_.seekp(currentByte_);
+		stream_.seekp(currentByteIndex_);
 		stream_.write(reinterpret_cast<const char*>(&currentByte_), 1);
 	}
 
@@ -166,6 +169,7 @@ class FixedSizeWriter : public IWriter {
 public:
 
 	using IWriter::write;
+	using scg::serialize::IWriter::writeBits;
 
 	inline explicit FixedSizeWriter(uint32_t size)
 		: bytes_(size, 0)

@@ -379,7 +379,7 @@ template <typename T,
 	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
 constexpr uint32_t bit_size(const T& value)
 {
-	static_assert(false, "no `bit_size` override exists for type");
+	static_assert(sizeof(T) == 0, "no `bit_size` override exists for type");
 	return 0;
 }
 
@@ -387,14 +387,14 @@ template <typename WriterType, typename T,
 	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
 inline void serialize(WriterType& writer, const T& value)
 {
-	static_assert(false, "no `serialize` override exists for type");
+	static_assert(sizeof(T) == 0, "no `serialize` override exists for type");
 }
 
 template <typename ReaderType, typename T,
 	std::enable_if_t<!std::is_enum<T>::value, int> = 0>
 inline error::Error deserialize(T& value, ReaderType& reader)
 {
-	static_assert(false, "no `deserialize` override exists for type");
+	static_assert(sizeof(T) == 0, "no `deserialize` override exists for type");
 	return nullptr;
 }
 

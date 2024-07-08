@@ -60,6 +60,7 @@ inline void var_encode_uint(WriterType& writer, uint64_t val, uint32_t num_bytes
 template <typename ReaderType>
 inline error::Error var_decode_uint(uint64_t& val, ReaderType& reader, uint32_t num_bytes)
 {
+	val = 0;
 	for (uint32_t i = 0; i < num_bytes; ++i) {
 		uint8_t flag = 0;
 		auto err = reader.readBits(flag, 1);
