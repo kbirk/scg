@@ -29,14 +29,14 @@ public:
 	inline void put(const std::string& key, const char* val)
 	{
 		using scg::serialize::serialize;
-		using scg::serialize::byte_size;
+		using scg::serialize::bit_size;
 
 		std::string str(val);
 
-		auto size = byte_size(str);
+		auto size = bit_size(str);
 
 		std::vector<uint8_t> data;
-		data.reserve(size);
+		data.reserve(scg::serialize::bits_to_bytes(size));
 		scg::serialize::WriterView writer(data);
 		serialize(writer, str);
 
@@ -47,12 +47,12 @@ public:
 	inline void put(const std::string& key, const T& val)
 	{
 		using scg::serialize::serialize;
-		using scg::serialize::byte_size;
+		using scg::serialize::bit_size;
 
-		auto size = byte_size(val);
+		auto size = bit_size(val);
 
 		std::vector<uint8_t> data;
-		data.reserve(size);
+		data.reserve(scg::serialize::bits_to_bytes(size));
 		scg::serialize::WriterView writer(data);
 		serialize(writer, val);
 
@@ -84,11 +84,11 @@ public:
 		return deserialize(t, reader);
 	}
 
-	friend inline uint32_t byte_size(const Context& ctx)
+	friend inline uint32_t bit_size(const Context& ctx)
 	{
-		using scg::serialize::byte_size;
+		using scg::serialize::bit_size; // adl trickery
 
-		return byte_size(ctx.values_);
+		return bit_size(ctx.values_);
 	}
 
 	template <typename WriterType>

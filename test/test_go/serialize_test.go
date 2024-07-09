@@ -1,13 +1,75 @@
 package test
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/serialize"
 	"github.com/kbirk/scg/test/files/output/basic"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestSerializeContext(t *testing.T) {
+
+	s := &basic.StructA{
+		ValInt8:    1,
+		ValFloat32: 1.0,
+		ValBool:    true,
+		ValMapStringTimestamp: map[string]time.Time{
+			"now": time.Now(),
+		},
+	}
+
+	metadata := rpc.NewMetadata()
+	metadata.PutString("key1", "val1")
+	metadata.Put("key2", s)
+	metadata.PutBytes("key3", []byte{1, 2, 3})
+
+	input := rpc.NewContextWithMetadata(context.Background(), metadata)
+
+	size := rpc.BitSizeContext(input)
+	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	rpc.SerializeContext(writer, input)
+
+	bs := writer.Bytes()
+
+	output := context.Background()
+	reader := serialize.NewReader(bs)
+	rpc.DeserializeContext(&output, reader)
+
+	md := rpc.GetMetadataFromContext(output)
+
+	assert.Equal(t, metadata, md)
+}
+
+func TestSerializeEnum(t *testing.T) {
+	input := basic.SomeEnum_ValueA
+	size := input.BitSize()
+	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	input.Serialize(writer)
+
+	bs := writer.Bytes()
+
+	var output basic.SomeEnum
+	reader := serialize.NewReader(bs)
+	output.Deserialize(reader)
+
+	assert.Equal(t, input, output)
+
+	input = basic.SomeEnum_ValueB
+	size = input.BitSize()
+	writer = serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	input.Serialize(writer)
+
+	bs = writer.Bytes()
+
+	reader = serialize.NewReader(bs)
+	output.Deserialize(reader)
+
+	assert.Equal(t, input, output)
+}
 
 func TestSerializeBasic(t *testing.T) {
 	input := basic.BasicStruct{
@@ -39,8 +101,8 @@ func TestSerializeBasic(t *testing.T) {
 		},
 		ValByteArray: []byte{1, 2, 3},
 	}
-	size := input.ByteSize()
-	writer := serialize.NewFixedSizeWriter(size)
+	size := input.BitSize()
+	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
 	input.Serialize(writer)
 
 	bs := writer.Bytes()
@@ -123,8 +185,8 @@ func TestSerializeComplicated(t *testing.T) {
 			},
 		},
 	}
-	size := input.ByteSize()
-	writer := serialize.NewFixedSizeWriter(size)
+	size := input.BitSize()
+	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
 	input.Serialize(writer)
 
 	bs := writer.Bytes()

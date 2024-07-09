@@ -67,11 +67,11 @@ inline scg::error::Error deserialize({{.MessageNamePascalCase}}& value, ReaderTy
 	{{end}}return nullptr;
 }
 
-inline uint32_t byte_size(const {{.MessageNamePascalCase}}& value)
+inline uint32_t bit_size(const {{.MessageNamePascalCase}}& value)
 {
-	using scg::serialize::byte_size; // adl trickery
+	using scg::serialize::bit_size; // adl trickery
 	uint32_t size = 0;{{- range .MessageFields}}
-	size += byte_size(value.{{.FieldNameCamelCase}});{{end}}
+	size += bit_size(value.{{.FieldNameCamelCase}});{{end}}
 	return size;
 }
 
@@ -93,7 +93,7 @@ void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& data)
 std::vector<uint8_t> {{.MessageNamePascalCase}}::toBytes() const
 {
 	std::vector<uint8_t> data;
-	data.reserve(byte_size(*this));
+	data.reserve(scg::serialize::bits_to_bytes(bit_size(*this)));
 	scg::serialize::WriterView writer(data);
 	serialize(writer, *this);
 	return data;
@@ -124,7 +124,7 @@ inline scg::error::Error deserialize({{.MessageNamePascalCase}}& value, ReaderTy
 	return nullptr;
 }
 
-inline uint32_t byte_size(const {{.MessageNamePascalCase}}& value)
+inline uint32_t bit_size(const {{.MessageNamePascalCase}}& value)
 {
 	return 0;
 }

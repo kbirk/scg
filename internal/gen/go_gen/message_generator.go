@@ -20,7 +20,7 @@ type MessageArgs struct {
 	MessageNamePascalCase  string
 	MessageNameFirstLetter string
 	MessageFields          []MessageFieldArgs
-	ByteSizeCode           string
+	BitSizeCode            string
 	SerializeCode          string
 	DeserializeCode        string
 }
@@ -47,8 +47,8 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromJSON(data []b
 }
 {{- if gt (len .MessageFields) 0 }}
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ToBytes() []byte {
-	size := {{.MessageNameFirstLetter}}.ByteSize()
-	writer := serialize.NewFixedSizeWriter(size)
+	size := {{.MessageNameFirstLetter}}.BitSize()
+	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
 	{{.MessageNameFirstLetter}}.Serialize(writer)
 	return writer.Bytes()
 }
@@ -66,15 +66,15 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromBytes(bs []by
 }
 {{- end }}
 
-{{.ByteSizeCode}}
+{{.BitSizeCode}}
 {{.SerializeCode}}
 {{.DeserializeCode}}
 `
 
-type ByteSizeMethodArgs struct {
-	MessageNameFirstLetter   string
-	MessageNamePascalCase    string
-	FieldByteSizeMethodCalls []string
+type BitSizeMethodArgs struct {
+	MessageNameFirstLetter  string
+	MessageNamePascalCase   string
+	FieldBitSizeMethodCalls []string
 }
 
 type SerializeMethodArgs struct {
@@ -89,9 +89,9 @@ type DeserializeMethodArgs struct {
 	FieldDeserializeMethodCalls []string
 }
 
-const messageByteSizeMethodTemplateStr = `
-func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ByteSize() int {
-	size := 0{{range .FieldByteSizeMethodCalls}}
+const messageBitSizeMethodTemplateStr = `
+func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) BitSize() int {
+	size := 0{{range .FieldBitSizeMethodCalls}}
 	size += {{.}}{{end}}
 	return size
 }`
@@ -112,11 +112,11 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) Deserialize(reade
 	return nil
 }`
 
-type ByteSizeContainerMethodArgs struct {
-	FullMethodName              string
-	ArgType                     string
-	KeyTypeByteSizeMethodCall   string
-	ValueTypeByteSizeMethodCall string
+type BitSizeContainerMethodArgs struct {
+	FullMethodName             string
+	ArgType                    string
+	KeyTypeBitSizeMethodCall   string
+	ValueTypeBitSizeMethodCall string
 }
 
 type SerializeContainerMethodArgs struct {
@@ -135,11 +135,11 @@ type DeserializeContainerMethodArgs struct {
 	ValueType                      string
 }
 
-const mapByteSizeMethodTemplateStr = `
+const mapBitSizeMethodTemplateStr = `
 func {{.FullMethodName}}(arg {{.ArgType}}) int {
-	size := 4
+	size := serialize.BitSizeUInt32(uint32(len(arg)))
 	for k, v := range arg {
-		size += {{.KeyTypeByteSizeMethodCall}} + {{.ValueTypeByteSizeMethodCall}}
+		size += {{.KeyTypeBitSizeMethodCall}} + {{.ValueTypeBitSizeMethodCall}}
 	}
 	return size
 }`
@@ -180,11 +180,11 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 	return nil
 }`
 
-const listByteSizeMethodTemplateStr = `
+const listBitSizeMethodTemplateStr = `
 func {{.FullMethodName}}(arg {{.ArgType}}) int {
-	size := 4
+	size := serialize.BitSizeUInt32(uint32(len(arg)))
 	for _, v := range arg {
-		size += {{.ValueTypeByteSizeMethodCall}}
+		size += {{.ValueTypeBitSizeMethodCall}}
 	}
 	return size
 }`
@@ -221,12 +221,12 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 
 var (
 	messageTemplate                  = template.Must(template.New("messageTemplateGo").Parse(messageTemplateStr))
-	messageByteSizeMethodTemplate    = template.Must(template.New("messageByteSizeMethodTemplateGo").Parse(messageByteSizeMethodTemplateStr))
+	messageBitSizeMethodTemplate     = template.Must(template.New("messageBitSizeMethodTemplateGo").Parse(messageBitSizeMethodTemplateStr))
 	messageSerializeMethodTemplate   = template.Must(template.New("messageSerializeMethodTemplateGo").Parse(messageSerializeMethodTemplateStr))
 	messageDeserializeMethodTemplate = template.Must(template.New("messageDeserializeMethodTemplateGo").Parse(messageDeserializeMethodTemplateStr))
 	// container methods
-	mapByteSizeMethodTemplate     = template.Must(template.New("mapByteSizeMethodTemplateGo").Parse(mapByteSizeMethodTemplateStr))
-	listByteSizeMethodTemplate    = template.Must(template.New("listByteSizeMethodTemplateGo").Parse(listByteSizeMethodTemplateStr))
+	mapBitSizeMethodTemplate      = template.Must(template.New("mapBitSizeMethodTemplateGo").Parse(mapBitSizeMethodTemplateStr))
+	listBitSizeMethodTemplate     = template.Must(template.New("listBitSizeMethodTemplateGo").Parse(listBitSizeMethodTemplateStr))
 	mapSerializeMethodTemplate    = template.Must(template.New("mapSerializeMethodTemplateGo").Parse(mapSerializeMethodTemplateStr))
 	listSerializeMethodTemplate   = template.Must(template.New("listSerializeMethodTemplateGo").Parse(listSerializeMethodTemplateStr))
 	mapDeserializeMethodTemplate  = template.Must(template.New("mapDeserializeMethodTemplateGo").Parse(mapDeserializeMethodTemplateStr))
@@ -348,22 +348,22 @@ type FunctionCallArgs struct {
 
 const (
 	// calc bytes templates
-	byteSizeByteTemplateStr      = `serialize.ByteSizeUInt8({{.VariableName}})`
-	byteSizeBoolTemplateStr      = `serialize.ByteSizeBool({{.VariableName}})`
-	byteSizeUInt8TemplateStr     = `serialize.ByteSizeUInt8({{.VariableName}})`
-	byteSizeInt8TemplateStr      = `serialize.ByteSizeInt8({{.VariableName}})`
-	byteSizeUInt16TemplateStr    = `serialize.ByteSizeUInt16({{.VariableName}})`
-	byteSizeInt16TemplateStr     = `serialize.ByteSizeInt16({{.VariableName}})`
-	byteSizeUInt32TemplateStr    = `serialize.ByteSizeUInt32({{.VariableName}})`
-	byteSizeInt32TemplateStr     = `serialize.ByteSizeInt32({{.VariableName}})`
-	byteSizeUInt64TemplateStr    = `serialize.ByteSizeUInt64({{.VariableName}})`
-	byteSizeInt64TemplateStr     = `serialize.ByteSizeInt64({{.VariableName}})`
-	byteSizeFloat32TemplateStr   = `serialize.ByteSizeFloat32({{.VariableName}})`
-	byteSizeFloat64TemplateStr   = `serialize.ByteSizeFloat64({{.VariableName}})`
-	byteSizeStringTemplateStr    = `serialize.ByteSizeString({{.VariableName}})`
-	byteSizeTimestampTemplateStr = `serialize.ByteSizeTime({{.VariableName}})`
-	byteSizeUUIDTemplateStr      = `serialize.ByteSizeUUID({{.VariableName}})`
-	byteSizeCustomTemplateStr    = `{{.VariableName}}.ByteSize()`
+	byteSizeByteTemplateStr      = `serialize.BitSizeUInt8({{.VariableName}})`
+	byteSizeBoolTemplateStr      = `serialize.BitSizeBool({{.VariableName}})`
+	byteSizeUInt8TemplateStr     = `serialize.BitSizeUInt8({{.VariableName}})`
+	byteSizeInt8TemplateStr      = `serialize.BitSizeInt8({{.VariableName}})`
+	byteSizeUInt16TemplateStr    = `serialize.BitSizeUInt16({{.VariableName}})`
+	byteSizeInt16TemplateStr     = `serialize.BitSizeInt16({{.VariableName}})`
+	byteSizeUInt32TemplateStr    = `serialize.BitSizeUInt32({{.VariableName}})`
+	byteSizeInt32TemplateStr     = `serialize.BitSizeInt32({{.VariableName}})`
+	byteSizeUInt64TemplateStr    = `serialize.BitSizeUInt64({{.VariableName}})`
+	byteSizeInt64TemplateStr     = `serialize.BitSizeInt64({{.VariableName}})`
+	byteSizeFloat32TemplateStr   = `serialize.BitSizeFloat32({{.VariableName}})`
+	byteSizeFloat64TemplateStr   = `serialize.BitSizeFloat64({{.VariableName}})`
+	byteSizeStringTemplateStr    = `serialize.BitSizeString({{.VariableName}})`
+	byteSizeTimestampTemplateStr = `serialize.BitSizeTime({{.VariableName}})`
+	byteSizeUUIDTemplateStr      = `serialize.BitSizeUUID({{.VariableName}})`
+	byteSizeCustomTemplateStr    = `{{.VariableName}}.BitSize()`
 	// serialization templates
 	serializeByteTemplateStr      = `serialize.SerializeUInt8(writer, {{.VariableName}})`
 	serializeBoolTemplateStr      = `serialize.SerializeBool(writer, {{.VariableName}})`
@@ -563,14 +563,14 @@ func getDataTypeDefinitionMethodSuffix(dataType *parse.DataTypeDefinition) (stri
 	return getDataTypeMethodSuffix(dataType.Type)
 }
 
-func generateByteSizeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func generateBitSizeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
 	fullTypeName, err := getDataTypeDefinitionMethodSuffix(dataType)
 	if err != nil {
 		return "", nil, err
 	}
 
-	methodFullName := fmt.Sprintf("%s_ByteSize%s", util.EnsureCamelCase(messageName), fullTypeName)
+	methodFullName := fmt.Sprintf("%s_BitSize%s", util.EnsureCamelCase(messageName), fullTypeName)
 
 	serializationMethodCode := map[string]string{}
 
@@ -579,15 +579,15 @@ func generateByteSizeContainerMethod(messageName string, varName string, dataTyp
 		return "", nil, err
 	}
 
-	valueMethodCall, methodCode, err := generateFieldByteSizeMethodCall(messageName, "v", dataType.SubType)
+	valueMethodCall, methodCode, err := generateFieldBitSizeMethodCall(messageName, "v", dataType.SubType)
 	if err != nil {
 		return "", nil, err
 	}
 
-	args := ByteSizeContainerMethodArgs{
-		FullMethodName:              methodFullName,
-		ArgType:                     argType,
-		ValueTypeByteSizeMethodCall: valueMethodCall,
+	args := BitSizeContainerMethodArgs{
+		FullMethodName:             methodFullName,
+		ArgType:                    argType,
+		ValueTypeBitSizeMethodCall: valueMethodCall,
 	}
 
 	buf := &bytes.Buffer{}
@@ -595,7 +595,7 @@ func generateByteSizeContainerMethod(messageName string, varName string, dataTyp
 
 		// list
 
-		err = listByteSizeMethodTemplate.Execute(buf, args)
+		err = listBitSizeMethodTemplate.Execute(buf, args)
 		if err != nil {
 			return "", nil, err
 		}
@@ -604,13 +604,13 @@ func generateByteSizeContainerMethod(messageName string, varName string, dataTyp
 
 		// map
 
-		keyMethodCall, err := generateKeyFieldByteSizeMethodCall("k", dataType.Key.Type)
+		keyMethodCall, err := generateKeyFieldBitSizeMethodCall("k", dataType.Key.Type)
 		if err != nil {
 			return "", nil, err
 		}
-		args.KeyTypeByteSizeMethodCall = keyMethodCall
+		args.KeyTypeBitSizeMethodCall = keyMethodCall
 
-		err = mapByteSizeMethodTemplate.Execute(buf, args)
+		err = mapBitSizeMethodTemplate.Execute(buf, args)
 		if err != nil {
 			return "", nil, err
 		}
@@ -767,7 +767,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 	return fullMethodCall, deserializationMethodCode, nil
 }
 
-func generateKeyFieldByteSizeMethodCall(varName string, dataType parse.DataTypeComparable) (string, error) {
+func generateKeyFieldBitSizeMethodCall(varName string, dataType parse.DataTypeComparable) (string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -911,7 +911,7 @@ func generateKeyFieldDeserializationMethodCall(varName string, dataType parse.Da
 	return buf.String(), nil
 }
 
-func generateFieldByteSizeMethodCall(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func generateFieldBitSizeMethodCall(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -955,7 +955,7 @@ func generateFieldByteSizeMethodCall(messageName string, varName string, dataTyp
 	case parse.DataTypeMap,
 		parse.DataTypeList:
 		// special case for containers
-		return generateByteSizeContainerMethod(messageName, varName, dataType)
+		return generateBitSizeContainerMethod(messageName, varName, dataType)
 
 	default:
 		return "", nil, fmt.Errorf("unrecognized type: %v", dataType.Type)
@@ -1104,8 +1104,8 @@ func valuesSortedByKey(m map[string]string) []string {
 	return values
 }
 
-func generateMessageByteSizeMethod(msg *parse.MessageDefinition) (string, error) {
-	args := ByteSizeMethodArgs{
+func generateMessageBitSizeMethod(msg *parse.MessageDefinition) (string, error) {
+	args := BitSizeMethodArgs{
 		MessageNameFirstLetter: util.FirstLetterAsLowercase(msg.Name),
 		MessageNamePascalCase:  util.EnsurePascalCase(msg.Name),
 	}
@@ -1116,16 +1116,16 @@ func generateMessageByteSizeMethod(msg *parse.MessageDefinition) (string, error)
 
 		fieldName := fmt.Sprintf("%s.%s", util.FirstLetterAsLowercase(msg.Name), util.EnsurePascalCase(field.Name))
 
-		fieldByteSizeMethodCall, methodCode, err := generateFieldByteSizeMethodCall(msg.Name, fieldName, field.DataTypeDefinition)
+		fieldBitSizeMethodCall, methodCode, err := generateFieldBitSizeMethodCall(msg.Name, fieldName, field.DataTypeDefinition)
 		if err != nil {
 			return "", err
 		}
 		additionalFunctionCode = util.MergeMap(additionalFunctionCode, methodCode)
-		args.FieldByteSizeMethodCalls = append(args.FieldByteSizeMethodCalls, fieldByteSizeMethodCall)
+		args.FieldBitSizeMethodCalls = append(args.FieldBitSizeMethodCalls, fieldBitSizeMethodCall)
 	}
 
 	buf := &bytes.Buffer{}
-	err := messageByteSizeMethodTemplate.Execute(buf, args)
+	err := messageBitSizeMethodTemplate.Execute(buf, args)
 	if err != nil {
 		return "", err
 	}
@@ -1230,7 +1230,7 @@ func generateMessageGoCode(msg *parse.MessageDefinition) (string, error) {
 		args.MessageFields = append(args.MessageFields, fieldArg)
 	}
 
-	byteSizeCode, err := generateMessageByteSizeMethod(msg)
+	byteSizeCode, err := generateMessageBitSizeMethod(msg)
 	if err != nil {
 		return "", err
 	}
@@ -1245,7 +1245,7 @@ func generateMessageGoCode(msg *parse.MessageDefinition) (string, error) {
 		return "", err
 	}
 
-	args.ByteSizeCode = byteSizeCode
+	args.BitSizeCode = byteSizeCode
 	args.SerializeCode = serializeCode
 	args.DeserializeCode = deserializeCode
 

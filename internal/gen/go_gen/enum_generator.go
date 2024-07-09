@@ -26,8 +26,8 @@ type EnumArgs struct {
 const enumTemplateStr = `
 type {{.EnumNamePascalCase}} {{.EnumUnderlyingType}}
 
-func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) ByteSize() int {
-	return serialize.ByteSize{{.EnumUnderlyingTypePascalCase}}(*(*{{.EnumUnderlyingType}})({{.EnumNameNameFirstLetter}}))
+func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) BitSize() int {
+	return serialize.BitSize{{.EnumUnderlyingTypePascalCase}}(*(*{{.EnumUnderlyingType}})({{.EnumNameNameFirstLetter}}))
 }
 
 func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Serialize(writer *serialize.FixedSizeWriter) {

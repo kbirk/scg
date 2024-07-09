@@ -8,6 +8,8 @@ Message code is generated for both golang and C++ with JSON and binary serializa
 
 RPCs are implemented over websockets. Client and server code is generated for golang. Only client code is generated for C++.
 
+Serialization uses bitpacked variable-length integer encoding with zigzag encoding for signed integers.
+
 ## Installation:
 
 ```sh

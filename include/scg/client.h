@@ -109,9 +109,16 @@ protected:
 			requestID = requestID_++;
 		}
 
-		using scg::serialize::byte_size; // adl trickery
+		using scg::serialize::bit_size; // adl trickery
 
-		serialize::FixedSizeWriter writer(REQUEST_HEADER_SIZE + byte_size(ctx) + byte_size(msg));
+		serialize::FixedSizeWriter writer(
+			scg::serialize::bits_to_bytes(
+				bit_size(REQUEST_PREFIX) +
+				bit_size(ctx) +
+				bit_size(requestID) +
+				bit_size(serviceID) +
+				bit_size(methodID) +
+				bit_size(msg)));
 
 		writer.write(REQUEST_PREFIX);
 		writer.write(ctx);
@@ -148,6 +155,10 @@ protected:
 
 		std::string errMsg;
 		serialize::deserialize(errMsg, reader);
+
+		if (errMsg == "") {
+			errMsg = "Unknown error";
+		}
 
 		return std::make_pair(serialize::Reader({}), error::Error(errMsg));
 	}
@@ -189,11 +200,14 @@ protected:
 
 		serialize::Reader reader(std::vector<uint8_t>(payload.begin(), payload.end()));
 
+		using scg::serialize::deserialize;
+
 		std::array<uint8_t, 16> prefix;
-		reader.read(prefix);
+		deserialize(prefix, reader);
 
 		if (prefix != RESPONSE_PREFIX) {
 			client->get_elog().write(websocketpp::log::elevel::fatal, "received message with invalid prefix, closing connection");
+			// TODO: resolve the promise with an error
 			disconnect();
 			return;
 		}
@@ -207,7 +221,7 @@ protected:
 		if (iter != requests_.end()) {
 			iter->second->set_value(reader);
 		} else {
-			client->get_elog().write(websocketpp::log::elevel::fatal, "received message with invalid prefix, closing connection");
+			client->get_elog().write(websocketpp::log::elevel::fatal, "received message with unknown request id, closing connection");
 			disconnect();
 			return;
 		}

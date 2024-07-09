@@ -54,8 +54,8 @@ func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Scan(src inte
 {{end}}
 }
 
-func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) ByteSize() int {
-	return serialize.ByteSize{{.TypedefUnderlyingTypePascalCase}}(*(*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}))
+func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) BitSize() int {
+	return serialize.BitSize{{.TypedefUnderlyingTypePascalCase}}(*(*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}))
 }
 
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Serialize(writer *serialize.FixedSizeWriter) {

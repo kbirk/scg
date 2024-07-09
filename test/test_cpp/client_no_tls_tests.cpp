@@ -83,6 +83,7 @@ void test_pingpong_client_no_tls() {
 		auto [res, err] = pingPongClient.ping(context, req);
 		if (err != nullptr) {
 			printf("ERROR: %s\n", err.message.c_str());
+			TEST_CHECK(err == nullptr);
 			return;
 		}
 		TEST_CHECK(err == nullptr);

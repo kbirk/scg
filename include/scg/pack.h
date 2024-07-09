@@ -1,12 +1,150 @@
 #pragma once
 
 #include <cstdint>
+#include <cmath>
+
+#include "scg/error.h"
 
 typedef float float32_t;
 typedef double float64_t;
 
 namespace scg {
 namespace serialize {
+
+inline constexpr uint32_t bits_to_bytes(uint32_t x) {
+	return static_cast<uint32_t>(std::ceil(x / 8.0f));
+}
+
+inline constexpr uint32_t bytes_to_bits(uint32_t x) {
+	return x << 3; // same as (x * 8)
+}
+
+inline constexpr uint32_t get_byte_offset(uint32_t x) {
+	return x >> 3; // same as (x / 8)
+}
+
+inline constexpr uint8_t get_bit_offset(uint32_t x) {
+	return x & 0x7; // same as (x % 8)
+}
+
+inline uint32_t var_uint_bit_size(uint64_t val, uint32_t num_bytes)
+{
+	uint32_t size = 0;
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		if (val != 0) {
+			size += 9;
+		} else {
+			size += 1;
+			break;
+		}
+		val >>= 8;
+	}
+	return size;
+}
+
+template <typename WriterType>
+inline void var_encode_uint(WriterType& writer, uint64_t val, uint32_t num_bytes)
+{
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		if (val != 0) {
+			writer.writeBits(uint8_t(1), 1);
+			writer.writeBits(val & 0xFF, 8);
+		} else {
+			writer.writeBits(uint8_t(0), 1);
+			break;
+		}
+		val >>= 8;
+	}
+}
+
+template <typename ReaderType>
+inline error::Error var_decode_uint(uint64_t& val, ReaderType& reader, uint32_t num_bytes)
+{
+	val = 0;
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		uint8_t flag = 0;
+		auto err = reader.readBits(flag, 1);
+		if (err) {
+			return err;
+		}
+
+		if (!flag) {
+			break;
+		}
+
+		uint8_t byte = 0;
+
+		err = reader.readBits(byte, 8);
+		if (err) {
+			return err;
+		}
+
+		val |= static_cast<uint64_t>(byte) << (8 * i);
+	}
+	return nullptr;
+}
+
+
+inline uint64_t zigzagEncode(int64_t val)
+{
+	return (static_cast<uint64_t>(val) << 1) ^ static_cast<uint64_t>(val>>63);
+}
+
+inline int64_t zigzagDecode(uint64_t encoded )
+{
+	return static_cast<int64_t>((encoded >> 1) ^ (-(encoded & 1)));
+}
+
+inline uint32_t var_int_bit_size(int64_t val, uint32_t num_bytes)
+{
+	uint64_t uv = 0;
+	if (val < 0) {
+		uv = zigzagEncode(val);
+	} else {
+		uv = val;
+	}
+
+	return 1 + var_uint_bit_size(uv, num_bytes);
+}
+
+template <typename WriterType>
+inline void var_encode_int(WriterType& writer, int64_t val, uint32_t num_bytes)
+{
+	uint64_t uv = 0;
+	if (val < 0) {
+		uv = zigzagEncode(val);
+		writer.writeBits(uint8_t(1), 1);
+	} else {
+		uv = val;
+		writer.writeBits(uint8_t(0), 1);
+	}
+
+	var_encode_uint(writer, uv, num_bytes);
+}
+
+template <typename ReaderType>
+inline error::Error var_decode_int(int64_t& val, ReaderType& reader, uint32_t num_bytes)
+{
+	uint8_t sign = 0;
+	auto err = reader.readBits(sign, 1);
+	if (err) {
+		return err;
+	}
+
+	uint64_t uv = 0;
+	err = var_decode_uint(uv, reader, num_bytes);
+	if (err) {
+		return err;
+	}
+
+	if (sign) {
+		val = zigzagDecode(uv);
+	} else {
+		val = uv;
+	}
+
+	return nullptr;
+}
 
 /**
  * Bit packing macros

@@ -138,21 +138,26 @@ public:
 		return is;
 	}
 
-	friend inline uint32_t byte_size(const uuid& value)
+	friend inline uint32_t bit_size(const uuid& value)
 	{
-		return 16;
+		return scg::serialize::bytes_to_bits(16);
 	}
 
 	template <typename WriterType>
 	friend inline void serialize(WriterType& writer, const uuid& value)
 	{
-		writer.write(value.bytes_, 16);
+		for (int i = 0; i < 16; ++i) {
+			writer.writeBits(value.bytes_[i], 8);
+		}
 	}
 
 	template <typename ReaderType>
 	friend inline error::Error deserialize(uuid& value, ReaderType& reader)
 	{
-		reader.read(value.bytes_, 16);
+		for (int i = 0; i < 16; ++i) {
+			reader.readBits(value.bytes_[i], 8);
+		}
+
 		if (value.isNull()) {
 			return nullptr;
 		}

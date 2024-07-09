@@ -19,20 +19,46 @@ public:
 
 	virtual ~IReader() = default;
 
-	virtual error::Error read(uint8_t* dest, uint32_t n) = 0;
-	virtual error::Error read(std::vector<uint8_t>& dest, uint32_t n) = 0;
-
-	template <std::size_t N>
-	inline error::Error read(std::array<uint8_t, N>& dest)
-	{
-		return read(dest.data(), N);
-	}
-
 	template <typename T>
 	inline error::Error read(T& data)
 	{
 		return deserialize(data, *this);
 	}
+
+	error::Error readBits(uint8_t& val, uint32_t num_bits_to_read)
+	{
+		uint32_t total_bits_to_read = num_bits_to_read;
+
+		val = 0;
+
+		while (num_bits_to_read > 0) {
+			uint32_t src_byteIndex = get_byte_offset(numBitsRead_);
+			uint8_t src_bit_index =  get_bit_offset(numBitsRead_);
+			uint8_t dst_bit_index = get_bit_offset(total_bits_to_read - num_bits_to_read);
+			uint32_t src_mask = 1 << src_bit_index;
+			uint32_t dst_mask = 1 << dst_bit_index;
+			uint8_t val_byte = 0;
+
+			auto err = readByte(val_byte, src_byteIndex);
+			if (err) {
+				return err;
+			}
+			if (val_byte & src_mask) {
+				val |= dst_mask;
+			}
+			numBitsRead_++;
+			num_bits_to_read--;
+		}
+
+		return nullptr;
+	}
+
+protected:
+
+	virtual error::Error readByte(uint8_t& val, uint32_t byteIndex) = 0;
+
+	uint32_t numBitsRead_ = 0;
+
 };
 
 
@@ -40,40 +66,28 @@ class ReaderView : public IReader {
 public:
 
 	using IReader::read;
+	using IReader::readBits;
 
 	inline ReaderView(const uint8_t* data, uint32_t size)
 		: bytes_(data)
 		, size_(size)
-		, pos_(0)
 	{
 	}
 
 	inline explicit ReaderView(const std::vector<uint8_t>& data)
 		: bytes_(&data[0])
 		, size_(data.size())
-		, pos_(0)
 	{
 	}
 
-	inline error::Error read(uint8_t* dest, uint32_t n)
+protected:
+
+	error::Error readByte(uint8_t& val, uint32_t byteIndex)
 	{
-		if (pos_ + n > size_) {
-			return error::Error("Reader does not contain enough data to fill the argument");
+		if (byteIndex >= size_) {
+			return error::Error("ReaderView does not contain enough data to fill the argument: " + std::to_string(byteIndex) + " >= " + std::to_string(size_) + " bytes");
 		}
-
-		std::copy(bytes_ + pos_, bytes_ + pos_ + n, dest);
-		pos_ += n;
-		return nullptr;
-	}
-
-	inline error::Error read(std::vector<uint8_t>& dest, uint32_t n)
-	{
-		if  (pos_ + n > size_) {
-			return error::Error("Reader does not contain enough data to fill the argument");
-		}
-
-		dest.insert(dest.end(), bytes_ + pos_, bytes_ + pos_ + n);
-		pos_ += n;
+		val = bytes_[byteIndex];
 		return nullptr;
 	}
 
@@ -81,79 +95,68 @@ private:
 
 	const uint8_t* bytes_;
 	uint32_t size_;
-	size_t pos_;
 };
 
 class Reader : public IReader {
 public:
 
 	using IReader::read;
+	using IReader::readBits;
 
 	inline explicit Reader(const std::vector<uint8_t>& data)
 		: bytes_(data)
-		, pos_(0)
 	{
 	}
 
-	inline error::Error read(uint8_t* dest, uint32_t n)
+protected:
+
+	error::Error readByte(uint8_t& val, uint32_t byteIndex)
 	{
-		if (pos_ + n > bytes_.size()) {
-			return error::Error("Reader does not contain enough data to fill the argument");
+		if (byteIndex >= bytes_.size()) {
+			return error::Error("Reader does not contain enough data to fill the argument: " + std::to_string(byteIndex) + " >= " + std::to_string(bytes_.size()) + " bytes");
 		}
-
-		std::copy(bytes_.begin() + pos_, bytes_.begin() + pos_ + n, dest);
-		pos_ += n;
-		return nullptr;
-	}
-
-	inline error::Error read(std::vector<uint8_t>& dest, uint32_t n)
-	{
-		if  (pos_ + n > bytes_.size()) {
-			return error::Error("Reader does not contain enough data to fill the argument");
-		}
-
-		dest.insert(dest.end(), bytes_.begin() + pos_, bytes_.begin() + pos_ + n);
-		pos_ += n;
+		val = bytes_[byteIndex];
 		return nullptr;
 	}
 
 private:
 
 	std::vector<uint8_t> bytes_;
-	size_t pos_;
 };
 
 class StreamReader : scg::serialize::IReader {
 public:
 
-	using scg::serialize::IReader::read;
+	using IReader::read;
+	using IReader::readBits;
 
 	StreamReader(std::istream& stream)
 		: stream_(stream)
-	{}
-
-	error::Error read(uint8_t* dest, uint32_t n)
 	{
-		// check that it has enough bytes
-		stream_.read((char*)dest, n);
-		if (stream_.fail()) {
-			return error::Error("Failed to read " + std::to_string(n) + " bytes from stream");
-		}
-		return nullptr;
 	}
 
-	error::Error read(std::vector<uint8_t>& dest, uint32_t n)
+protected:
+
+	error::Error readByte(uint8_t& val, uint32_t byteIndex)
 	{
-		dest.resize(n, 0);
-		stream_.read((char*)(&dest[0]), n);
-		if (stream_.fail()) {
-			return error::Error("Failed to read " + std::to_string(n) + " bytes from stream");
+		if (byteIndex > currentIndex_) {
+			assert((byteIndex == currentIndex_ + 1) && "StreamReader::readByte: byteIndex must be incremented by 1");
+			currentIndex_ = byteIndex;
+
+			stream_.read(reinterpret_cast<char*>(&currentByte_), 1);
+			if (stream_.fail()) {
+				return error::Error("Failed to read byte from stream");
+			}
 		}
+
+		val = currentByte_;
 		return nullptr;
 	}
 
 private:
 	std::istream& stream_;
+	uint8_t currentByte_ = 0;
+	int64_t currentIndex_ = -1;
 };
 
 }
