@@ -212,6 +212,83 @@ assert(err && "request failed");
 std::cout << res.pong.count << std::endl;
 ```
 
+## SCG C++ Serialization Macros
+
+The C++ `include/scg/macro.h` provides some macros for building serialization overrides for types that are _not_ generated with scg.
+
+There are four macros:
+
+- `SCG_SERIALIZABLE_PUBLIC`: declare public fields as serializable.
+- `SCG_SERIALIZABLE_PRIVATE`: declare public _and_ private fields as serializable.
+- `SCG_SERIALIZABLE_DERIVED_PUBLIC`: declare a type as derived from another, include any base class serialization logic, along with new public fields.
+- `SCG_SERIALIZABLE_DERIVED_PRIVATE`: declare a type as derived from another, and include any base class serialization logic, along with new public _and_ private fields.
+
+```cpp
+// Declare public fields as serializable, note the macro is called _outside_ the struct.
+struct MyStruct {
+	uint32_t a = 0;
+	float64_t b = 0;
+	std::vector<std::string> c;
+};
+SCG_SERIALIZABLE_PUBLIC(MyStruct, a, b, c);
+
+// Declare declare private fields as serializable, note the macro is called _inside_ the class.
+class MyClass {
+public:
+	MyClass() = default;
+	MyClass(uint32_t a, float64_t b) : a_(a), b_(b)
+	{
+	}
+	SCG_SERIALIZABLE_PRIVATE(MyClass, a_, b_);
+private:
+	uint32_t a_ = 0;
+	uint64_t b_ = 0;
+};
+
+// Declare the base class to derive serialization logic from, note the macro is called _outside_ the struct.
+struct DerivedStruct : MyStruct{
+	bool d = false;
+};
+SCG_SERIALIZABLE_DERIVED_PUBLIC(DerivedStruct, MyStruct, d);
+
+// Declare the base class to derive serialization logic from, note the macro is called _inside_ the class.
+class MyDerivedClass : public MyClass {
+public:
+	MyDerivedClass() = default;
+	MyDerivedClass(uint32_t a, float64_t b, bool c) : MyClass(a, b), c_(c)
+	{
+	}
+	SCG_SERIALIZABLE_DERIVED_PRIVATE(MyDerivedClass, MyClass, c_);
+private:
+	bool c_ = false;
+};
+```
+
+Individual serialization overrides can be provided using ADL as follows, for example, here is how to extend it to serialize `glm` types:
+
+```cpp
+namespace glm {
+
+template <typename WriterType>
+inline void serialize(WriterType& writer, const glm::vec2& value)
+{
+	writer.write(value.x);
+	writer.write(value.y);
+}
+
+template <typename ReaderType>
+inline scg::error::Error deserialize(glm::vec2& value, ReaderType& reader)
+{
+	auto err = reader.read(value.x);
+	if (err) {
+		return err;
+	}
+	return reader.read(value.y);
+}
+
+}
+```
+
 ## Development / Testing:
 
 Generate test files:

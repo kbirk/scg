@@ -5,6 +5,7 @@
 #include "scg/serialize.h"
 #include "scg/timestamp.h"
 #include "scg/uuid.h"
+#include "scg/macro.h"
 
 #include "pingpong/pingpong.h"
 
@@ -456,6 +457,115 @@ void test_stream_writer_reader()
 	TEST_CHECK(output.valByteArray.size() == input.valByteArray.size());
 }
 
+struct TestStructA {
+	uint32_t a = 0;
+	float64_t b = 1;
+};
+SCG_SERIALIZABLE_PUBLIC(TestStructA, a, b);
+
+struct TestStructEmpty {};
+SCG_SERIALIZABLE_PUBLIC(TestStructEmpty);
+
+struct TestStructDerivedA : TestStructA {
+	std::string c = "2";
+};
+SCG_SERIALIZABLE_DERIVED_PUBLIC(TestStructDerivedA, TestStructA, c);
+
+class TestClassPrivate {
+public:
+	TestClassPrivate(uint32_t a, float64_t b) : a_(a), b_(b) {}
+
+	uint32_t a() const { return a_; }
+	float64_t b() const { return b_; }
+
+SCG_SERIALIZABLE_PRIVATE(TestClassPrivate, a_, b_);
+
+private:
+	uint32_t a_ = 0;
+	float64_t b_ = 1;
+};
+
+class TestDerivedPrivate: public TestClassPrivate {
+public:
+	TestDerivedPrivate(uint32_t a, float64_t b, std::string c) : TestClassPrivate(a, b), c_(c) {}
+
+	std::string c() const { return c_; }
+
+SCG_SERIALIZABLE_DERIVED_PRIVATE(TestDerivedPrivate, TestClassPrivate, c_);
+
+private:
+	std::string c_;
+};
+
+void test_serialize_macros()
+{
+	TestStructA inputA;
+	inputA.a = 123;
+	inputA.b = 3.14;
+
+	TestStructEmpty inputEmpty;
+
+	scg::serialize::Writer writer;
+	serialize(writer, inputA);
+	serialize(writer, inputEmpty);
+
+	scg::serialize::Reader reader(writer.bytes());
+	TestStructA outputA;
+	auto err = deserialize(outputA, reader);
+	TEST_CHECK(!err);
+
+	TEST_CHECK(inputA.a == outputA.a);
+	TEST_CHECK(inputA.b == outputA.b);
+
+	TestStructEmpty outputEmpty;
+	err = deserialize(outputEmpty, reader);
+	TEST_CHECK(!err);
+
+	TestStructDerivedA inputDerivedA;
+	inputDerivedA.a = 123;
+	inputDerivedA.b = 3.14;
+	inputDerivedA.c = "456";
+
+	scg::serialize::Writer writer2;
+	serialize(writer2, inputDerivedA);
+
+	scg::serialize::Reader reader2(writer2.bytes());
+	TestStructDerivedA outputDerivedA;
+	err = deserialize(outputDerivedA, reader2);
+	TEST_CHECK(!err);
+
+	TEST_CHECK(inputDerivedA.a == outputDerivedA.a);
+	TEST_CHECK(inputDerivedA.b == outputDerivedA.b);
+	TEST_CHECK(inputDerivedA.c == outputDerivedA.c);
+
+	TestClassPrivate inputPrivate(123, 3.14);
+
+	scg::serialize::Writer writer3;
+	serialize(writer3, inputPrivate);
+
+	scg::serialize::Reader reader3(writer3.bytes());
+	TestClassPrivate outputPrivate(0, 0);
+	err = deserialize(outputPrivate, reader3);
+	TEST_CHECK(!err);
+
+	TEST_CHECK(inputPrivate.a() == outputPrivate.a());
+	TEST_CHECK(inputPrivate.b() == outputPrivate.b());
+
+	TestDerivedPrivate inputDerivedPrivate(123, 3.14, "456");
+
+	scg::serialize::Writer writer4;
+	serialize(writer4, inputDerivedPrivate);
+
+	scg::serialize::Reader reader4(writer4.bytes());
+	TestDerivedPrivate outputDerivedPrivate(0, 0, "");
+	err = deserialize(outputDerivedPrivate, reader4);
+	TEST_CHECK(!err);
+
+	TEST_CHECK(inputDerivedPrivate.a() == outputDerivedPrivate.a());
+	TEST_CHECK(inputDerivedPrivate.b() == outputDerivedPrivate.b());
+	TEST_CHECK(inputDerivedPrivate.c() == outputDerivedPrivate.c());
+}
+
 // helper method to reduce redundant test typing
 #define TEST(x) {#x, x}
 
@@ -478,6 +588,7 @@ TEST_LIST = {
 	TEST(test_serialize_pingpong),
 	TEST(test_serialize_context),
 	TEST(test_stream_writer_reader),
+	TEST(test_serialize_macros),
 
 	{ NULL, NULL }
 };
