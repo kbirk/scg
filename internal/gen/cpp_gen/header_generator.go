@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"text/template"
-	"time"
 
 	"github.com/kbirk/scg/internal/parse"
 )
@@ -16,7 +15,6 @@ type HeaderArgs struct {
 	Version string
 	Source  string
 	SHA     string
-	Date    string
 }
 
 const headerTemplateStr = `
@@ -27,8 +25,6 @@ const headerTemplateStr = `
 // Source: {{.Source}}
 //
 // SHA: {{.SHA}}
-//
-// Date: {{.Date}}
 
 #pragma once`
 
@@ -46,7 +42,6 @@ func generateHeaderCpp(file *parse.File) (string, error) {
 		Version: version,
 		Source:  file.Name,
 		SHA:     sha,
-		Date:    time.Now().Format(time.RFC3339),
 	}
 
 	buf := &bytes.Buffer{}
