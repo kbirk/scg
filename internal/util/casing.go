@@ -21,18 +21,33 @@ func splitNameIntoParts(name string) []string {
 	return words
 }
 
+func replaceWordCasing(s string, fn func(string) string) string {
+	switch s {
+	case "id":
+		return "ID"
+	case "ids":
+		return "IDs"
+	case "uuid":
+		return "UUID"
+	case "uuids":
+		return "UUIDs"
+	case "url":
+		return "URL"
+	case "urls":
+		return "URLs"
+	}
+	return fn(s)
+}
+
 func EnsurePascalCase(s string) string {
 	words := splitNameIntoParts(s)
 	for i, word := range words {
 		if len(word) > 0 {
-			word = strings.ToLower(word)
-			if word == "id" {
-				words[i] = "ID"
-				continue
-			}
-			runes := []rune(word)
-			runes[0] = unicode.ToUpper(runes[0])
-			words[i] = string(runes)
+			words[i] = replaceWordCasing(strings.ToLower(word), func(str string) string {
+				runes := []rune(str)
+				runes[0] = unicode.ToUpper(runes[0])
+				return string(runes)
+			})
 		}
 	}
 	return strings.Join(words, "")
@@ -42,15 +57,13 @@ func EnsureCamelCase(s string) string {
 	words := splitNameIntoParts(s)
 	for i := range words {
 		if len(words[i]) > 0 {
-			words[i] = strings.ToLower(words[i])
+			word := strings.ToLower(words[i])
 			if i == 0 {
-				words[i] = string(unicode.ToLower(rune(words[i][0]))) + words[i][1:]
+				words[i] = string(unicode.ToLower(rune(word[0]))) + word[1:]
 			} else {
-				if words[i] == "id" {
-					words[i] = "ID"
-					continue
-				}
-				words[i] = string(unicode.ToUpper(rune(words[i][0]))) + words[i][1:]
+				words[i] = replaceWordCasing(word, func(str string) string {
+					return string(unicode.ToUpper(rune(str[0]))) + str[1:]
+				})
 			}
 		}
 	}
