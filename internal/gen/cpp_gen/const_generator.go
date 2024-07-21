@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kbirk/scg/internal/parse"
+	"github.com/kbirk/scg/internal/util"
 )
 
 type ConstArgs struct {
@@ -82,7 +83,7 @@ func generateConstCppCode(constDelc *parse.ConstDeclaration) (string, error) {
 	}
 
 	args := ConstArgs{
-		ConstNameUpperCase:  strings.ToUpper(constDelc.Name),
+		ConstNameUpperCase:  strings.ToUpper(util.EnsureSnakeCase(constDelc.Name)),
 		ConstUnderlyingType: typeName,
 		ConstValue:          value,
 	}

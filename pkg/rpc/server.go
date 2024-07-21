@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/websocket"
 
@@ -213,6 +214,8 @@ func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
 		}
 		defer conn.Close()
 
+		mu := &sync.Mutex{}
+
 		for {
 			// read message
 			_, bs, err := conn.ReadMessage()
@@ -220,67 +223,74 @@ func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
 				s.handleError(err)
 				break
 			}
-			reader := serialize.NewReader(bs)
 
-			var prefix [16]byte
-			err = DeserializePrefix(&prefix, reader)
-			if err != nil {
-				s.handleError(err)
-				break
-			}
+			go func() {
+				reader := serialize.NewReader(bs)
 
-			if prefix != RequestPrefix {
-				s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
-				break
-			}
+				var prefix [16]byte
+				err = DeserializePrefix(&prefix, reader)
+				if err != nil {
+					s.handleError(err)
+					return
+				}
 
-			// get the context
-			ctx := context.Background()
-			err = DeserializeContext(&ctx, reader)
-			if err != nil {
-				s.handleError(err)
-				break
-			}
+				if prefix != RequestPrefix {
+					s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
+					return
+				}
 
-			// get the request id
-			var requestID uint64
-			err = serialize.DeserializeUInt64(&requestID, reader)
-			if err != nil {
-				s.handleError(err)
-				break
-			}
+				// get the context
+				ctx := context.Background()
+				err = DeserializeContext(&ctx, reader)
+				if err != nil {
+					s.handleError(err)
+					return
+				}
 
-			// get the service id
-			var serviceID uint64
-			err = serialize.DeserializeUInt64(&serviceID, reader)
-			if err != nil {
-				s.handleError(err)
-				break
-			}
+				// get the request id
+				var requestID uint64
+				err = serialize.DeserializeUInt64(&requestID, reader)
+				if err != nil {
+					s.handleError(err)
+					return
+				}
 
-			// acquire the service
-			service, err := s.getServiceByID(serviceID)
-			if err != nil {
-				s.handleError(err)
-				break
-			}
+				// get the service id
+				var serviceID uint64
+				err = serialize.DeserializeUInt64(&serviceID, reader)
+				if err != nil {
+					s.handleError(err)
+					return
+				}
 
-			// gather middleware for the call
-			middleware, err := s.getMiddlewareStackForServiceID(serviceID)
-			if err != nil {
-				s.handleError(err)
-				break
-			}
+				// acquire the service
+				service, err := s.getServiceByID(serviceID)
+				if err != nil {
+					s.handleError(err)
+					return
+				}
 
-			// handle the request
-			bs = service.HandleWrapper(ctx, middleware, requestID, reader)
+				// gather middleware for the call
+				middleware, err := s.getMiddlewareStackForServiceID(serviceID)
+				if err != nil {
+					s.handleError(err)
+					return
+				}
 
-			// send response
-			err = conn.WriteMessage(websocket.BinaryMessage, bs)
-			if err != nil {
-				s.handleError(err)
-				break
-			}
+				// handle the request
+				bs = service.HandleWrapper(ctx, middleware, requestID, reader)
+
+				// need to lock when writing
+				mu.Lock()
+				defer mu.Unlock()
+
+				// send response
+				err = conn.WriteMessage(websocket.BinaryMessage, bs)
+				if err != nil {
+					s.handleError(err)
+					return
+				}
+			}()
 		}
 	}
 }
