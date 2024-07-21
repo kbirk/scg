@@ -64,16 +64,37 @@ type PackageDependency struct {
 }
 
 type Package struct {
-	Name                   string
-	Declaration            *PackageDeclaration
-	PackageDependencies    map[string]*PackageDependency
-	Enums                  map[string]*EnumDefinition
-	Typedefs               map[string]*TypedefDeclaration
-	Consts                 map[string]*ConstDeclaration
-	ServiceDefinitions     map[string]*ServiceDefinition
-	MessageDefinitions     map[string]*MessageDefinition
-	serverIDCollisionCheck map[uint64]string
-	methodIDCollisionCheck map[uint64]map[uint64]string
+	Name                    string
+	Declaration             *PackageDeclaration
+	PackageDependencies     map[string]*PackageDependency
+	Enums                   map[string]*EnumDefinition
+	Typedefs                map[string]*TypedefDeclaration
+	Consts                  map[string]*ConstDeclaration
+	ServiceDefinitions      map[string]*ServiceDefinition
+	MessageDefinitions      map[string]*MessageDefinition
+	messageIDCollisionCheck map[uint64]string
+	serverIDCollisionCheck  map[uint64]string
+	methodIDCollisionCheck  map[uint64]map[uint64]string
+}
+
+func (p *Package) HashStringToMessageID(messageName string) (uint64, error) {
+
+	_, ok := p.MessageDefinitions[messageName]
+	if !ok {
+		return 0, fmt.Errorf("Message not found: %s", messageName)
+	}
+
+	if p.messageIDCollisionCheck == nil {
+		p.messageIDCollisionCheck = map[uint64]string{}
+	}
+
+	messageID := uint64(util.HashStringToUInt64(messageName))
+	existing, ok := p.messageIDCollisionCheck[messageID]
+	if ok && existing != messageName {
+		return 0, fmt.Errorf("MessageID collision detected: %s and %s both hash to %d", messageName, existing, messageID)
+	}
+	p.messageIDCollisionCheck[messageID] = messageName
+	return messageID, nil
 }
 
 func (p *Package) HashStringToServiceID(serviceName string) (uint64, error) {

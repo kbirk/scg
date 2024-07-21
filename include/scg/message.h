@@ -17,6 +17,10 @@ namespace type {
 		virtual std::vector<uint8_t> toBytes() const  = 0;
 		virtual scg::error::Error fromBytes(const std::vector<uint8_t>& data)  = 0;
 		virtual scg::error::Error fromBytes(const uint8_t* data, uint32_t size)  = 0;
+
+		virtual std::vector<uint8_t> toBytesWithPrefix() const  = 0;
+		virtual scg::error::Error fromBytesWithPrefix(const std::vector<uint8_t>& data)  = 0;
+		virtual scg::error::Error fromBytesWithPrefix(const uint8_t* data, uint32_t size)  = 0;
 	};
 
 }
