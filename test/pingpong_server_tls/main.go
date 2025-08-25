@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/kbirk/scg/pkg/rpc"
+	"github.com/kbirk/scg/pkg/rpc/websocket"
 	"github.com/kbirk/scg/test/files/output/pingpong"
 )
 
@@ -68,7 +69,12 @@ func main() {
 	}
 
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: port,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port:     port,
+				CertFile: certFile,
+				KeyFile:  keyFile,
+			}),
 		ErrHandler: func(err error) {
 			fmt.Println("Server error handler:", err)
 		},
@@ -76,7 +82,7 @@ func main() {
 	server.Middleware(authMiddleware)
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
-	err := server.ListenAndServeTLS(certFile, keyFile)
+	err := server.ListenAndServe()
 	if err != nil {
 		fmt.Println(err)
 	}

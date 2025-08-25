@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kbirk/scg/pkg/rpc"
+	"github.com/kbirk/scg/pkg/rpc/websocket"
 	"github.com/kbirk/scg/test/files/output/pingpong"
 )
 
@@ -29,7 +30,10 @@ func (s *pingpongServer) Ping(ctx context.Context, req *pingpong.PingRequest) (*
 
 func main() {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: port,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: port,
+			}),
 		ErrHandler: func(err error) {
 			fmt.Println("Server error handler:", err)
 		},

@@ -331,7 +331,7 @@ void test_serialize_pingpong()
 	input.valTimestamp = scg::type::timestamp();
 	input.valBool = true;
 	input.valEnum = pingpong::EnumType::ENUM_TYPE_1;
-	input.valUUID = scg::type::uuid::random();
+	input.valUuid = scg::type::uuid::random();
 	input.valListPayload = {nested1, nested2};
 	input.valMapKeyEnum = {
 		{pingpong::KeyType("key_1"), pingpong::EnumType::ENUM_TYPE_1},
@@ -362,7 +362,7 @@ void test_serialize_pingpong()
 	TEST_CHECK(output.valString == input.valString);
 	TEST_CHECK(output.valBool == input.valBool);
 	TEST_CHECK(output.valEnum == input.valEnum);
-	TEST_CHECK(output.valUUID == input.valUUID);
+	TEST_CHECK(output.valUuid == input.valUuid);
 	TEST_CHECK(output.valListPayload.size() == 2);
 	TEST_CHECK(output.valListPayload[0].valString == nested1.valString);
 	TEST_CHECK(output.valListPayload[0].valDouble == nested1.valDouble);
@@ -409,7 +409,7 @@ void test_stream_writer_reader()
 	input.valTimestamp = scg::type::timestamp();
 	input.valBool = true;
 	input.valEnum = pingpong::EnumType::ENUM_TYPE_1;
-	input.valUUID = scg::type::uuid::random();
+	input.valUuid = scg::type::uuid::random();
 	input.valListPayload = {nested1, nested2};
 	input.valMapKeyEnum = {
 		{pingpong::KeyType("key_1"), pingpong::EnumType::ENUM_TYPE_1},
@@ -445,7 +445,7 @@ void test_stream_writer_reader()
 	TEST_CHECK(output.valString == input.valString);
 	TEST_CHECK(output.valBool == input.valBool);
 	TEST_CHECK(output.valEnum == input.valEnum);
-	TEST_CHECK(output.valUUID == input.valUUID);
+	TEST_CHECK(output.valUuid == input.valUuid);
 	TEST_CHECK(output.valListPayload.size() == 2);
 	TEST_CHECK(output.valListPayload[0].valString == nested1.valString);
 	TEST_CHECK(output.valListPayload[0].valDouble == nested1.valDouble);
