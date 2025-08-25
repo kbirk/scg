@@ -22,36 +22,36 @@ public:
 	{
 	}
 
-	operator T&() noexcept
+	constexpr operator T&() noexcept
 	{
 		return value_;
 	}
 
-	operator const T&() const noexcept
+	constexpr operator const T&() const noexcept
 	{
 		return value_;
 	}
 
-	strong_typedef<T, Tag>& operator++()
+	constexpr strong_typedef<T, Tag>& operator++()
 	{
 		value_++;
 		return *this;
 	}
 
-	strong_typedef<T, Tag> operator++(int)
+	constexpr strong_typedef<T, Tag> operator++(int)
 	{
 		strong_typedef<T, Tag> old = *this;
 		value_++;
 		return old;
 	}
 
-	strong_typedef<T, Tag>& operator--()
+	constexpr strong_typedef<T, Tag>& operator--()
 	{
 		value_--;
 		return *this;
 	}
 
-	strong_typedef<T, Tag> operator--(int)
+	constexpr strong_typedef<T, Tag> operator--(int)
 	{
 		strong_typedef<T, Tag> old = *this;
 		value_--;
@@ -59,75 +59,75 @@ public:
 	}
 
 	template <typename S>
-	strong_typedef<T, Tag>& operator+=(const S& s)
+	constexpr strong_typedef<T, Tag>& operator+=(const S& s)
 	{
 		value_ += s;
 		return *this;
 	}
 
 	template <typename S>
-	strong_typedef<T, Tag>& operator-=(const S& s)
+	constexpr strong_typedef<T, Tag>& operator-=(const S& s)
 	{
 		value_ -= s;
 		return *this;
 	}
 
-	bool operator==(const strong_typedef<T, Tag>& x) const
+	constexpr bool operator==(const strong_typedef<T, Tag>& x) const
 	{
 		return value_ == x.value_;
 	}
 
-	bool operator!=(const strong_typedef<T, Tag>& x) const
+	constexpr bool operator!=(const strong_typedef<T, Tag>& x) const
 	{
 		return value_ != x.value_;
 	}
 
-	bool operator<(const strong_typedef<T, Tag>& x) const
+	constexpr bool operator<(const strong_typedef<T, Tag>& x) const
 	{
 		return value_ < x.value_;
 	}
 
-	bool operator>(const strong_typedef<T, Tag>& x) const
+	constexpr bool operator>(const strong_typedef<T, Tag>& x) const
 	{
 		return value_ > x.value_;
 	}
 
-	bool operator<=(const strong_typedef<T, Tag>& x) const
+	constexpr bool operator<=(const strong_typedef<T, Tag>& x) const
 	{
 		return value_ <= x.value_;
 	}
 
-	bool operator>=(const strong_typedef<T, Tag>& x) const
+	constexpr bool operator>=(const strong_typedef<T, Tag>& x) const
 	{
 		return value_ >= x.value_;
 	}
 
-	friend strong_typedef operator&(const strong_typedef& lhs, const strong_typedef& rhs)
+	friend constexpr strong_typedef operator&(const strong_typedef& lhs, const strong_typedef& rhs)
 	{
 		return strong_typedef(lhs.value_ & rhs.value_);
 	}
 
-	friend strong_typedef operator|(const strong_typedef& lhs, const strong_typedef& rhs)
+	friend constexpr strong_typedef operator|(const strong_typedef& lhs, const strong_typedef& rhs)
 	{
 		return strong_typedef(lhs.value_ | rhs.value_);
 	}
 
-	friend strong_typedef operator^(const strong_typedef& lhs, const strong_typedef& rhs)
+	friend constexpr strong_typedef operator^(const strong_typedef& lhs, const strong_typedef& rhs)
 	{
 		return strong_typedef(lhs.value_ ^ rhs.value_);
 	}
 
-	friend strong_typedef operator~(const strong_typedef& lhs)
+	friend constexpr strong_typedef operator~(const strong_typedef& lhs)
 	{
 		return strong_typedef(~lhs.value_);
 	}
 
-	friend strong_typedef operator<<(const strong_typedef& lhs, int32_t shift)
+	friend constexpr strong_typedef operator<<(const strong_typedef& lhs, int32_t shift)
 	{
 		return strong_typedef(lhs.value_ << shift);
 	}
 
-	friend strong_typedef operator>>(const strong_typedef& lhs, int32_t shift)
+	friend constexpr strong_typedef operator>>(const strong_typedef& lhs, int32_t shift)
 	{
 		return strong_typedef(lhs.value_ >> shift);
 	}
@@ -176,14 +176,14 @@ private:
 };
 
 template<typename T, typename Tag, typename S>
-strong_typedef<T, Tag> operator+(strong_typedef<T, Tag> lhs, const S& rhs)
+constexpr strong_typedef<T, Tag> operator+(strong_typedef<T, Tag> lhs, const S& rhs)
 {
 	lhs += rhs;
 	return lhs;
 }
 
 template<typename T, typename Tag, typename S>
-strong_typedef<T, Tag> operator-(strong_typedef<T, Tag> lhs, const S& rhs)
+constexpr strong_typedef<T, Tag> operator-(strong_typedef<T, Tag> lhs, const S& rhs)
 {
 	lhs -= rhs;
 	return lhs;
