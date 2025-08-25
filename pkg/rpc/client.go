@@ -2,14 +2,11 @@ package rpc
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"math/rand"
-	"net/url"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"github.com/kbirk/scg/pkg/log"
 	"github.com/kbirk/scg/pkg/serialize"
 )
@@ -17,15 +14,15 @@ import (
 type Client struct {
 	conf      ClientConfig
 	mu        *sync.Mutex
-	conn      *websocket.Conn
+	conn      Connection
+	transport ClientTransport
 	requests  map[uint64]chan *serialize.Reader
 	requestID uint64
+	running   bool
 }
 
 type ClientConfig struct {
-	Host       string
-	Port       int
-	TLSConfig  *tls.Config
+	Transport  ClientTransport
 	ErrHandler func(error)
 	middleware []Middleware
 	Logger     log.Logger
@@ -38,6 +35,7 @@ func seedRequestID() uint64 {
 func NewClient(conf ClientConfig) *Client {
 	return &Client{
 		conf:      conf,
+		transport: conf.Transport,
 		mu:        &sync.Mutex{},
 		requestID: seedRequestID(),
 		requests:  make(map[uint64]chan *serialize.Reader),
@@ -106,23 +104,9 @@ func (c *Client) connectUnsafe() error {
 		return nil
 	}
 
-	// set up the WebSocket URL
-
-	scheme := "ws"
-
-	// create dialer
-	dialer := websocket.Dialer{}
-	if c.conf.TLSConfig != nil {
-		// Configure the Dialer to use SSL/TLS
-		dialer.TLSClientConfig = c.conf.TLSConfig
-		scheme = "wss"
-	}
-
-	u := url.URL{Scheme: scheme, Host: fmt.Sprintf("%s:%d", c.conf.Host, c.conf.Port), Path: "/rpc"}
-
-	// connect to the WebSocket server
-	c.logDebug("Connecting to " + u.String())
-	conn, _, err := dialer.Dial(u.String(), nil)
+	// connect using transport
+	c.logDebug("Connecting to server")
+	conn, err := c.transport.Connect()
 	if err != nil {
 		return err
 	}
@@ -131,8 +115,13 @@ func (c *Client) connectUnsafe() error {
 	go func() {
 		for {
 			c.logDebug("Waiting for message")
-			_, bs, err := conn.ReadMessage()
+			bs, err := conn.Receive()
 			if err != nil {
+				// Don't treat normal connection closures as errors
+				if err.Error() == "connection closed" {
+					c.logDebug("Connection closed normally")
+					return
+				}
 				c.handleError(err)
 				return
 			}
@@ -211,7 +200,7 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 	ch := make(chan *serialize.Reader)
 	c.requests[requestID] = ch
 
-	err = c.conn.WriteMessage(websocket.BinaryMessage, bs)
+	err = c.conn.Send(bs)
 	if err != nil {
 		delete(c.requests, requestID)
 		return nil, c.handleError(err)

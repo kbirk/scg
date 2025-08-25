@@ -3,7 +3,6 @@ package rpc
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -12,17 +11,14 @@ import (
 	"github.com/kbirk/scg/pkg/serialize"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
-
 type Server struct {
 	conf             ServerConfig
-	server           *http.Server
+	transport        ServerTransport
 	rootGroup        *ServerGroup
 	groupByServiceID map[uint64]*ServerGroup
 	activeGroup      *ServerGroup
+	running          bool
+	mu               *sync.Mutex
 }
 
 type ServerGroup struct {
@@ -33,7 +29,7 @@ type ServerGroup struct {
 }
 
 type ServerConfig struct {
-	Port       int
+	Transport  ServerTransport
 	ErrHandler func(error)
 	Logger     log.Logger
 }
@@ -83,18 +79,13 @@ func NewServer(conf ServerConfig) *Server {
 	rootGroup := newServerGroup()
 
 	s := &Server{
-		conf: conf,
-		server: &http.Server{
-			Addr: fmt.Sprintf(":%d", conf.Port),
-		},
+		conf:             conf,
+		transport:        conf.Transport,
 		rootGroup:        rootGroup,
 		activeGroup:      rootGroup,
 		groupByServiceID: make(map[uint64]*ServerGroup),
+		mu:               &sync.Mutex{},
 	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/rpc", s.getHandler())
-	s.server.Handler = mux
 
 	return s
 }
@@ -205,106 +196,135 @@ func (g *ServerGroup) getServiceByID(id uint64) (serverStub, error) {
 	return service, nil
 }
 
-func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+func (s *Server) handleConnection(conn Connection) {
+	defer conn.Close()
+
+	for {
+		// read message
+		bs, err := conn.Receive()
 		if err != nil {
-			s.conf.ErrHandler(err)
-			return
-		}
-		defer conn.Close()
-
-		mu := &sync.Mutex{}
-
-		for {
-			// read message
-			_, bs, err := conn.ReadMessage()
-			if err != nil {
-				s.handleError(err)
+			// Don't treat normal connection closures as errors
+			if err.Error() == "connection closed" {
 				break
 			}
-
-			go func() {
-				reader := serialize.NewReader(bs)
-
-				var prefix [16]byte
-				err = DeserializePrefix(&prefix, reader)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				if prefix != RequestPrefix {
-					s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
-					return
-				}
-
-				// get the context
-				ctx := context.Background()
-				err = DeserializeContext(&ctx, reader)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// get the request id
-				var requestID uint64
-				err = serialize.DeserializeUInt64(&requestID, reader)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// get the service id
-				var serviceID uint64
-				err = serialize.DeserializeUInt64(&serviceID, reader)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// acquire the service
-				service, err := s.getServiceByID(serviceID)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// gather middleware for the call
-				middleware, err := s.getMiddlewareStackForServiceID(serviceID)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// handle the request
-				bs = service.HandleWrapper(ctx, middleware, requestID, reader)
-
-				// need to lock when writing
-				mu.Lock()
-				defer mu.Unlock()
-
-				// send response
-				err = conn.WriteMessage(websocket.BinaryMessage, bs)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-			}()
+			s.handleError(err)
+			break
 		}
+
+		go func() {
+			reader := serialize.NewReader(bs)
+
+			var prefix [16]byte
+			err = DeserializePrefix(&prefix, reader)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			if prefix != RequestPrefix {
+				s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
+				return
+			}
+
+			// get the context
+			ctx := context.Background()
+			err = DeserializeContext(&ctx, reader)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// get the request id
+			var requestID uint64
+			err = serialize.DeserializeUInt64(&requestID, reader)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// get the service id
+			var serviceID uint64
+			err = serialize.DeserializeUInt64(&serviceID, reader)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// acquire the service
+			service, err := s.getServiceByID(serviceID)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// gather middleware for the call
+			middleware, err := s.getMiddlewareStackForServiceID(serviceID)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// handle the request
+			bs = service.HandleWrapper(ctx, middleware, requestID, reader)
+
+			// send response
+			err = conn.Send(bs)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+		}()
 	}
 }
 
 func (s *Server) ListenAndServe() error {
-	s.logInfo(fmt.Sprintf("Listening on port %d", s.conf.Port))
-	return s.server.ListenAndServe()
-}
+	s.mu.Lock()
+	if s.running {
+		s.mu.Unlock()
+		return fmt.Errorf("server is already running")
+	}
+	s.running = true
+	s.mu.Unlock()
 
-func (s *Server) ListenAndServeTLS(certFile string, keyFile string) error {
-	s.logInfo(fmt.Sprintf("Listening on port %d", s.conf.Port))
-	return s.server.ListenAndServeTLS(certFile, keyFile)
+	s.logInfo("Starting server")
+
+	err := s.transport.Listen()
+	if err != nil {
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
+
+	for {
+		s.mu.Lock()
+		running := s.running
+		s.mu.Unlock()
+
+		if !running {
+			break
+		}
+
+		conn, err := s.transport.Accept()
+		if err != nil {
+			// If the transport is closed (during shutdown), don't treat it as an error
+			if err.Error() == "transport is closed" {
+				break
+			}
+			s.handleError(err)
+			continue
+		}
+
+		go s.handleConnection(conn)
+	}
+
+	return nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.server.Shutdown(ctx)
+	s.mu.Lock()
+	s.running = false
+	s.mu.Unlock()
+
+	return s.transport.Close()
 }

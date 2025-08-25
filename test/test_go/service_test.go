@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
+	"github.com/kbirk/scg/pkg/rpc/websocket"
 	"github.com/kbirk/scg/test/files/output/basic"
 	"github.com/kbirk/scg/test/files/output/pingpong"
 
@@ -65,7 +66,10 @@ func (s *pingpongServerFail) Ping(ctx context.Context, req *pingpong.PingRequest
 func TestPingPong(t *testing.T) {
 
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: 8000,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -77,8 +81,11 @@ func TestPingPong(t *testing.T) {
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
+		Transport: websocket.NewClientTransport(
+			websocket.ClientTransportConfig{
+				Host: "localhost",
+				Port: 8000,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -121,7 +128,10 @@ func TestPingPong(t *testing.T) {
 func TestPingPongConcurrent(t *testing.T) {
 
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: 8001,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -133,8 +143,11 @@ func TestPingPongConcurrent(t *testing.T) {
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
+		Transport: websocket.NewClientTransport(
+			websocket.ClientTransportConfig{
+				Host: "localhost",
+				Port: 8001,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -181,8 +194,13 @@ func TestPingPongConcurrent(t *testing.T) {
 }
 
 func TestPingPongTLS(t *testing.T) {
+
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(websocket.ServerTransportConfig{
+			Port:     8002,
+			CertFile: "../server.crt",
+			KeyFile:  "../server.key",
+		}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -190,15 +208,17 @@ func TestPingPongTLS(t *testing.T) {
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
 	go func() {
-		server.ListenAndServeTLS("../server.crt", "../server.key")
+		server.ListenAndServe()
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true, // self signed
-		},
+		Transport: websocket.NewClientTransport(websocket.ClientTransportConfig{
+			Host: "localhost",
+			Port: 8002,
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: true, // self signed
+			},
+		}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -232,7 +252,11 @@ func TestPingPongTLS(t *testing.T) {
 
 func TestPingPongTLSAndAuth(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(websocket.ServerTransportConfig{
+			Port:     8003,
+			CertFile: "../server.crt",
+			KeyFile:  "../server.key",
+		}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -241,15 +265,17 @@ func TestPingPongTLSAndAuth(t *testing.T) {
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
 	go func() {
-		server.ListenAndServeTLS("../server.crt", "../server.key")
+		server.ListenAndServe()
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true, // self signed
-		},
+		Transport: websocket.NewClientTransport(websocket.ClientTransportConfig{
+			Host: "localhost",
+			Port: 8003,
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: true, // self signed
+			},
+		}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -288,7 +314,10 @@ func TestPingPongTLSAndAuth(t *testing.T) {
 
 func TestPingPongFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: 8004,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -300,8 +329,11 @@ func TestPingPongFail(t *testing.T) {
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
+		Transport: websocket.NewClientTransport(
+			websocket.ClientTransportConfig{
+				Host: "localhost",
+				Port: 8004,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -323,7 +355,10 @@ func TestPingPongFail(t *testing.T) {
 
 func TestPingPongAuthFail(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: 8005,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -336,8 +371,11 @@ func TestPingPongAuthFail(t *testing.T) {
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
+		Transport: websocket.NewClientTransport(
+			websocket.ClientTransportConfig{
+				Host: "localhost",
+				Port: 8005,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -364,7 +402,12 @@ func TestPingPongAuthFail(t *testing.T) {
 
 func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port:     8006,
+				CertFile: "../server.crt",
+				KeyFile:  "../server.key",
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -375,15 +418,18 @@ func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 	})
 
 	go func() {
-		server.ListenAndServeTLS("../server.crt", "../server.key")
+		server.ListenAndServe()
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true, // self signed
-		},
+		Transport: websocket.NewClientTransport(
+			websocket.ClientTransportConfig{
+				Host: "localhost",
+				Port: 8006,
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true, // self signed
+				},
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -422,7 +468,10 @@ func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 
 func TestPingPongDuplicateGroupPanic(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: 8007,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -461,7 +510,10 @@ func (s *testerBServer) Test(ctx context.Context, req *basic.TestRequestB) (*bas
 
 func TestServerGroupsMiddleware(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: 8008,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -480,8 +532,11 @@ func TestServerGroupsMiddleware(t *testing.T) {
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
+		Transport: websocket.NewClientTransport(
+			websocket.ClientTransportConfig{
+				Host: "localhost",
+				Port: 8008,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -508,7 +563,10 @@ func TestServerGroupsMiddleware(t *testing.T) {
 
 func TestServerNestedGroupsMiddleware(t *testing.T) {
 	server := rpc.NewServer(rpc.ServerConfig{
-		Port: 8000,
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: 8009,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
@@ -531,8 +589,11 @@ func TestServerNestedGroupsMiddleware(t *testing.T) {
 	}()
 
 	client := rpc.NewClient(rpc.ClientConfig{
-		Host: "localhost",
-		Port: 8000,
+		Transport: websocket.NewClientTransport(
+			websocket.ClientTransportConfig{
+				Host: "localhost",
+				Port: 8009,
+			}),
 		ErrHandler: func(err error) {
 			require.NoError(t, err)
 		},
