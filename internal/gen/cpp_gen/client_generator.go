@@ -82,10 +82,6 @@ func methodIDVarName(serviceName string, methodName string) string {
 	return fmt.Sprintf("%s_%sID", util.EnsureCamelCase(serviceName), util.EnsurePascalCase(methodName))
 }
 
-func getServerStubStructName(serviceName string) string {
-	return fmt.Sprintf("%s_Stub", util.EnsureCamelCase(serviceName))
-}
-
 func generateServiceMethodParams(method *parse.ServiceMethodDefinition) (string, string, error) {
 
 	argType, err := mapDataTypeDefinitionToCppType(method.Argument)

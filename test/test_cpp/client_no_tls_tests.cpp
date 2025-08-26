@@ -5,7 +5,8 @@
 #include <acutest.h>
 
 #include "scg/serialize.h"
-#include "scg/client_no_tls.h"
+#include "scg/client.h"
+#include "scg/ws/transport_no_tls.h"
 #include "pingpong/pingpong.h"
 
 void test_pingpong_client_no_tls() {
@@ -25,11 +26,22 @@ void test_pingpong_client_no_tls() {
 		printf("ERROR: %s\n", msg.c_str());
 	};
 
-	scg::rpc::ClientConfig config;
-	config.uri = "localhost:8000";
-	config.logging = logging;
+	scg::ws::ClientTransportConfig transportConfig;
+	transportConfig.host = "localhost";
+	transportConfig.port = 8000;
+	transportConfig.logging = logging;
 
-	auto client = std::make_shared<scg::rpc::ClientNoTLS>(config);
+	scg::rpc::ClientConfig config;
+	config.transport = std::make_shared<scg::ws::ClientTransportNoTLS>(transportConfig);
+
+	auto client = std::make_shared<scg::rpc::Client>(config);
+
+	auto connectErr = client->connect();
+	if (connectErr) {
+		printf("Connection failed: %s\n", connectErr.message.c_str());
+		TEST_CHECK(false);
+		return;
+	}
 
 	pingpong::PingPongClient pingPongClient(client);
 

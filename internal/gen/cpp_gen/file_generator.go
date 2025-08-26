@@ -122,5 +122,5 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 		return "", err
 	}
 
-	return string(buf.Bytes()), nil
+	return buf.String(), nil
 }

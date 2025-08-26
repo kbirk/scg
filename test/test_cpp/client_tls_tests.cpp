@@ -5,7 +5,8 @@
 #include <acutest.h>
 
 #include "scg/serialize.h"
-#include "scg/client_tls.h"
+#include "scg/client.h"
+#include "scg/ws/transport_tls.h"
 #include "pingpong/pingpong.h"
 
 void test_pingpong_client_tls() {
@@ -25,11 +26,22 @@ void test_pingpong_client_tls() {
 		printf("ERROR: %s\n", msg.c_str());
 	};
 
-	scg::rpc::ClientConfig config;
-	config.uri = "localhost:8000";
-	config.logging = logging;
+	scg::ws::ClientTransportTLSConfig transportConfig;
+	transportConfig.host = "localhost";
+	transportConfig.port = 8000;
+	transportConfig.logging = logging;
 
-	auto client = std::make_shared<scg::rpc::ClientTLS>(config);
+	scg::rpc::ClientConfig config;
+	config.transport = std::make_shared<scg::ws::ClientTransportTLS>(transportConfig);
+
+	auto client = std::make_shared<scg::rpc::Client>(config);
+
+	auto connectErr = client->connect();
+	if (connectErr) {
+		printf("Connection failed: %s\n", connectErr.message.c_str());
+		TEST_CHECK(false);
+		return;
+	}
 
 	uint32_t middlewareCount = 0;
 	client->middleware([&middlewareCount](scg::context::Context& ctx, const scg::type::Message& req, scg::middleware::Handler next) -> std::pair<scg::type::Message*, scg::error::Error> {
