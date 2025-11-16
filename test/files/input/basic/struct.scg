@@ -46,6 +46,7 @@ message BasicStruct {
 	map<string, float32> val_map_string_float_32 = 10;
 	timestamp val_timestamp = 11;
 	SomeEnum val_enum = 12;
+	uuid val_uuid = 19;
 	list<SomeEnum> val_list_enum = 13;
 	map<SomeEnum, string> val_map_enum_string = 14;
 	map<string, SomeEnum> val_map_string_enum = 15;

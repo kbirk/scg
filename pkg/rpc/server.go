@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/gorilla/websocket"
-
 	"github.com/kbirk/scg/pkg/log"
 	"github.com/kbirk/scg/pkg/serialize"
 )
@@ -100,8 +98,9 @@ func (s *Server) Group(fn func(*Server)) {
 }
 
 func (s *Server) handleError(err error) {
-	if cErr, ok := err.(*websocket.CloseError); ok {
-		s.logInfo("Client disconnected: " + cErr.Text)
+	// Check if this is a normal connection close
+	if err.Error() == "connection closed" {
+		s.logInfo("Client disconnected")
 		return
 	}
 	s.logError("Encountered error: " + err.Error())
@@ -134,13 +133,20 @@ func (s *Server) logError(msg string) {
 	}
 }
 
-func (s *Server) RegisterServer(id uint64, service serverStub) {
+func (s *Server) RegisterServer(id uint64, serviceName string, service serverStub) {
 	_, ok := s.groupByServiceID[id]
 	if ok {
 		panic(fmt.Sprintf("service with id %d already registered", id))
 	}
 	s.activeGroup.registerServer(id, service)
 	s.groupByServiceID[id] = s.activeGroup
+
+	// If the transport is service-aware, notify it about the service
+	if sat, ok := s.transport.(ServiceAwareTransport); ok {
+		if err := sat.RegisterService(id, serviceName); err != nil {
+			panic(fmt.Sprintf("failed to register service %s with transport: %v", serviceName, err))
+		}
+	}
 }
 
 func (g *ServerGroup) registerServer(id uint64, service serverStub) {

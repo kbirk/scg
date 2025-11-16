@@ -84,7 +84,7 @@ void test_pingpong_client_tls() {
 		payload.valTimestamp = scg::type::timestamp();
 		payload.valBool = i % 2 == 0;
 		payload.valEnum = pingpong::EnumType::ENUM_TYPE_1;
-		payload.valUuid = scg::type::uuid::random();
+		payload.valUUID = scg::type::uuid::random();
 		payload.valListPayload = {nested1, nested2};
 		payload.valMapKeyEnum = {
 			{pingpong::KeyType("key_" + std::to_string(i+1)), pingpong::EnumType::ENUM_TYPE_1},
@@ -119,7 +119,7 @@ void test_pingpong_client_tls() {
 		TEST_CHECK(res.pong.payload.valString == payload.valString);
 		TEST_CHECK(res.pong.payload.valBool == payload.valBool);
 		TEST_CHECK(res.pong.payload.valEnum == payload.valEnum);
-		TEST_CHECK(res.pong.payload.valUuid == payload.valUuid);
+		TEST_CHECK(res.pong.payload.valUUID == payload.valUUID);
 		TEST_CHECK(res.pong.payload.valListPayload.size() == 2);
 		TEST_CHECK(res.pong.payload.valListPayload[0].valString == nested1.valString);
 		TEST_CHECK(res.pong.payload.valListPayload[0].valDouble == nested1.valDouble);

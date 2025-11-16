@@ -30,5 +30,14 @@ type ClientTransport interface {
 	Connect() (Connection, error)
 }
 
+// ServiceAwareTransport is an optional interface that transports can implement
+// to register services by name for service-specific routing (e.g., NATS subjects)
+type ServiceAwareTransport interface {
+	ServerTransport
+	// RegisterService notifies the transport about a service registration
+	// This allows the transport to set up service-specific routing (e.g., NATS subjects)
+	RegisterService(serviceID uint64, serviceName string) error
+}
+
 // ConnectionHandler is called for each new connection on the server
 type ConnectionHandler func(Connection)
