@@ -44,12 +44,13 @@ cleanup() {
     echo -e "${GREEN}NATS server stopped and removed${NC}"
 }
 
-# Register cleanup function to run on script exit
+# ========================================
+# Go NATS Tests
+# ========================================
 trap cleanup EXIT INT TERM
-
-# Run the NATS tests
 echo -e "${YELLOW}Running NATS tests...${NC}"
-go test -v ./test/test_go -run "NATS"
+
+go test -v -count=1 ./test/test_go/service_nats_test.go ./test/test_go/service_nats_edge_test.go
 
 TEST_RESULT=$?
 

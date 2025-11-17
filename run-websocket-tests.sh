@@ -24,7 +24,7 @@ trap cleanup EXIT INT TERM
 # Go WebSocket Tests
 # ========================================
 echo -e "${YELLOW}Running Go WebSocket tests...${NC}"
-go test -v -count=1 ./test/test_go/service_websocket_test.go
+go test -v -count=1 ./test/test_go/service_websocket_test.go ./test/test_go/service_websocket_edge_test.go
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go WebSocket tests passed${NC}"
 else

@@ -215,23 +215,26 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 }
 
 func (c *Client) receiveMessage(ctx context.Context, ch chan *serialize.Reader) (*serialize.Reader, error) {
-	// TODO: respect any deadlines / timeouts on the context
+	select {
+	case reader := <-ch:
+		if reader == nil {
+			return nil, errors.New("channel closed")
+		}
 
-	reader := <-ch
-	if reader == nil {
-		return nil, errors.New("channel closed")
+		var responseType uint8
+		serialize.DeserializeUInt8(&responseType, reader)
+
+		if responseType == MessageResponse {
+			return reader, nil
+		}
+
+		var errMsg string
+		serialize.DeserializeString(&errMsg, reader)
+		return nil, errors.New(errMsg)
+	case <-ctx.Done():
+		// Context cancelled or timed out
+		return nil, ctx.Err()
 	}
-
-	var responseType uint8
-	serialize.DeserializeUInt8(&responseType, reader)
-
-	if responseType == MessageResponse {
-		return reader, nil
-	}
-
-	var errMsg string
-	serialize.DeserializeString(&errMsg, reader)
-	return nil, errors.New(errMsg)
 }
 
 func (c *Client) Call(ctx context.Context, serviceID uint64, methodID uint64, msg Message) (*serialize.Reader, error) {

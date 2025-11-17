@@ -3,7 +3,6 @@ package nats
 import (
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/nats-io/nats.go"
@@ -160,26 +159,19 @@ func (c *natsServerConnection) Close() error {
 }
 
 type ClientTransport struct {
-	URL     string
-	nc      *nats.Conn
-	mu      *sync.Mutex
-	timeout time.Duration
+	URL string
+	nc  *nats.Conn
+	mu  *sync.Mutex
 }
 
 type ClientTransportConfig struct {
-	URL     string
-	Timeout time.Duration
+	URL string
 }
 
 func NewClientTransport(config ClientTransportConfig) *ClientTransport {
-	timeout := config.Timeout
-	if timeout == 0 {
-		timeout = 5 * time.Second
-	}
 	return &ClientTransport{
-		URL:     config.URL,
-		mu:      &sync.Mutex{},
-		timeout: timeout,
+		URL: config.URL,
+		mu:  &sync.Mutex{},
 	}
 }
 
