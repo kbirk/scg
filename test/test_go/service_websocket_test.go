@@ -51,7 +51,8 @@ type pingpongServer struct {
 func (s *pingpongServer) Ping(ctx context.Context, req *pingpong.PingRequest) (*pingpong.PongResponse, error) {
 	return &pingpong.PongResponse{
 		Pong: pingpong.Pong{
-			Count: req.Ping.Count + 1,
+			Count:   req.Ping.Count + 1,
+			Payload: req.Ping.Payload,
 		},
 	}, nil
 }
@@ -621,4 +622,107 @@ func TestServerNestedGroupsMiddleware(t *testing.T) {
 
 	err = server.Shutdown(context.Background())
 	require.NoError(t, err)
+}
+
+func TestWebSocketConcurrency(t *testing.T) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: websocket.NewServerTransport(
+			websocket.ServerTransportConfig{
+				Port: 8004,
+			}),
+		ErrHandler: func(err error) {
+			t.Logf("Server error: %v", err)
+		},
+	})
+
+	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+
+	go func() {
+		server.ListenAndServe()
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: websocket.NewClientTransport(
+			websocket.ClientTransportConfig{
+				Host: "localhost",
+				Port: 8004,
+			}),
+		ErrHandler: func(err error) {
+			t.Logf("Client error: %v", err)
+		},
+	})
+
+	c := pingpong.NewPingPongClient(client)
+
+	// Test concurrent requests from multiple goroutines
+	const numGoroutines = 50
+	const requestsPerGoroutine = 20
+
+	var wg sync.WaitGroup
+	var successCount atomic.Int32
+	var errorCount atomic.Int32
+
+	t.Logf("Starting %d goroutines, each sending %d requests", numGoroutines, requestsPerGoroutine)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		goroutineID := i
+
+		go func(id int) {
+			defer wg.Done()
+
+			for j := 0; j < requestsPerGoroutine; j++ {
+				// Use unique count value to verify responses match requests
+				expectedCount := int32(id*requestsPerGoroutine + j)
+
+				resp, err := c.Ping(context.Background(), &pingpong.PingRequest{
+					Ping: pingpong.Ping{
+						Count: expectedCount,
+						Payload: pingpong.TestPayload{
+							ValString: fmt.Sprintf("goroutine-%d-request-%d", id, j),
+						},
+					},
+				})
+
+				if err != nil {
+					errorCount.Add(1)
+					t.Errorf("Goroutine %d, request %d failed: %v", id, j, err)
+					continue
+				}
+
+				// Verify we got the correct response for our request
+				if resp.Pong.Count != expectedCount+1 {
+					errorCount.Add(1)
+					t.Errorf("Goroutine %d, request %d: expected count %d, got %d",
+						id, j, expectedCount+1, resp.Pong.Count)
+					continue
+				}
+
+				expectedPayload := fmt.Sprintf("goroutine-%d-request-%d", id, j)
+				if resp.Pong.Payload.ValString != expectedPayload {
+					errorCount.Add(1)
+					t.Errorf("Goroutine %d, request %d: expected payload %q, got %q",
+						id, j, expectedPayload, resp.Pong.Payload.ValString)
+					continue
+				}
+
+				successCount.Add(1)
+			}
+		}(goroutineID)
+	}
+
+	wg.Wait()
+
+	totalRequests := numGoroutines * requestsPerGoroutine
+	success := int(successCount.Load())
+	errors := int(errorCount.Load())
+
+	t.Logf("Completed: %d successful, %d errors out of %d total requests",
+		success, errors, totalRequests)
+
+	assert.Equal(t, totalRequests, success, "All requests should succeed")
+	assert.Equal(t, 0, errors, "No errors should occur")
 }

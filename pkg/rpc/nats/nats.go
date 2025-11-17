@@ -197,9 +197,11 @@ func (t *ClientTransport) Connect() (rpc.Connection, error) {
 
 	// Create inbox and subscription for this connection
 	inbox := nats.NewInbox()
-	responseCh := make(chan *nats.Msg, 1)
+	responseCh := make(chan *nats.Msg)
 
-	sub, err := t.nc.ChanSubscribe(inbox, responseCh)
+	sub, err := t.nc.Subscribe(inbox, func(msg *nats.Msg) {
+		responseCh <- msg
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to inbox: %w", err)
 	}
@@ -237,12 +239,11 @@ func (c *natsClientConnection) Receive() ([]byte, error) {
 		return nil, fmt.Errorf("no request sent")
 	}
 
-	select {
-	case msg := <-c.responseCh:
-		return msg.Data, nil
-	case <-time.After(c.transport.timeout):
-		return nil, fmt.Errorf("NATS request timeout")
+	msg, ok := <-c.responseCh
+	if !ok {
+		return nil, fmt.Errorf("connection closed")
 	}
+	return msg.Data, nil
 }
 
 func (c *natsClientConnection) Close() error {
