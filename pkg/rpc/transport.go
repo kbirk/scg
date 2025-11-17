@@ -3,7 +3,8 @@ package rpc
 // Connection represents a bidirectional communication channel
 type Connection interface {
 	// Send sends a message to the remote peer
-	Send(data []byte) error
+	// serviceID is used by service-aware transports for routing (e.g., NATS subjects)
+	Send(data []byte, serviceID uint64) error
 
 	// Receive blocks until a message is received from the remote peer
 	Receive() ([]byte, error)

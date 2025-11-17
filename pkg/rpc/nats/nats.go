@@ -9,138 +9,49 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// NATSConnection implements the Connection interface for NATS
-type NATSConnection struct {
-	nc      *nats.Conn
-	sub     *nats.Subscription
-	subject string
-	inbox   string
-	mu      *sync.Mutex
-}
-
-func (c *NATSConnection) Send(data []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.nc == nil {
-		return fmt.Errorf("connection is closed")
-	}
-
-	return c.nc.Publish(c.subject, data)
-}
-
-func (c *NATSConnection) Receive() ([]byte, error) {
-	if c.sub == nil {
-		return nil, fmt.Errorf("no subscription available")
-	}
-
-	msg, err := c.sub.NextMsg(time.Hour * 24 * 365) // effectively no timeout
-	if err != nil {
-		if err == nats.ErrConnectionClosed || err == nats.ErrBadSubscription {
-			return nil, fmt.Errorf("connection closed")
-		}
-		return nil, err
-	}
-
-	// Update the subject to reply to the sender
-	c.mu.Lock()
-	if msg.Reply != "" {
-		c.subject = msg.Reply
-	}
-	c.mu.Unlock()
-
-	return msg.Data, nil
-}
-
-func (c *NATSConnection) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.sub != nil {
-		if err := c.sub.Unsubscribe(); err != nil {
-			return err
-		}
-		c.sub = nil
-	}
-
-	if c.nc != nil {
-		c.nc = nil
-	}
-
-	return nil
-}
-
-// ServerTransport implements ServerTransport for NATS
+// ServerTransport implements ServerTransport for NATS using request/response pattern
 type ServerTransport struct {
-	URL         string
-	nc          *nats.Conn
-	subs        map[uint64]*nats.Subscription // serviceID -> subscription
-	connCh      chan rpc.Connection
-	mu          *sync.Mutex
-	closed      bool
-	serviceInfo map[uint64]string // serviceID -> service name for subject generation
+	URL    string
+	nc     *nats.Conn
+	subs   map[uint64]*nats.Subscription
+	connCh chan rpc.Connection
+	mu     *sync.Mutex
+	closed bool
 }
 
 type ServerTransportConfig struct {
-	URL string // NATS server URL (e.g., "nats://localhost:4222")
+	URL string
 }
 
 func NewServerTransport(config ServerTransportConfig) *ServerTransport {
 	return &ServerTransport{
-		URL:         config.URL,
-		subs:        make(map[uint64]*nats.Subscription),
-		serviceInfo: make(map[uint64]string),
-		connCh:      make(chan rpc.Connection, 16), // buffered channel for connections
-		mu:          &sync.Mutex{},
+		URL:    config.URL,
+		subs:   make(map[uint64]*nats.Subscription),
+		connCh: make(chan rpc.Connection, 100),
+		mu:     &sync.Mutex{},
 	}
 }
 
-// RegisterService registers a service to listen on its own NATS subject
 func (t *ServerTransport) RegisterService(serviceID uint64, serviceName string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.nc == nil {
-		// Store for later when Listen() is called
-		t.serviceInfo[serviceID] = serviceName
+		// Store serviceID for later subscription when Listen() is called
+		t.subs[serviceID] = nil
 		return nil
 	}
 
-	// Already listening, subscribe immediately
-	return t.subscribeToService(serviceID, serviceName)
+	return t.subscribeToService(serviceID)
 }
 
-func (t *ServerTransport) subscribeToService(serviceID uint64, serviceName string) error {
-	subject := fmt.Sprintf("rpc.%s", serviceName)
+func (t *ServerTransport) subscribeToService(serviceID uint64) error {
+	subject := fmt.Sprintf("rpc.%d", serviceID)
 
 	sub, err := t.nc.Subscribe(subject, func(msg *nats.Msg) {
-		// The client sends an initial connection request with their inbox in msg.Reply
-		if msg.Reply == "" {
-			// No reply address, can't establish connection
-			return
-		}
-
-		// Create our own inbox for this connection
-		serverInbox := t.nc.NewRespInbox()
-
-		// Subscribe to our inbox for receiving messages from this client
-		serverSub, err := t.nc.SubscribeSync(serverInbox)
-		if err != nil {
-			return
-		}
-
-		conn := &NATSConnection{
-			nc:      t.nc,
-			sub:     serverSub,
-			subject: msg.Reply, // Client's inbox - this is where we send responses
-			inbox:   serverInbox,
-			mu:      &sync.Mutex{},
-		}
-
-		// Send our inbox back to the client so they know where to send messages
-		if err := t.nc.Publish(msg.Reply, []byte(serverInbox)); err != nil {
-			serverSub.Unsubscribe()
-			return
+		conn := &natsServerConnection{
+			msg:     msg,
+			request: msg.Data,
 		}
 
 		t.mu.Lock()
@@ -151,11 +62,8 @@ func (t *ServerTransport) subscribeToService(serviceID uint64, serviceName strin
 			select {
 			case t.connCh <- conn:
 			default:
-				// Channel is full, close the connection
-				conn.Close()
+				msg.Respond([]byte("server busy"))
 			}
-		} else {
-			conn.Close()
 		}
 	})
 
@@ -175,7 +83,6 @@ func (t *ServerTransport) Listen() error {
 		return fmt.Errorf("transport is already listening")
 	}
 
-	// Connect to NATS
 	nc, err := nats.Connect(t.URL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS: %w", err)
@@ -183,8 +90,8 @@ func (t *ServerTransport) Listen() error {
 	t.nc = nc
 
 	// Subscribe to all registered services
-	for serviceID, serviceName := range t.serviceInfo {
-		if err := t.subscribeToService(serviceID, serviceName); err != nil {
+	for serviceID := range t.subs {
+		if err := t.subscribeToService(serviceID); err != nil {
 			nc.Close()
 			return err
 		}
@@ -208,7 +115,6 @@ func (t *ServerTransport) Close() error {
 	t.closed = true
 	close(t.connCh)
 
-	// Unsubscribe from all services
 	for _, sub := range t.subs {
 		if err := sub.Unsubscribe(); err != nil {
 			return err
@@ -224,68 +130,127 @@ func (t *ServerTransport) Close() error {
 	return nil
 }
 
-// ClientTransport implements ClientTransport for NATS
+type natsServerConnection struct {
+	msg      *nats.Msg
+	request  []byte
+	mu       sync.Mutex
+	received bool
+}
+
+func (c *natsServerConnection) Send(data []byte, serviceID uint64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.msg.Respond(data)
+}
+
+func (c *natsServerConnection) Receive() ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.received {
+		return nil, fmt.Errorf("connection closed")
+	}
+
+	c.received = true
+	return c.request, nil
+}
+
+func (c *natsServerConnection) Close() error {
+	return nil
+}
+
 type ClientTransport struct {
 	URL     string
-	subject string
+	nc      *nats.Conn
+	mu      *sync.Mutex
+	timeout time.Duration
 }
 
 type ClientTransportConfig struct {
-	URL         string // NATS server URL (e.g., "nats://localhost:4222")
-	ServiceName string // Service name (e.g., "pingpong") - subject will be "rpc.pingpong"
+	URL     string
+	Timeout time.Duration
 }
 
 func NewClientTransport(config ClientTransportConfig) *ClientTransport {
-	subject := fmt.Sprintf("rpc.%s", config.ServiceName)
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
 	return &ClientTransport{
 		URL:     config.URL,
-		subject: subject,
+		mu:      &sync.Mutex{},
+		timeout: timeout,
 	}
 }
 
 func (t *ClientTransport) Connect() (rpc.Connection, error) {
-	// Connect to NATS
-	nc, err := nats.Connect(t.URL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.nc == nil {
+		nc, err := nats.Connect(t.URL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to NATS: %w", err)
+		}
+		t.nc = nc
 	}
 
-	// Create an inbox for receiving messages from the server
-	clientInbox := nc.NewRespInbox()
+	// Create inbox and subscription for this connection
+	inbox := nats.NewInbox()
+	responseCh := make(chan *nats.Msg, 1)
 
-	// Subscribe to our inbox BEFORE sending the connection request
-	clientSub, err := nc.SubscribeSync(clientInbox)
+	sub, err := t.nc.ChanSubscribe(inbox, responseCh)
 	if err != nil {
-		nc.Close()
 		return nil, fmt.Errorf("failed to subscribe to inbox: %w", err)
 	}
 
-	// Send connection request with our inbox as the reply address
-	err = nc.PublishRequest(t.subject, clientInbox, nil)
-	if err != nil {
-		clientSub.Unsubscribe()
-		nc.Close()
-		return nil, fmt.Errorf("failed to send connection request: %w", err)
+	return &natsClientConnection{
+		transport:  t,
+		inbox:      inbox,
+		sub:        sub,
+		responseCh: responseCh,
+	}, nil
+}
+
+// natsClientConnection implements Connection for NATS
+type natsClientConnection struct {
+	transport  *ClientTransport
+	inbox      string
+	sub        *nats.Subscription
+	responseCh chan *nats.Msg
+}
+
+func (c *natsClientConnection) Send(data []byte, serviceID uint64) error {
+	subject := fmt.Sprintf("rpc.%d", serviceID)
+
+	msg := &nats.Msg{
+		Subject: subject,
+		Reply:   c.inbox,
+		Data:    data,
 	}
 
-	// Wait for the server to send us its inbox
-	msg, err := clientSub.NextMsg(5 * time.Second)
-	if err != nil {
-		clientSub.Unsubscribe()
-		nc.Close()
-		return nil, fmt.Errorf("failed to receive server inbox: %w", err)
+	return c.transport.nc.PublishMsg(msg)
+}
+
+func (c *natsClientConnection) Receive() ([]byte, error) {
+	if c.responseCh == nil {
+		return nil, fmt.Errorf("no request sent")
 	}
 
-	// The message contains the server's inbox
-	serverInbox := string(msg.Data)
-
-	conn := &NATSConnection{
-		nc:      nc,
-		sub:     clientSub,
-		subject: serverInbox, // Server's inbox - where we send RPC messages
-		inbox:   clientInbox,
-		mu:      &sync.Mutex{},
+	select {
+	case msg := <-c.responseCh:
+		return msg.Data, nil
+	case <-time.After(c.transport.timeout):
+		return nil, fmt.Errorf("NATS request timeout")
 	}
+}
 
-	return conn, nil
+func (c *natsClientConnection) Close() error {
+	if c.sub != nil {
+		c.sub.Unsubscribe()
+	}
+	if c.responseCh != nil {
+		close(c.responseCh)
+	}
+	return nil
 }

@@ -274,7 +274,7 @@ func (s *Server) handleConnection(conn Connection) {
 			bs = service.HandleWrapper(ctx, middleware, requestID, reader)
 
 			// send response
-			err = conn.Send(bs)
+			err = conn.Send(bs, serviceID)
 			if err != nil {
 				s.handleError(err)
 				return

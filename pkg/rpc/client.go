@@ -51,21 +51,21 @@ func (c *Client) GetMiddleware() []Middleware {
 }
 
 func (c *Client) handleError(err error) error {
-
 	c.logError("Encountered error: " + err.Error())
 	if c.conf.ErrHandler != nil {
 		c.conf.ErrHandler(err)
 	}
 
 	c.mu.Lock()
-
-	c.conn.Close()
-	c.conn = nil
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
 	requests := c.requests
 	c.requests = make(map[uint64]chan *serialize.Reader)
-
 	c.mu.Unlock()
 
+	// Notify all pending requests of the error
 	go func() {
 		for _, ch := range requests {
 			ch <- nil
@@ -166,12 +166,13 @@ func (c *Client) connectUnsafe() error {
 }
 
 func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uint64, msg Message) (chan *serialize.Reader, error) {
-
+	// Get next request ID
 	c.mu.Lock()
 	requestID := c.requestID
-	c.requestID += 1
+	c.requestID++
 	c.mu.Unlock()
 
+	// Serialize message
 	writer := serialize.NewFixedSizeWriter(
 		int(serialize.BitsToBytes(
 			BitSizePrefix() +
@@ -189,20 +190,24 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 	msg.Serialize(writer)
 	bs := writer.Bytes()
 
+	// Ensure connection and register request
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	err := c.connectUnsafe()
 	if err != nil {
+		c.mu.Unlock()
 		return nil, err
 	}
 
 	ch := make(chan *serialize.Reader)
 	c.requests[requestID] = ch
+	c.mu.Unlock()
 
-	err = c.conn.Send(bs)
+	// Send message
+	err = c.conn.Send(bs, serviceID)
 	if err != nil {
+		c.mu.Lock()
 		delete(c.requests, requestID)
+		c.mu.Unlock()
 		return nil, c.handleError(err)
 	}
 
@@ -210,7 +215,6 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 }
 
 func (c *Client) receiveMessage(ctx context.Context, ch chan *serialize.Reader) (*serialize.Reader, error) {
-
 	// TODO: respect any deadlines / timeouts on the context
 
 	reader := <-ch
@@ -231,7 +235,6 @@ func (c *Client) receiveMessage(ctx context.Context, ch chan *serialize.Reader) 
 }
 
 func (c *Client) Call(ctx context.Context, serviceID uint64, methodID uint64, msg Message) (*serialize.Reader, error) {
-
 	ch, err := c.sendMessage(ctx, serviceID, methodID, msg)
 	if err != nil {
 		return nil, err

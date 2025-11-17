@@ -67,8 +67,7 @@ func TestPingPongNATS(t *testing.T) {
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: nats.NewClientTransport(
 			nats.ClientTransportConfig{
-				URL:         natsURL,
-				ServiceName: "PingPong",
+				URL: natsURL,
 			}),
 		ErrHandler: func(err error) {
 			t.Logf("Client error: %v", err)
@@ -135,8 +134,7 @@ func TestNATSMiddleware(t *testing.T) {
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: nats.NewClientTransport(
 			nats.ClientTransportConfig{
-				URL:         natsURL,
-				ServiceName: "PingPong",
+				URL: natsURL,
 			}),
 	})
 
@@ -209,32 +207,19 @@ func TestNATSServiceIsolation(t *testing.T) {
 	defer server1.Shutdown(context.Background())
 	defer server2.Shutdown(context.Background())
 
-	// Client A: Connects to TesterA service (should route to Server 1)
-	clientA := rpc.NewClient(rpc.ClientConfig{
+	// Single client can connect to both services
+	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: nats.NewClientTransport(
 			nats.ClientTransportConfig{
-				URL:         natsURL,
-				ServiceName: "TesterA",
+				URL: natsURL,
 			}),
 		ErrHandler: func(err error) {
-			t.Logf("ClientA error: %v", err)
+			t.Logf("Client error: %v", err)
 		},
 	})
 
-	// Client B: Connects to TesterB service (should route to Server 2)
-	clientB := rpc.NewClient(rpc.ClientConfig{
-		Transport: nats.NewClientTransport(
-			nats.ClientTransportConfig{
-				URL:         natsURL,
-				ServiceName: "TesterB",
-			}),
-		ErrHandler: func(err error) {
-			t.Logf("ClientB error: %v", err)
-		},
-	})
-
-	testerAClient := basic.NewTesterAClient(clientA)
-	testerBClient := basic.NewTesterBClient(clientB)
+	testerAClient := basic.NewTesterAClient(client)
+	testerBClient := basic.NewTesterBClient(client)
 
 	// Test TesterA - should be handled by Server 1
 	respA, err := testerAClient.Test(context.Background(), &basic.TestRequestA{
@@ -301,26 +286,16 @@ func TestNATSMultipleServicesOnOneServer(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	defer server.Shutdown(context.Background())
 
-	// Client A: Connects to TesterA service
-	clientA := rpc.NewClient(rpc.ClientConfig{
+	// Single client can connect to both services on the same server
+	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: nats.NewClientTransport(
 			nats.ClientTransportConfig{
-				URL:         natsURL,
-				ServiceName: "TesterA",
+				URL: natsURL,
 			}),
 	})
 
-	// Client B: Connects to TesterB service
-	clientB := rpc.NewClient(rpc.ClientConfig{
-		Transport: nats.NewClientTransport(
-			nats.ClientTransportConfig{
-				URL:         natsURL,
-				ServiceName: "TesterB",
-			}),
-	})
-
-	testerAClient := basic.NewTesterAClient(clientA)
-	testerBClient := basic.NewTesterBClient(clientB)
+	testerAClient := basic.NewTesterAClient(client)
+	testerBClient := basic.NewTesterBClient(client)
 
 	// Both should work from the same server
 	respA, err := testerAClient.Test(context.Background(), &basic.TestRequestA{A: "multi-a"})

@@ -22,7 +22,7 @@ type WebSocketConnection struct {
 	mu   *sync.Mutex
 }
 
-func (c *WebSocketConnection) Send(data []byte) error {
+func (c *WebSocketConnection) Send(data []byte, serviceID uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.conn.WriteMessage(websocket.BinaryMessage, data)
