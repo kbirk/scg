@@ -152,10 +152,10 @@ private:
 
 	LogType type_ = LogType::ACCESS;
 	LogLevel level_ = LogLevel::NONE;
-	std::function<void(std::string)> debugLogger_ = [](std::string msg) {};
-	std::function<void(std::string)> infoLogger_ = [](std::string msg) {};
-	std::function<void(std::string)> warnLogger_ = [](std::string msg) {};
-	std::function<void(std::string)> errorLogger_ = [](std::string msg) {};
+	std::function<void(std::string)> debugLogger_ = [](std::string) {};
+	std::function<void(std::string)> infoLogger_ = [](std::string) {};
+	std::function<void(std::string)> warnLogger_ = [](std::string) {};
+	std::function<void(std::string)> errorLogger_ = [](std::string) {};
 };
 
 }

@@ -81,6 +81,9 @@ func TestPingPong(t *testing.T) {
 		server.ListenAndServe()
 	}()
 
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
+
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(
 			websocket.ClientTransportConfig{
@@ -142,6 +145,9 @@ func TestPingPongConcurrent(t *testing.T) {
 	go func() {
 		server.ListenAndServe()
 	}()
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(
@@ -212,6 +218,9 @@ func TestPingPongTLS(t *testing.T) {
 		server.ListenAndServe()
 	}()
 
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
+
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(websocket.ClientTransportConfig{
 			Host: "localhost",
@@ -268,6 +277,9 @@ func TestPingPongTLSAndAuth(t *testing.T) {
 	go func() {
 		server.ListenAndServe()
 	}()
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(websocket.ClientTransportConfig{
@@ -329,6 +341,9 @@ func TestPingPongFail(t *testing.T) {
 		server.ListenAndServe()
 	}()
 
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
+
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(
 			websocket.ClientTransportConfig{
@@ -370,6 +385,9 @@ func TestPingPongAuthFail(t *testing.T) {
 	go func() {
 		server.ListenAndServe()
 	}()
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(
@@ -421,6 +439,9 @@ func TestPingPongTLSWithGroupsAndAuth(t *testing.T) {
 	go func() {
 		server.ListenAndServe()
 	}()
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(
@@ -532,6 +553,9 @@ func TestServerGroupsMiddleware(t *testing.T) {
 		server.ListenAndServe()
 	}()
 
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
+
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(
 			websocket.ClientTransportConfig{
@@ -588,6 +612,9 @@ func TestServerNestedGroupsMiddleware(t *testing.T) {
 	go func() {
 		server.ListenAndServe()
 	}()
+
+	// Give server time to start
+	time.Sleep(100 * time.Millisecond)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: websocket.NewClientTransport(

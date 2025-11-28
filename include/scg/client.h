@@ -112,7 +112,7 @@ protected:
 		status_ = ConnectionStatus::CONNECTED;
 
 		// Set up handlers
-		connection_->setFailHandler([this](const error::Error& err) {
+		connection_->setFailHandler([this](const error::Error&) {
 			std::lock_guard<std::mutex> lock(mu_);
 			status_ = ConnectionStatus::FAILED;
 		});

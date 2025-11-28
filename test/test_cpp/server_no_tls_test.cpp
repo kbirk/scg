@@ -1,0 +1,91 @@
+#include <cstdio>
+#include <thread>
+#include <chrono>
+#include <atomic>
+#include <csignal>
+
+#include "scg/server.h"
+#include "scg/ws/transport_server_no_tls.h"
+#include "pingpong/pingpong.h"
+
+std::atomic<bool> running(true);
+
+void signalHandler(int signum) {
+    printf("Interrupt signal (%d) received.\n", signum);
+    running = false;
+}
+
+class PingPongServerImpl : public pingpong::PingPongServer {
+public:
+    std::pair<pingpong::PongResponse, scg::error::Error> ping(const scg::context::Context& ctx, const pingpong::PingRequest& req) override {
+        // Echo back the payload with incremented count
+        pingpong::PongResponse response;
+        response.pong.count = req.ping.count + 1;
+        response.pong.payload = req.ping.payload;
+
+        return std::make_pair(response, nullptr);
+    }
+};
+
+int main() {
+    // Set up signal handler for graceful shutdown
+    signal(SIGINT, signalHandler);
+    signal(SIGTERM, signalHandler);
+
+
+
+    // Configure logging
+    scg::log::LoggingConfig logging;
+    logging.level = scg::log::LogLevel::INFO;
+    logging.debugLogger = [](std::string msg) {
+        printf("DEBUG: %s\n", msg.c_str());
+    };
+    logging.infoLogger = [](std::string msg) {
+        printf("INFO: %s\n", msg.c_str());
+    };
+    logging.warnLogger = [](std::string msg) {
+        printf("WARN: %s\n", msg.c_str());
+    };
+    logging.errorLogger = [](std::string msg) {
+        printf("ERROR: %s\n", msg.c_str());
+    };
+
+    // Configure transport
+    scg::ws::ServerTransportConfig transportConfig;
+    transportConfig.port = 8000;
+    transportConfig.logging = logging;
+
+    // Configure server
+    scg::rpc::ServerConfig config;
+    config.transport = std::make_shared<scg::ws::ServerTransportNoTLS>(transportConfig);
+    config.errorHandler = [](const scg::error::Error& err) {
+        printf("Server error: %s\n", err.message.c_str());
+    };
+
+    // Create server
+    auto server = std::make_shared<scg::rpc::Server>(config);
+
+    // Create and register service implementation
+    auto impl = std::make_shared<PingPongServerImpl>();
+    pingpong::registerPingPongServer(server.get(), impl.get());
+
+    // Start server (non-blocking)
+    auto err = server->start();
+    if (err) {
+        return 1;
+    }
+
+    // Main loop - poll for messages
+    while (running) {
+        // Process any pending messages/connections
+        server->process();
+
+        // Small sleep to avoid busy-waiting
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    // Stop server
+    server->stop();
+
+    return 0;
+}

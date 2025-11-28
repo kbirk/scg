@@ -42,5 +42,12 @@ add_executable(client_no_tls_tests "client_no_tls_tests.cpp")
 # Client with TLS tests
 add_executable(client_tls_tests "client_tls_tests.cpp")
 
+# Server without TLS test
+add_executable(server_no_tls_test "server_no_tls_test.cpp")
+
+# Macro test
+add_executable(macro_test "macro_test.cpp")
+
 # Link with libs
 target_link_libraries(client_tls_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(server_no_tls_test OpenSSL::SSL OpenSSL::Crypto)

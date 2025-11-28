@@ -16,7 +16,7 @@
 namespace scg {
 namespace serialize {
 
-inline constexpr uint32_t bit_size(bool value)
+inline constexpr uint32_t bit_size(bool)
 {
 	return 1;
 }
@@ -39,7 +39,7 @@ inline error::Error deserialize(bool& value, ReaderType& reader)
 	return nullptr;
 }
 
-inline constexpr uint32_t bit_size(uint8_t value)
+inline constexpr uint32_t bit_size(uint8_t)
 {
 	return 8;
 }
@@ -210,7 +210,7 @@ inline error::Error deserialize(int64_t& value, ReaderType& reader)
 	return var_decode_int(value, reader, 8);
 }
 
-inline constexpr uint32_t bit_size(float32_t value)
+inline constexpr uint32_t bit_size(float32_t)
 {
 	return bytes_to_bits(4);
 }
@@ -244,7 +244,7 @@ inline error::Error deserialize(float32_t& value, ReaderType& reader)
 	return nullptr;
 }
 
-inline constexpr uint32_t bit_size(float64_t value)
+inline constexpr uint32_t bit_size(float64_t)
 {
 	return bytes_to_bits(8);
 }
@@ -420,7 +420,7 @@ inline void serialize(WriterType& writer, const std::vector<T>& value)
 template <typename ReaderType, typename T>
 inline error::Error deserialize(std::vector<T>& value, ReaderType& reader)
 {
-	uint32_t size;
+	uint32_t size = 0;
 	auto err = deserialize(size, reader);
 	if (err) {
 		return err;
@@ -458,15 +458,15 @@ inline void serialize(WriterType& writer, const std::map<K,V>& value)
 template <typename K, typename V, typename ReaderType>
 inline error::Error deserialize(std::map<K,V>& value, ReaderType& reader)
 {
-	uint32_t size;
+	uint32_t size = 0;
 	auto err = deserialize(size, reader);
 	if (err) {
 		return err;
 	}
 
 	for (auto i = uint32_t(0); i < size; i++) {
-		K key;
-		V val;
+		K key{};
+		V val{};
 		err = deserialize(key, reader);
 		if (err) {
 			return err;
@@ -503,7 +503,7 @@ inline void serialize(WriterType& writer, const std::unordered_map<K,V>& value)
 template <typename K, typename V, typename ReaderType>
 inline error::Error deserialize(std::unordered_map<K,V>& value, ReaderType& reader)
 {
-	uint32_t size;
+	uint32_t size = 0;
 	auto err = deserialize(size, reader);
 	if (err) {
 		return err;
@@ -511,8 +511,8 @@ inline error::Error deserialize(std::unordered_map<K,V>& value, ReaderType& read
 	value.reserve(size);
 
 	for (auto i = uint32_t(0); i < size; i++) {
-		K key;
-		V val;
+		K key{};
+		V val{};
 		err = deserialize(key, reader);
 		if (err) {
 			return err;
@@ -548,7 +548,7 @@ inline void serialize(WriterType& writer, const std::set<T>& value)
 template <typename ReaderType, typename T>
 inline error::Error deserialize(std::set<T>& value, ReaderType& reader)
 {
-	uint32_t size;
+	uint32_t size = 0;
 	auto err = deserialize(size, reader);
 	if (err) {
 		return err;
@@ -586,7 +586,7 @@ inline void serialize(WriterType& writer, const std::unordered_set<T>& value)
 template <typename ReaderType, typename T>
 inline error::Error deserialize(std::unordered_set<T>& value, ReaderType& reader)
 {
-	uint32_t size;
+	uint32_t size = 0;
 	auto err = deserialize(size, reader);
 	if (err) {
 		return err;

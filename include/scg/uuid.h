@@ -138,7 +138,7 @@ public:
 		return is;
 	}
 
-	friend inline uint32_t bit_size(const uuid& value)
+	friend inline uint32_t bit_size(const uuid&)
 	{
 		return scg::serialize::bytes_to_bits(16);
 	}

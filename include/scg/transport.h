@@ -41,5 +41,20 @@ public:
     virtual void shutdown() = 0;
 };
 
+// Server transport interface
+class ServerTransport {
+public:
+    virtual ~ServerTransport() = default;
+
+    // Start listening for incoming connections (non-blocking)
+    virtual error::Error listen() = 0;
+
+    // Accept a new connection (non-blocking, returns nullptr if no connection available)
+    virtual std::pair<std::shared_ptr<Connection>, error::Error> accept() = 0;
+
+    // Close the transport and stop listening
+    virtual error::Error close() = 0;
+};
+
 } // namespace rpc
 } // namespace scg

@@ -27,7 +27,7 @@ inline constexpr uint8_t get_bit_offset(uint32_t x) {
 	return x & 0x7; // same as (x % 8)
 }
 
-inline uint32_t var_uint_bit_size(uint64_t val, uint32_t num_bytes)
+inline constexpr uint32_t var_uint_bit_size(uint64_t val, uint32_t num_bytes)
 {
 	uint32_t size = 0;
 	for (uint32_t i = 0; i < num_bytes; ++i) {
@@ -85,17 +85,17 @@ inline error::Error var_decode_uint(uint64_t& val, ReaderType& reader, uint32_t 
 }
 
 
-inline uint64_t zigzagEncode(int64_t val)
+inline constexpr uint64_t zigzagEncode(int64_t val)
 {
 	return (static_cast<uint64_t>(val) << 1) ^ static_cast<uint64_t>(val>>63);
 }
 
-inline int64_t zigzagDecode(uint64_t encoded )
+inline constexpr int64_t zigzagDecode(uint64_t encoded )
 {
 	return static_cast<int64_t>((encoded >> 1) ^ (-(encoded & 1)));
 }
 
-inline uint32_t var_int_bit_size(int64_t val, uint32_t num_bytes)
+inline constexpr uint32_t var_int_bit_size(int64_t val, uint32_t num_bytes)
 {
 	uint64_t uv = 0;
 	if (val < 0) {

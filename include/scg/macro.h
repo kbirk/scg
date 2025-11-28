@@ -1,14 +1,5 @@
 #pragma once
 
-// Disable -Wgnu-zero-variadic-macro-arguments warning
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
-#endif
-
 // Follow is some magic from: https://stackoverflow.com/questions/66556552/a-way-to-count-the-number-of-va-args-arguments-including-0-without-compile
 #define SCG_EXPAND(x) x
 
@@ -23,13 +14,15 @@
 	_40,_39,_38,_37,_36,_35,_34,_33,_32,_31,_30,_29,_28,_27,_26,_25,_24,_23,_22,_21, \
 	_20,_19,_18,_17,_16,_15,_14,_13,_12,_11,_10,_9,_8,_7,_6,_5,_4,_3,_2,X_,...) X_
 
+#define SCG_GET_TAIL(x, ...) __VA_ARGS__
+
 // Returns whether __VA_ARGS__ has a comma (up to 100 arguments)
 #define SCG_HAS_COMMA(...) SCG_EXPAND(SCG_ARG_100(__VA_ARGS__, \
 	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, \
 	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, \
 	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, \
 	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ,1, \
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0))
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0))
 
 // Produces a comma if followed by a parenthesis
 #define SCG_TRIGGER_PARENTHESIS_(...) ,
@@ -66,7 +59,7 @@
 	80,79,78,77,76,75,74,73,72,71,70,69,68,67,66,65,64,63,62,61, \
 	60,59,58,57,56,55,54,53,52,51,50,49,48,47,46,45,44,43,42,41, \
 	40,39,38,37,36,35,34,33,32,31,30,29,28,27,26,25,24,23,22,21, \
-	20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1))
+	20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0))
 #define SCG_NARG(...) SCG_CONCAT(SCG_VAR_COUNT_EMPTY_, IS_EMPTY(__VA_ARGS__))(__VA_ARGS__)
 
 #define SCG_APPLY_F0(f,_0)
@@ -160,7 +153,23 @@
 
 
 // Serialize public fields
-#define SCG_SERIALIZABLE_PUBLIC(ClassName, ...) \
+#define SCG_SERIALIZABLE_PUBLIC(...) \
+	SCG_CONCAT(SCG_SERIALIZABLE_PUBLIC_IMPL_, SCG_HAS_COMMA(__VA_ARGS__))(__VA_ARGS__)
+
+#define SCG_SERIALIZABLE_PUBLIC_IMPL_0(ClassName) \
+\
+template <typename WriterType> \
+void serialize(WriterType&, const ClassName&)\
+{\
+}\
+template <typename ReaderType> \
+scg::error::Error deserialize(ClassName&, ReaderType&)\
+{\
+	return nullptr;\
+}\
+static_assert(true, "")
+
+#define SCG_SERIALIZABLE_PUBLIC_IMPL_1(ClassName, ...) \
 \
 template <typename WriterType> \
 void serialize(WriterType& writer, const ClassName& arg)\
@@ -173,11 +182,28 @@ scg::error::Error deserialize(ClassName& arg, ReaderType& reader)\
 	scg::error::Error err;\
 	SCG_MAP_MEMBER(SCG_DESERIALIZE_MEMBER, __VA_ARGS__)\
 	return nullptr;\
-}
+}\
+static_assert(true, "")
 
 
 // Serialize private fields
-#define SCG_SERIALIZABLE_PRIVATE(ClassName, ...) \
+#define SCG_SERIALIZABLE_PRIVATE(...) \
+	SCG_CONCAT(SCG_SERIALIZABLE_PRIVATE_IMPL_, SCG_HAS_COMMA(__VA_ARGS__))(__VA_ARGS__)
+
+#define SCG_SERIALIZABLE_PRIVATE_IMPL_0(ClassName) \
+\
+template <typename WriterType> \
+friend void serialize(WriterType&, const ClassName&)\
+{\
+}\
+template <typename ReaderType> \
+friend scg::error::Error deserialize(ClassName&, ReaderType&)\
+{\
+	return nullptr;\
+}\
+static_assert(true, "")
+
+#define SCG_SERIALIZABLE_PRIVATE_IMPL_1(ClassName, ...) \
 \
 template <typename WriterType> \
 friend void serialize(WriterType& writer, const ClassName& arg)\
@@ -190,11 +216,31 @@ friend scg::error::Error deserialize(ClassName& arg, ReaderType& reader)\
 	scg::error::Error err;\
 	SCG_MAP_MEMBER(SCG_DESERIALIZE_MEMBER, __VA_ARGS__)\
 	return nullptr;\
-}
+}\
+static_assert(true, "")
 
 
 // Serialize public fields with base class
-#define SCG_SERIALIZABLE_DERIVED_PUBLIC(DerivedName, BaseName, ...) \
+#define SCG_SERIALIZABLE_DERIVED_PUBLIC(...) \
+	SCG_CONCAT(SCG_SERIALIZABLE_DERIVED_PUBLIC_IMPL_, SCG_HAS_COMMA(SCG_GET_TAIL(__VA_ARGS__)))(__VA_ARGS__)
+
+#define SCG_SERIALIZABLE_DERIVED_PUBLIC_IMPL_0(DerivedName, BaseName) \
+\
+template <typename WriterType> \
+void serialize(WriterType& writer, const DerivedName& arg) \
+{\
+	writer.write(static_cast<BaseName>(arg)); \
+}\
+template <typename ReaderType> \
+scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
+{\
+	auto err = reader.read(static_cast<BaseName&>(arg)); \
+	if (err) { return err; } \
+	return nullptr;\
+}\
+static_assert(true, "")
+
+#define SCG_SERIALIZABLE_DERIVED_PUBLIC_IMPL_1(DerivedName, BaseName, ...) \
 \
 template <typename WriterType> \
 void serialize(WriterType& writer, const DerivedName& arg) \
@@ -209,11 +255,31 @@ scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
 	if (err) { return err; } \
 	SCG_MAP_MEMBER(SCG_DESERIALIZE_MEMBER, __VA_ARGS__)\
 	return nullptr;\
-}
+}\
+static_assert(true, "")
 
 
 // Serialize private fields with base class
-#define SCG_SERIALIZABLE_DERIVED_PRIVATE(DerivedName, BaseName, ...) \
+#define SCG_SERIALIZABLE_DERIVED_PRIVATE(...) \
+	SCG_CONCAT(SCG_SERIALIZABLE_DERIVED_PRIVATE_IMPL_, SCG_HAS_COMMA(SCG_GET_TAIL(__VA_ARGS__)))(__VA_ARGS__)
+
+#define SCG_SERIALIZABLE_DERIVED_PRIVATE_IMPL_0(DerivedName, BaseName) \
+\
+template <typename WriterType> \
+friend void serialize(WriterType& writer, const DerivedName& arg)\
+{\
+	writer.write(static_cast<BaseName>(arg)); \
+}\
+template <typename ReaderType> \
+friend scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
+{\
+	auto err = reader.read(static_cast<BaseName&>(arg)); \
+	if (err) { return err; } \
+	return nullptr;\
+}\
+static_assert(true, "")
+
+#define SCG_SERIALIZABLE_DERIVED_PRIVATE_IMPL_1(DerivedName, BaseName, ...) \
 \
 template <typename WriterType> \
 friend void serialize(WriterType& writer, const DerivedName& arg)\
@@ -228,4 +294,5 @@ friend scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
 	if (err) { return err; } \
 	SCG_MAP_MEMBER(SCG_DESERIALIZE_MEMBER, __VA_ARGS__)\
 	return nullptr;\
-}
+}\
+static_assert(true, "")

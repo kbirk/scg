@@ -4,6 +4,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <istream>
 #include <cassert>
 #include <type_traits>
 
