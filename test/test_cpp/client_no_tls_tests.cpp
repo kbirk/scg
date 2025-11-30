@@ -6,7 +6,7 @@
 
 #include "scg/serialize.h"
 #include "scg/client.h"
-#include "scg/ws/transport_no_tls.h"
+#include "scg/ws/transport_client_no_tls.h"
 #include "pingpong/pingpong.h"
 
 void test_pingpong_client_no_tls() {

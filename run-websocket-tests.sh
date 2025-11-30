@@ -41,7 +41,7 @@ trap cleanup EXIT INT TERM
 # Go WebSocket Tests
 # ========================================
 echo -e "${YELLOW}Running Go WebSocket tests...${NC}"
-run_with_timeout "Go WebSocket tests" go test -v -count=1 ./test/test_go/service_websocket_test.go ./test/test_go/service_websocket_edge_test.go
+run_with_timeout "Go WebSocket tests" go test -v -count=1 ./test/test_go/service_websocket_test.go ./test/test_go/service_websocket_edge_test.go ./test/test_go/test_utils.go
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go WebSocket tests passed${NC}"
 else
@@ -147,7 +147,7 @@ echo -e "${GREEN}C++ server started (pid: $pid)${NC}"
 
 # Run Go client tests (only the basic ones without TLS)
 cd ..
-if run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestPingPong$ ./test/test_go/service_websocket_test.go; then
+if run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestPingPong$ ./test/test_go/service_websocket_test.go ./test/test_go/test_utils.go; then
 	echo -e "${GREEN}Go Client + C++ Server tests passed${NC}"
 else
 	echo -e "${RED}Go Client + C++ Server tests failed${NC}"

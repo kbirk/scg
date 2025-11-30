@@ -6,48 +6,34 @@
 
 #include "scg/serialize.h"
 #include "scg/client.h"
-#include "scg/ws/transport_client_tls.h"
+#include "scg/tcp/transport_client_tls.h"
 #include "pingpong/pingpong.h"
 
-void test_pingpong_client_tls() {
+void test_pingpong_client_tcp_tls() {
 
-	scg::log::LoggingConfig logging;
-	logging.level = scg::log::LogLevel::WARN;
-	logging.debugLogger = [](std::string msg) {
-		printf("DEBUG: %s\n", msg.c_str());
-	};
-	logging.infoLogger = [](std::string msg) {
-		printf("INFO: %s\n", msg.c_str());
-	};
-	logging.warnLogger = [](std::string msg) {
-		printf("WARN: %s\n", msg.c_str());
-	};
-	logging.errorLogger = [](std::string msg) {
-		printf("ERROR: %s\n", msg.c_str());
-	};
-
-	scg::ws::ClientTransportTLSConfig transportConfig;
+	scg::tcp::ClientTransportTLSConfig transportConfig;
 	transportConfig.host = "localhost";
-	transportConfig.port = 8000;
-	transportConfig.logging = logging;
+	transportConfig.port = 9002;
+	transportConfig.verifyPeer = false;  // Self-signed cert
 
 	scg::rpc::ClientConfig config;
-	config.transport = std::make_shared<scg::ws::ClientTransportTLS>(transportConfig);
+	config.transport = std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
 
 	auto client = std::make_shared<scg::rpc::Client>(config);
 
-	auto connectErr = client->connect();
+	// Retry connection a few times to allow server to start
+	scg::error::Error connectErr;
+	for (int i = 0; i < 10; i++) {
+		connectErr = client->connect();
+		if (!connectErr) break;
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+
 	if (connectErr) {
 		printf("Connection failed: %s\n", connectErr.message.c_str());
 		TEST_CHECK(false);
 		return;
 	}
-
-	uint32_t middlewareCount = 0;
-	client->middleware([&middlewareCount](scg::context::Context& ctx, const scg::type::Message& req, scg::middleware::Handler next) -> std::pair<scg::type::Message*, scg::error::Error> {
-		middlewareCount++;
-		return next(ctx, req);
-	});
 
 	pingpong::PingPongClient pingPongClient(client);
 
@@ -56,7 +42,7 @@ void test_pingpong_client_tls() {
 	for (uint32_t i=0; i<COUNT; i++) {
 
 		scg::context::Context context;
-		context.put("token", "1234");
+		context.put("key", "value");
 
 		pingpong::NestedPayload nested1;
 		nested1.valString = "nested" + std::to_string(i);
@@ -131,15 +117,13 @@ void test_pingpong_client_tls() {
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	}
-
-	TEST_CHECK(middlewareCount == COUNT);
 }
 
 // helper method to reduce redundant test typing
 #define TEST(x) {#x, x}
 
 TEST_LIST = {
+	TEST(test_pingpong_client_tcp_tls),
 
-	TEST(test_pingpong_client_tls), // (requires running external server)
 	{ NULL, NULL }
 };

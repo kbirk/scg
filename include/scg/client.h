@@ -112,14 +112,28 @@ protected:
 		status_ = ConnectionStatus::CONNECTED;
 
 		// Set up handlers
-		connection_->setFailHandler([this](const error::Error&) {
+		connection_->setFailHandler([this](const error::Error& err) {
 			std::lock_guard<std::mutex> lock(mu_);
 			status_ = ConnectionStatus::FAILED;
+            // Fail all pending requests
+            for (auto& pair : requests_) {
+                try {
+                    pair.second->set_exception(std::make_exception_ptr(std::runtime_error("Connection failed: " + err.message)));
+                } catch (...) {}
+            }
+            requests_.clear();
 		});
 
 		connection_->setCloseHandler([this]() {
 			std::lock_guard<std::mutex> lock(mu_);
 			status_ = ConnectionStatus::NOT_CONNECTED;
+            // Fail all pending requests
+            for (auto& pair : requests_) {
+                try {
+                    pair.second->set_exception(std::make_exception_ptr(std::runtime_error("Connection closed")));
+                } catch (...) {}
+            }
+            requests_.clear();
 		});
 
 		connection_->setMessageHandler([this](const std::vector<uint8_t>& data) {
