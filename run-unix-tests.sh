@@ -33,20 +33,22 @@ cleanup() {
 		kill $pid 2>/dev/null || true
 		wait $pid 2>/dev/null || true
 	fi
+	# Clean up socket file
+	rm -f /tmp/scg_test_unix.sock
 }
 
 # Register cleanup function to run on script exit
 trap cleanup EXIT INT TERM
 
 # ========================================
-# Go TCP Tests (Go Client + Go Server)
+# Go Unix Socket Tests (Go Client + Go Server)
 # ========================================
-echo -e "${YELLOW}Running Go TCP tests (Go Client + Go Server)...${NC}"
-run_with_timeout "Go TCP tests" go test -v -count=1 ./test/test_go/service_tcp_test.go ./test/test_go/test_utils.go
+echo -e "${YELLOW}Running Go Unix socket tests (Go Client + Go Server)...${NC}"
+run_with_timeout "Go Unix socket tests" go test -v -count=1 ./test/test_go/service_unix_test.go ./test/test_go/test_utils.go
 if [ $? -eq 0 ]; then
-	echo -e "${GREEN}Go TCP tests passed${NC}"
+	echo -e "${GREEN}Go Unix socket tests passed${NC}"
 else
-	echo -e "${RED}Go TCP tests failed${NC}"
+	echo -e "${RED}Go Unix socket tests failed${NC}"
 	exit 1
 fi
 
@@ -63,20 +65,20 @@ else
 fi
 
 # ========================================
-# C++ TCP Tests (C++ Client + C++ Server)
+# C++ Unix Socket Tests (C++ Client + C++ Server)
 # ========================================
-echo -e "\n${YELLOW}Running C++ TCP tests (C++ Client + C++ Server)...${NC}"
+echo -e "\n${YELLOW}Running C++ Unix socket tests (C++ Client + C++ Server)...${NC}"
 
 # Start server
-./server_tcp_test > server.log 2>&1 &
+./server_unix_test > server.log 2>&1 &
 pid=$!
-echo "Started C++ TCP server (PID: $pid)"
+echo "Started C++ Unix socket server (PID: $pid)"
 
 # Wait for server to start
 sleep 1
 
 # Run client tests
-run_with_timeout "C++ TCP client tests" ./client_tcp_tests
+run_with_timeout "C++ Unix socket client tests" ./client_unix_tests
 status=$?
 
 # Stop server
@@ -85,35 +87,35 @@ wait $pid 2>/dev/null || true
 pid=""
 
 if [ $status -eq 0 ]; then
-	echo -e "${GREEN}C++ TCP tests (C++ Client + C++ Server) passed${NC}"
+	echo -e "${GREEN}C++ Unix socket tests (C++ Client + C++ Server) passed${NC}"
 else
-	echo -e "${RED}C++ TCP tests (C++ Client + C++ Server) failed${NC}"
+	echo -e "${RED}C++ Unix socket tests (C++ Client + C++ Server) failed${NC}"
 	exit 1
 fi
 
 sleep 1
 
 # ========================================
-# TCP Tests (C++ Client + Go Server)
+# Unix Socket Tests (C++ Client + Go Server)
 # ========================================
-echo -e "\n${YELLOW}Running TCP tests (C++ Client + Go Server)...${NC}"
+echo -e "\n${YELLOW}Running Unix socket tests (C++ Client + Go Server)...${NC}"
 
-# Build and start Go TCP server
-go build -o pingpong_tcp ../test/pingpong_server_tcp/main.go
-./pingpong_tcp > server.log 2>&1 &
+# Build and start Go Unix socket server
+go build -o pingpong_unix ../test/pingpong_server_unix/main.go
+./pingpong_unix > server.log 2>&1 &
 pid=$!
-echo "Started Go TCP server (PID: $pid)"
+echo "Started Go Unix socket server (PID: $pid)"
 
 # Wait for server to start
 sleep 1
 
 if ! kill -0 $pid 2>/dev/null; then
-	echo -e "${RED}Failed to start Go TCP server${NC}"
+	echo -e "${RED}Failed to start Go Unix socket server${NC}"
 	exit 1
 fi
 
 # Run C++ client tests
-run_with_timeout "C++ Client + Go Server tests" ./client_tcp_tests
+run_with_timeout "C++ Client + Go Server tests" ./client_unix_tests
 status=$?
 
 # Stop server
@@ -122,35 +124,35 @@ wait $pid 2>/dev/null || true
 pid=""
 
 if [ $status -eq 0 ]; then
-	echo -e "${GREEN}TCP tests (C++ Client + Go Server) passed${NC}"
+	echo -e "${GREEN}Unix socket tests (C++ Client + Go Server) passed${NC}"
 else
-	echo -e "${RED}TCP tests (C++ Client + Go Server) failed${NC}"
+	echo -e "${RED}Unix socket tests (C++ Client + Go Server) failed${NC}"
 	exit 1
 fi
 
 sleep 1
 
 # ========================================
-# TCP Tests (Go Client + C++ Server)
+# Unix Socket Tests (Go Client + C++ Server)
 # ========================================
-echo -e "\n${YELLOW}Running TCP tests (Go Client + C++ Server)...${NC}"
+echo -e "\n${YELLOW}Running Unix socket tests (Go Client + C++ Server)...${NC}"
 
-# Start C++ TCP server
-./server_tcp_test > server.log 2>&1 &
+# Start C++ Unix socket server
+./server_unix_test > server.log 2>&1 &
 pid=$!
-echo "Started C++ TCP server (PID: $pid)"
+echo "Started C++ Unix socket server (PID: $pid)"
 
 # Wait for server to start
 sleep 1
 
 if ! kill -0 $pid 2>/dev/null; then
-	echo -e "${RED}Failed to start C++ TCP server${NC}"
+	echo -e "${RED}Failed to start C++ Unix socket server${NC}"
 	exit 1
 fi
 
 # Run Go client tests
 cd ..
-run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestPingPongTCP$ ./test/test_go/service_tcp_test.go ./test/test_go/test_utils.go
+run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestPingPongUnix$ ./test/test_go/service_unix_test.go ./test/test_go/test_utils.go
 status=$?
 cd .build
 
@@ -160,13 +162,13 @@ wait $pid 2>/dev/null || true
 pid=""
 
 if [ $status -eq 0 ]; then
-	echo -e "${GREEN}TCP tests (Go Client + C++ Server) passed${NC}"
+	echo -e "${GREEN}Unix socket tests (Go Client + C++ Server) passed${NC}"
 else
-	echo -e "${RED}TCP tests (Go Client + C++ Server) failed${NC}"
+	echo -e "${RED}Unix socket tests (Go Client + C++ Server) failed${NC}"
 	exit 1
 fi
 
 # ========================================
 # All Tests Complete
 # ========================================
-echo -e "\n${GREEN}All TCP tests passed!${NC}"
+echo -e "\n${GREEN}All Unix socket tests passed!${NC}"

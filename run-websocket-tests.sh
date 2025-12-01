@@ -69,7 +69,7 @@ fi
 echo -e "\n${YELLOW}Running WebSocket (no TLS) tests - C++ Client + Go Server...${NC}"
 
 # Build and start pingpong server
-go build -o pingpong ../test/pingpong_server/main.go
+go build -o pingpong ../test/pingpong_server_ws/main.go
 ./pingpong > output.txt 2>&1 &
 pid=$!
 sleep 1
@@ -82,7 +82,7 @@ fi
 echo -e "${GREEN}PingPong Go server started (pid: $pid)${NC}"
 
 # Run client tests
-if run_with_timeout "C++ Client + Go Server tests" ./client_no_tls_tests --verbose; then
+if run_with_timeout "C++ Client + Go Server tests" ./client_no_tls_tests; then
 	echo -e "${GREEN}C++ Client + Go Server tests passed${NC}"
 else
 	echo -e "${RED}C++ Client + Go Server tests failed${NC}"
@@ -114,7 +114,7 @@ fi
 echo -e "${GREEN}C++ server started (pid: $pid)${NC}"
 
 # Run C++ client tests
-if run_with_timeout "C++ Client + C++ Server tests" ./client_no_tls_tests --verbose; then
+if run_with_timeout "C++ Client + C++ Server tests" ./client_no_tls_tests; then
 	echo -e "${GREEN}C++ Client + C++ Server tests passed${NC}"
 else
 	echo -e "${RED}C++ Client + C++ Server tests failed${NC}"
@@ -182,7 +182,7 @@ fi
 echo -e "${GREEN}PingPong TLS server started (pid: $pid)${NC}"
 
 # Run client TLS tests
-if run_with_timeout "WebSocket TLS tests" ./client_tls_tests --verbose; then
+if run_with_timeout "WebSocket TLS tests" ./client_tls_tests; then
 	echo -e "${GREEN}WebSocket (TLS) tests passed${NC}"
 else
 	echo -e "${RED}WebSocket (TLS) tests failed${NC}"

@@ -60,6 +60,12 @@ add_executable(server_tcp_tls_test "server_tcp_tls_test.cpp")
 # Macro test
 add_executable(macro_test "macro_test.cpp")
 
+# Client Unix tests
+add_executable(client_unix_tests "client_unix_tests.cpp")
+
+# Server Unix test
+add_executable(server_unix_test "server_unix_test.cpp")
+
 # Link with libs
 target_link_libraries(client_tls_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_no_tls_test OpenSSL::SSL OpenSSL::Crypto)
@@ -67,3 +73,5 @@ target_link_libraries(client_tcp_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_tcp_test OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_tcp_tls_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_tcp_tls_test OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(client_unix_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(server_unix_test OpenSSL::SSL OpenSSL::Crypto)
