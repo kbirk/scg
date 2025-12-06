@@ -1,110 +1,86 @@
 #pragma once
 
-#define ASIO_STANDALONE 1
+#define ASIO_STANDALONE
 #include <asio.hpp>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <cstdio>
 
 #include "scg/transport.h"
-#include "scg/unix/connection.h"
+#include "scg/unix/transport_client.h"
+#include <memory>
+#include <string>
+#include <vector>
+#include <unistd.h>
 
 namespace scg {
 namespace unix_socket {
 
 struct ServerTransportConfig {
-	std::string socketPath = "/tmp/scg.sock";
+    std::string socketPath;
 };
 
-class ServerTransportUnix : public rpc::ServerTransport {
+class ServerTransportUnix : public scg::rpc::ServerTransport {
 public:
-	ServerTransportUnix(const ServerTransportConfig& config)
-		: config_(config) {
-		ctx_ = std::make_shared<UnixContext>();
-		acceptor_ = std::make_unique<asio::local::stream_protocol::acceptor>(ctx_->io_context);
-	}
+    ServerTransportUnix(const ServerTransportConfig& config)
+        : config_(config), acceptor_(io_context_) {
+        // Remove existing socket file if it exists
+        ::unlink(config_.socketPath.c_str());
+    }
 
-	~ServerTransportUnix() {
-		close();
-	}
+    ~ServerTransportUnix() {
+        close();
+    }
 
-	error::Error listen() override {
-		if (acceptor_->is_open()) {
-			return error::Error("Server is already listening");
-		}
+    error::Error listen() override {
+        try {
+            asio::local::stream_protocol::endpoint endpoint(config_.socketPath);
+            acceptor_.open(endpoint.protocol());
+            acceptor_.bind(endpoint);
+            acceptor_.listen();
+            return nullptr;
+        } catch (const std::exception& e) {
+            return error::Error(e.what());
+        }
+    }
 
-		try {
-			// Remove existing socket file if it exists
-			std::remove(config_.socketPath.c_str());
+    std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> accept() override {
+        try {
+            asio::local::stream_protocol::socket socket(io_context_);
+            asio::error_code ec;
+            acceptor_.non_blocking(true);
+            acceptor_.accept(socket, ec);
 
-			asio::local::stream_protocol::endpoint endpoint(config_.socketPath);
-			acceptor_->open(endpoint.protocol());
-			acceptor_->bind(endpoint);
-			acceptor_->listen();
+            if (ec) {
+                if (ec == asio::error::would_block || ec == asio::error::try_again) {
+                    return {nullptr, nullptr};
+                }
+                return {nullptr, error::Error(ec.message())};
+            }
 
-			startAccept();
-		} catch (const std::exception& e) {
-			return error::Error("Failed to listen: " + std::string(e.what()));
-		}
+            // Connection accepted
+            return {std::make_shared<ConnectionUnix>(std::move(socket)), nullptr};
+        } catch (const std::exception& e) {
+            return {nullptr, error::Error(e.what())};
+        }
+    }
 
-		return nullptr;
-	}
+    void poll() override {
+        if (io_context_.stopped()) {
+            io_context_.restart();
+        }
+        io_context_.poll();
+    }
 
-	std::pair<std::shared_ptr<rpc::Connection>, error::Error> accept() override {
-		// Drive the IO context to process events
-		ctx_->io_context.poll();
-
-		// Reset the io_context so it can be polled again if it ran out of work
-		if (ctx_->io_context.stopped()) {
-			ctx_->io_context.restart();
-		}
-
-		std::lock_guard<std::mutex> lock(mutex_);
-		if (pending_connections_.empty()) {
-			return {nullptr, nullptr};
-		}
-
-		auto conn = pending_connections_.front();
-		pending_connections_.pop();
-		return {conn, nullptr};
-	}
-
-	error::Error close() override {
-		if (acceptor_ && acceptor_->is_open()) {
-			acceptor_->close();
-		}
-		// Clean up socket file
-		std::remove(config_.socketPath.c_str());
-		return nullptr;
-	}
+    error::Error close() override {
+        if (acceptor_.is_open()) {
+            acceptor_.close();
+        }
+        ::unlink(config_.socketPath.c_str());
+        return nullptr;
+    }
 
 private:
-	void startAccept() {
-		auto socket = std::make_shared<asio::local::stream_protocol::socket>(ctx_->io_context);
-		acceptor_->async_accept(*socket, [this, socket](const std::error_code& ec) {
-			if (!ec) {
-				auto conn = std::make_shared<UnixConnection>(std::move(*socket));
-				conn->start();
-
-				{
-					std::lock_guard<std::mutex> lock(mutex_);
-					pending_connections_.push(conn);
-				}
-			}
-
-			if (acceptor_->is_open()) {
-				startAccept();
-			}
-		});
-	}
-
-	ServerTransportConfig config_;
-	std::shared_ptr<UnixContext> ctx_;
-	std::unique_ptr<asio::local::stream_protocol::acceptor> acceptor_;
-
-	std::queue<std::shared_ptr<UnixConnection>> pending_connections_;
-	std::mutex mutex_;
+    ServerTransportConfig config_;
+    asio::io_context io_context_;
+    asio::local::stream_protocol::acceptor acceptor_;
 };
 
 } // namespace unix_socket

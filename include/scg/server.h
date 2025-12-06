@@ -184,6 +184,20 @@ public:
 	bool process() {
 		bool didWork = false;
 
+		// Poll the transport for I/O events (reads, writes, accepts)
+		// This must be called to process async I/O on connections
+		// NOTE: Do NOT hold mu_ while polling - handlers will try to acquire it
+		std::shared_ptr<ServerTransport> transport;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			if (running_ && transport_) {
+				transport = transport_;
+			}
+		}
+		if (transport) {
+			transport->poll();
+		}
+
 		// Accept new connections
 		if (acceptNewConnections()) {
 			didWork = true;

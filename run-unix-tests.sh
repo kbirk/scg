@@ -34,7 +34,7 @@ cleanup() {
 		wait $pid 2>/dev/null || true
 	fi
 	# Clean up socket file
-	rm -f /tmp/scg_test_unix.sock
+	rm -f /tmp/scg_test_unix.sock /tmp/scg_test_unix_0.sock
 }
 
 # Register cleanup function to run on script exit
@@ -44,7 +44,7 @@ trap cleanup EXIT INT TERM
 # Go Unix Socket Tests (Go Client + Go Server)
 # ========================================
 echo -e "${YELLOW}Running Go Unix socket tests (Go Client + Go Server)...${NC}"
-run_with_timeout "Go Unix socket tests" go test -v -count=1 ./test/test_go/service_unix_test.go ./test/test_go/test_utils.go
+run_with_timeout "Go Unix socket tests" go test -v -count=1 -run "^TestUnix$" ./test/test_go/service_unix_test.go ./test/test_go/service_test_suite.go ./test/test_go/test_utils.go
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go Unix socket tests passed${NC}"
 else
@@ -98,6 +98,8 @@ sleep 1
 # ========================================
 # Unix Socket Tests (C++ Client + Go Server)
 # ========================================
+# Unix Socket Tests (C++ Client + Go Server)
+# ========================================
 echo -e "\n${YELLOW}Running Unix socket tests (C++ Client + Go Server)...${NC}"
 
 # Build and start Go Unix socket server
@@ -130,8 +132,6 @@ else
 	exit 1
 fi
 
-sleep 1
-
 # ========================================
 # Unix Socket Tests (Go Client + C++ Server)
 # ========================================
@@ -150,11 +150,9 @@ if ! kill -0 $pid 2>/dev/null; then
 	exit 1
 fi
 
-# Run Go client tests
-cd ..
-run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestPingPongUnix$ ./test/test_go/service_unix_test.go ./test/test_go/test_utils.go
+# Run Go client tests with external server option
+run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestUnixExternalServer ../test/test_go/service_unix_test.go ../test/test_go/service_test_suite.go ../test/test_go/test_utils.go
 status=$?
-cd .build
 
 # Stop server
 kill $pid 2>/dev/null || true

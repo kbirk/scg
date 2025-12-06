@@ -78,7 +78,7 @@ type ServerTransport struct {
 
 type ServerTransportConfig struct {
 	Port    int
-	NoDelay bool // Disable Nagle's algorithm (default: true when using NewServerTransport)
+	NoDelay bool // Disable Nagle's algorithm for better latency
 }
 
 func NewServerTransport(config ServerTransportConfig) *ServerTransport {
@@ -177,7 +177,7 @@ type ClientTransport struct {
 type ClientTransportConfig struct {
 	Host    string
 	Port    int
-	NoDelay bool // Disable Nagle's algorithm (default: true when using NewClientTransport)
+	NoDelay bool // Disable Nagle's algorithm for better latency
 }
 
 func NewClientTransport(config ClientTransportConfig) *ClientTransport {

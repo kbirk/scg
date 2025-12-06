@@ -1,30 +1,148 @@
 #pragma once
 
-#define ASIO_STANDALONE 1
+#define ASIO_STANDALONE
 #include <asio.hpp>
-#include <thread>
-#include <memory>
-#include <future>
 
-#include "scg/tcp/connection.h"
+#include "scg/transport.h"
+#include "scg/error.h"
+#include <memory>
+#include <string>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <vector>
+#include <deque>
+#include <iostream>
 
 namespace scg {
 namespace tcp {
 
 struct ClientTransportConfig {
-    std::string host = "localhost";
-    int port = 8080;
-    bool noDelay = true;  // Disable Nagle's algorithm by default
+    std::string host;
+    int port;
 };
 
-class ClientTransportTCP : public rpc::ClientTransport {
+class ConnectionTCP : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionTCP> {
+public:
+    ConnectionTCP(asio::ip::tcp::socket socket)
+        : socket_(std::move(socket)), closed_(false) {
+        socket_.set_option(asio::ip::tcp::no_delay(true));
+    }
+
+    error::Error send(const std::vector<uint8_t>& data) override {
+        if (closed_) return error::Error("Connection closed");
+
+        uint32_t len = static_cast<uint32_t>(data.size());
+        std::vector<uint8_t> buffer;
+        buffer.reserve(4 + len);
+        // Big endian length prefix
+        buffer.push_back((len >> 24) & 0xFF);
+        buffer.push_back((len >> 16) & 0xFF);
+        buffer.push_back((len >> 8) & 0xFF);
+        buffer.push_back(len & 0xFF);
+        buffer.insert(buffer.end(), data.begin(), data.end());
+
+        auto self = shared_from_this();
+        asio::post(socket_.get_executor(), [this, self, buffer = std::move(buffer)]() {
+            bool write_in_progress = !write_queue_.empty();
+            write_queue_.push_back(std::move(buffer));
+            if (!write_in_progress) {
+                do_write();
+            }
+        });
+
+        return nullptr;
+    }
+
+    void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override {
+        messageHandler_ = handler;
+        read_header();
+    }
+
+    void setFailHandler(std::function<void(const error::Error&)> handler) override {
+        failHandler_ = handler;
+    }
+
+    void setCloseHandler(std::function<void()> handler) override {
+        closeHandler_ = handler;
+    }
+
+    error::Error close() override {
+        if (!closed_) {
+            closed_ = true;
+            auto self = shared_from_this();
+            asio::post(socket_.get_executor(), [this, self]() {
+                if (socket_.is_open()) {
+                    socket_.close();
+                }
+                if (closeHandler_) closeHandler_();
+            });
+        }
+        return nullptr;
+    }
+
+private:
+    void do_write() {
+        auto self = shared_from_this();
+        asio::async_write(socket_, asio::buffer(write_queue_.front()),
+            [this, self](std::error_code ec, std::size_t /*length*/) {
+                if (!ec) {
+                    write_queue_.pop_front();
+                    if (!write_queue_.empty()) {
+                        do_write();
+                    }
+                } else {
+                    if (failHandler_) failHandler_(error::Error(ec.message()));
+                    close();
+                }
+            });
+    }
+
+    void read_header() {
+        auto self = shared_from_this();
+        asio::async_read(socket_, asio::buffer(read_buffer_, 4),
+            [this, self](std::error_code ec, std::size_t /*length*/) {
+                if (!ec) {
+                    uint32_t len = (read_buffer_[0] << 24) | (read_buffer_[1] << 16) | (read_buffer_[2] << 8) | read_buffer_[3];
+                    read_body(len);
+                } else {
+                    if (ec != asio::error::eof && failHandler_) failHandler_(error::Error(ec.message()));
+                    close();
+                }
+            });
+    }
+
+    void read_body(uint32_t length) {
+        auto self = shared_from_this();
+        body_buffer_.resize(length);
+        asio::async_read(socket_, asio::buffer(body_buffer_),
+            [this, self](std::error_code ec, std::size_t /*length*/) {
+                if (!ec) {
+                    if (messageHandler_) messageHandler_(body_buffer_);
+                    read_header();
+                } else {
+                    if (failHandler_) failHandler_(error::Error(ec.message()));
+                    close();
+                }
+            });
+    }
+
+    asio::ip::tcp::socket socket_;
+    std::function<void(const std::vector<uint8_t>&)> messageHandler_;
+    std::function<void(const error::Error&)> failHandler_;
+    std::function<void()> closeHandler_;
+    std::atomic<bool> closed_;
+    std::deque<std::vector<uint8_t>> write_queue_;
+    uint8_t read_buffer_[4];
+    std::vector<uint8_t> body_buffer_;
+};
+
+class ClientTransportTCP : public scg::rpc::ClientTransport {
 public:
     ClientTransportTCP(const ClientTransportConfig& config)
-        : config_(config) {
-
-        ctx_ = std::make_shared<TCPContext>();
+        : config_(config), work_guard_(asio::make_work_guard(io_context_)) {
         thread_ = std::thread([this]() {
-            ctx_->io_context.run();
+            io_context_.run();
         });
     }
 
@@ -32,39 +150,20 @@ public:
         shutdown();
     }
 
-    std::pair<std::shared_ptr<rpc::Connection>, error::Error> connect() override {
-        asio::ip::tcp::resolver resolver(ctx_->io_context);
-        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
-
-        auto socket = std::make_shared<asio::ip::tcp::socket>(ctx_->io_context);
-
-        std::promise<error::Error> promise;
-        auto future = promise.get_future();
-
-        asio::async_connect(*socket, endpoints,
-            [&promise](const std::error_code& ec, const asio::ip::tcp::endpoint& /*endpoint*/) {
-                if (!ec) {
-                    promise.set_value(nullptr);
-                } else {
-                    promise.set_value(error::Error(ec.message()));
-                }
-            });
-
-        auto err = future.get();
-        if (err) {
-            return {nullptr, err};
+    std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override {
+        try {
+            asio::ip::tcp::resolver resolver(io_context_);
+            auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
+            asio::ip::tcp::socket socket(io_context_);
+            asio::connect(socket, endpoints);
+            return {std::make_shared<ConnectionTCP>(std::move(socket)), nullptr};
+        } catch (const std::exception& e) {
+            return {nullptr, error::Error(e.what())};
         }
-
-        auto conn = std::make_shared<TCPConnection>(std::move(*socket), config_.noDelay);
-        conn->start();
-        return {conn, nullptr};
     }
 
     void shutdown() override {
-        if (ctx_ && !ctx_->io_context.stopped()) {
-            ctx_->work_guard.reset();
-            ctx_->io_context.stop();
-        }
+        io_context_.stop();
         if (thread_.joinable()) {
             thread_.join();
         }
@@ -72,7 +171,8 @@ public:
 
 private:
     ClientTransportConfig config_;
-    std::shared_ptr<TCPContext> ctx_;
+    asio::io_context io_context_;
+    asio::executor_work_guard<asio::io_context::executor_type> work_guard_;
     std::thread thread_;
 };
 

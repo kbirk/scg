@@ -50,7 +50,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 echo -e "${YELLOW}Running NATS tests...${NC}"
 
-go test -v -count=1 ./test/test_go/service_nats_test.go ./test/test_go/service_nats_edge_test.go
+go test -v -count=1 ./test/test_go/service_nats_test.go ./test/test_go/service_test_suite.go ./test/test_go/test_utils.go
 
 TEST_RESULT=$?
 

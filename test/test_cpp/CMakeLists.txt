@@ -26,6 +26,7 @@ find_package(OpenSSL REQUIRED)
 # Source include dirs
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../include")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../test/files/output")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}")
 include_directories(SYSTEM "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/include")
 
 # Executables
@@ -36,17 +37,20 @@ add_executable(serialize_tests "serialize_tests.cpp")
 # UUID tests
 add_executable(uuid_tests "uuid_tests.cpp")
 
-# Client without TLS tests
-add_executable(client_no_tls_tests "client_no_tls_tests.cpp")
+# Client Websocket tests
+add_executable(client_ws_tests "client_ws_tests.cpp")
 
 # Client TCP tests
 add_executable(client_tcp_tests "client_tcp_tests.cpp")
 
-# Client with TLS tests
-add_executable(client_tls_tests "client_tls_tests.cpp")
+# Client Websocket with TLS tests
+add_executable(client_ws_tls_tests "client_ws_tls_tests.cpp")
 
-# Server without TLS test
-add_executable(server_no_tls_test "server_no_tls_test.cpp")
+# Server Websocket tests
+add_executable(server_ws_test "server_ws_test.cpp")
+
+# Server Websocket TLS tests
+add_executable(server_ws_tls_test "server_ws_tls_test.cpp")
 
 # Server TCP test
 add_executable(server_tcp_test "server_tcp_test.cpp")
@@ -67,8 +71,10 @@ add_executable(client_unix_tests "client_unix_tests.cpp")
 add_executable(server_unix_test "server_unix_test.cpp")
 
 # Link with libs
-target_link_libraries(client_tls_tests OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(server_no_tls_test OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(client_ws_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(client_ws_tls_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(server_ws_test OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(server_ws_tls_test OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_tcp_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_tcp_test OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_tcp_tls_tests OpenSSL::SSL OpenSSL::Crypto)

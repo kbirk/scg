@@ -63,7 +63,7 @@ public:
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 
-		requests_.clear();
+		failPendingRequestsUnsafe("Connection closed");
 
 		return disconnectUnsafe();
 	}
@@ -93,6 +93,13 @@ public:
 
 protected:
 
+	void failPendingRequestsUnsafe(std::string error) {
+		for (auto& pair : requests_) {
+			pair.second->set_value(createErrorReader(error));
+		}
+		requests_.clear();
+	}
+
 	error::Error connectUnsafe() {
 		if (status_ != ConnectionStatus::FAILED && status_ != ConnectionStatus::NOT_CONNECTED) {
 			return nullptr;
@@ -115,25 +122,15 @@ protected:
 		connection_->setFailHandler([this](const error::Error& err) {
 			std::lock_guard<std::mutex> lock(mu_);
 			status_ = ConnectionStatus::FAILED;
-            // Fail all pending requests
-            for (auto& pair : requests_) {
-                try {
-                    pair.second->set_exception(std::make_exception_ptr(std::runtime_error("Connection failed: " + err.message)));
-                } catch (...) {}
-            }
-            requests_.clear();
+			// Fail all pending requests
+			failPendingRequestsUnsafe("Connection failed: " + err.message);
 		});
 
 		connection_->setCloseHandler([this]() {
 			std::lock_guard<std::mutex> lock(mu_);
 			status_ = ConnectionStatus::NOT_CONNECTED;
-            // Fail all pending requests
-            for (auto& pair : requests_) {
-                try {
-                    pair.second->set_exception(std::make_exception_ptr(std::runtime_error("Connection closed")));
-                } catch (...) {}
-            }
-            requests_.clear();
+			// Fail all pending requests
+			failPendingRequestsUnsafe("Connection closed");
 		});
 
 		connection_->setMessageHandler([this](const std::vector<uint8_t>& data) {
@@ -165,22 +162,39 @@ protected:
 		return error::Error("Connection not available");
 	}
 
+	serialize::Reader createErrorReader(std::string err) {
+		using scg::serialize::bit_size; // adl trickery
+
+		serialize::FixedSizeWriter writer(
+			scg::serialize::bits_to_bytes(
+				bit_size(ERROR_RESPONSE) +
+				bit_size(err)));
+
+		return serialize::Reader(writer.bytes());
+	}
+
 	void onMessage(const std::vector<uint8_t>& data) {
 		serialize::Reader reader(data);
 
 		using scg::serialize::deserialize;
 
 		std::array<uint8_t, 16> prefix;
-		deserialize(prefix, reader);
-
-		if (prefix != RESPONSE_PREFIX) {
-			// TODO: resolve the promise with an error
+		auto err = deserialize(prefix, reader);
+		if (err || prefix != RESPONSE_PREFIX) {
+			// We cannot resolve the promise here as we don't have the request ID
+			// We disconnect here to prevent the client from deadlocking
 			disconnect();
 			return;
 		}
 
 		uint64_t requestID = 0;
-		serialize::deserialize(requestID, reader);
+		err = serialize::deserialize(requestID, reader);
+		if (err) {
+			// We cannot resolve the promise here as we don't have the request ID
+			// We disconnect here to prevent the client from deadlocking
+			disconnect();
+			return;
+		}
 
 		std::lock_guard<std::mutex> lock(mu_);
 
@@ -188,7 +202,7 @@ protected:
 		if (iter != requests_.end()) {
 			iter->second->set_value(reader);
 		} else {
-			disconnect();
+			disconnectUnsafe();  // Already holding lock, use unsafe version
 			return;
 		}
 
@@ -256,7 +270,6 @@ protected:
 		if (errMsg == "") {
 			errMsg = "Unknown error";
 		}
-
 		return std::make_pair(serialize::Reader({}), error::Error(errMsg));
 	}
 

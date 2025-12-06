@@ -34,7 +34,7 @@ int main() {
 
 	// Configure transport
 	scg::unix_socket::ServerTransportConfig transportConfig;
-	transportConfig.socketPath = "/tmp/scg_test_unix.sock";
+	transportConfig.socketPath = "/tmp/scg_test_unix_0.sock";
 
 	// Configure server
 	scg::rpc::ServerConfig config;

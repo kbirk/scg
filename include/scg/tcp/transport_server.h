@@ -1,28 +1,25 @@
 #pragma once
 
-#define ASIO_STANDALONE 1
+#define ASIO_STANDALONE
 #include <asio.hpp>
-#include <memory>
-#include <mutex>
-#include <queue>
 
 #include "scg/transport.h"
-#include "scg/tcp/connection.h"
+#include "scg/tcp/transport_client.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace scg {
 namespace tcp {
 
 struct ServerTransportConfig {
-    int port = 8080;
-    bool noDelay = true;  // Disable Nagle's algorithm by default
+    int port;
 };
 
-class ServerTransportTCP : public rpc::ServerTransport {
+class ServerTransportTCP : public scg::rpc::ServerTransport {
 public:
     ServerTransportTCP(const ServerTransportConfig& config)
-        : config_(config) {
-        ctx_ = std::make_shared<TCPContext>();
-        acceptor_ = std::make_unique<asio::ip::tcp::acceptor>(ctx_->io_context);
+        : config_(config), acceptor_(io_context_) {
     }
 
     ~ServerTransportTCP() {
@@ -30,77 +27,57 @@ public:
     }
 
     error::Error listen() override {
-        if (acceptor_->is_open()) {
-            return error::Error("Server is already listening");
-        }
-
         try {
             asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v4(), config_.port);
-            acceptor_->open(endpoint.protocol());
-            acceptor_->set_option(asio::ip::tcp::acceptor::reuse_address(true));
-            acceptor_->bind(endpoint);
-            acceptor_->listen();
-
-            startAccept();
+            acceptor_.open(endpoint.protocol());
+            acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+            acceptor_.bind(endpoint);
+            acceptor_.listen();
+            return nullptr;
         } catch (const std::exception& e) {
-            return error::Error("Failed to listen: " + std::string(e.what()));
+            return error::Error(e.what());
         }
-
-        return nullptr;
     }
 
-    std::pair<std::shared_ptr<rpc::Connection>, error::Error> accept() override {
-        // Drive the IO context to process events
-        ctx_->io_context.poll();
+    std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> accept() override {
+        try {
+            asio::ip::tcp::socket socket(io_context_);
+            asio::error_code ec;
+            acceptor_.non_blocking(true);
+            acceptor_.accept(socket, ec);
 
-        // Reset the io_context so it can be polled again if it ran out of work
-        if (ctx_->io_context.stopped()) {
-            ctx_->io_context.restart();
+            if (ec) {
+                if (ec == asio::error::would_block || ec == asio::error::try_again) {
+                    return {nullptr, nullptr};
+                }
+                return {nullptr, error::Error(ec.message())};
+            }
+
+            // Connection accepted
+            return {std::make_shared<ConnectionTCP>(std::move(socket)), nullptr};
+        } catch (const std::exception& e) {
+            return {nullptr, error::Error(e.what())};
         }
+    }
 
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (pending_connections_.empty()) {
-            return {nullptr, nullptr};
+    void poll() override {
+        if (io_context_.stopped()) {
+            io_context_.restart();
         }
-
-        auto conn = pending_connections_.front();
-        pending_connections_.pop();
-        return {conn, nullptr};
+        io_context_.poll();
     }
 
     error::Error close() override {
-        if (acceptor_ && acceptor_->is_open()) {
-            acceptor_->close();
+        if (acceptor_.is_open()) {
+            acceptor_.close();
         }
         return nullptr;
     }
 
 private:
-    void startAccept() {
-        auto socket = std::make_shared<asio::ip::tcp::socket>(ctx_->io_context);
-        acceptor_->async_accept(*socket, [this, socket](const std::error_code& ec) {
-            if (!ec) {
-                auto conn = std::make_shared<TCPConnection>(std::move(*socket), config_.noDelay);
-                conn->start();
-
-                {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    pending_connections_.push(conn);
-                }
-            }
-
-            if (acceptor_->is_open()) {
-                startAccept();
-            }
-        });
-    }
-
     ServerTransportConfig config_;
-    std::shared_ptr<TCPContext> ctx_;
-    std::unique_ptr<asio::ip::tcp::acceptor> acceptor_;
-
-    std::queue<std::shared_ptr<TCPConnection>> pending_connections_;
-    std::mutex mutex_;
+    asio::io_context io_context_;
+    asio::ip::tcp::acceptor acceptor_;
 };
 
 } // namespace tcp

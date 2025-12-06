@@ -1,63 +1,165 @@
 #pragma once
 
-#define ASIO_STANDALONE 1
+#define ASIO_STANDALONE
 #include <asio.hpp>
 #include <asio/ssl.hpp>
-#include <thread>
-#include <memory>
-#include <future>
 
-#include "scg/tcp/connection_tls.h"
+#include "scg/transport.h"
+#include "scg/error.h"
+#include <memory>
+#include <string>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <vector>
+#include <deque>
+#include <iostream>
 
 namespace scg {
 namespace tcp {
 
 struct ClientTransportTLSConfig {
-    std::string host = "localhost";
-    int port = 8443;
-    bool noDelay = true;  // Disable Nagle's algorithm by default
-    bool verifyPeer = false;  // For testing with self-signed certs
-    std::string caFile;  // Optional CA certificate file for verification
+    std::string host;
+    int port;
+    bool verifyPeer;
+    std::string caFile;
 };
 
-// Client-specific TLS context with tls_client mode
-struct ClientTCPTLSContext {
-    asio::io_context io_context;
-    asio::ssl::context ssl_context;
-    asio::executor_work_guard<asio::io_context::executor_type> work_guard;
+class ConnectionTLS : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionTLS> {
+public:
+    ConnectionTLS(asio::ssl::stream<asio::ip::tcp::socket> socket)
+        : socket_(std::move(socket)), closed_(false) {
+        socket_.lowest_layer().set_option(asio::ip::tcp::no_delay(true));
+    }
 
-    ClientTCPTLSContext()
-        : ssl_context(asio::ssl::context::tls_client),
-          work_guard(asio::make_work_guard(io_context)) {}
+    error::Error send(const std::vector<uint8_t>& data) override {
+        if (closed_) return error::Error("Connection closed");
+
+        uint32_t len = static_cast<uint32_t>(data.size());
+        std::vector<uint8_t> buffer;
+        buffer.reserve(4 + len);
+        // Big endian length prefix
+        buffer.push_back((len >> 24) & 0xFF);
+        buffer.push_back((len >> 16) & 0xFF);
+        buffer.push_back((len >> 8) & 0xFF);
+        buffer.push_back(len & 0xFF);
+        buffer.insert(buffer.end(), data.begin(), data.end());
+
+        auto self = shared_from_this();
+        asio::post(socket_.get_executor(), [this, self, buffer = std::move(buffer)]() {
+            bool write_in_progress = !write_queue_.empty();
+            write_queue_.push_back(std::move(buffer));
+            if (!write_in_progress) {
+                do_write();
+            }
+        });
+
+        return nullptr;
+    }
+
+    void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override {
+        messageHandler_ = handler;
+        read_header();
+    }
+
+    void setFailHandler(std::function<void(const error::Error&)> handler) override {
+        failHandler_ = handler;
+    }
+
+    void setCloseHandler(std::function<void()> handler) override {
+        closeHandler_ = handler;
+    }
+
+    error::Error close() override {
+        if (!closed_) {
+            closed_ = true;
+            auto self = shared_from_this();
+            asio::post(socket_.get_executor(), [this, self]() {
+                if (socket_.lowest_layer().is_open()) {
+                    socket_.lowest_layer().close();
+                }
+                if (closeHandler_) closeHandler_();
+            });
+        }
+        return nullptr;
+    }
+
+private:
+    void do_write() {
+        auto self = shared_from_this();
+        asio::async_write(socket_, asio::buffer(write_queue_.front()),
+            [this, self](std::error_code ec, std::size_t /*length*/) {
+                if (!ec) {
+                    write_queue_.pop_front();
+                    if (!write_queue_.empty()) {
+                        do_write();
+                    }
+                } else {
+                    if (failHandler_) failHandler_(error::Error(ec.message()));
+                    close();
+                }
+            });
+    }
+
+    void read_header() {
+        auto self = shared_from_this();
+        asio::async_read(socket_, asio::buffer(read_buffer_, 4),
+            [this, self](std::error_code ec, std::size_t /*length*/) {
+                if (!ec) {
+                    uint32_t len = (read_buffer_[0] << 24) | (read_buffer_[1] << 16) | (read_buffer_[2] << 8) | read_buffer_[3];
+                    read_body(len);
+                } else {
+                    if (ec != asio::error::eof && failHandler_) failHandler_(error::Error(ec.message()));
+                    close();
+                }
+            });
+    }
+
+    void read_body(uint32_t length) {
+        auto self = shared_from_this();
+        body_buffer_.resize(length);
+        asio::async_read(socket_, asio::buffer(body_buffer_),
+            [this, self](std::error_code ec, std::size_t /*length*/) {
+                if (!ec) {
+                    if (messageHandler_) messageHandler_(body_buffer_);
+                    read_header();
+                } else {
+                    if (failHandler_) failHandler_(error::Error(ec.message()));
+                    close();
+                }
+            });
+    }
+
+    asio::ssl::stream<asio::ip::tcp::socket> socket_;
+    std::function<void(const std::vector<uint8_t>&)> messageHandler_;
+    std::function<void(const error::Error&)> failHandler_;
+    std::function<void()> closeHandler_;
+    std::atomic<bool> closed_;
+    std::deque<std::vector<uint8_t>> write_queue_;
+    uint8_t read_buffer_[4];
+    std::vector<uint8_t> body_buffer_;
 };
 
-class ClientTransportTCPTLS : public rpc::ClientTransport {
+class ClientTransportTCPTLS : public scg::rpc::ClientTransport {
 public:
     ClientTransportTCPTLS(const ClientTransportTLSConfig& config)
-        : config_(config) {
+        : config_(config),
+          ssl_context_(asio::ssl::context::tls_client),
+          work_guard_(asio::make_work_guard(io_context_)) {
 
-        ctx_ = std::make_shared<ClientTCPTLSContext>();
-
-        // Configure SSL context
-        ctx_->ssl_context.set_options(
-            asio::ssl::context::default_workarounds |
-            asio::ssl::context::no_sslv2 |
-            asio::ssl::context::no_sslv3 |
-            asio::ssl::context::single_dh_use);
-
-        if (config_.verifyPeer) {
-            ctx_->ssl_context.set_verify_mode(asio::ssl::verify_peer);
-            if (!config_.caFile.empty()) {
-                ctx_->ssl_context.load_verify_file(config_.caFile);
-            } else {
-                ctx_->ssl_context.set_default_verify_paths();
-            }
+        if (!config_.verifyPeer) {
+            ssl_context_.set_verify_mode(asio::ssl::verify_none);
         } else {
-            ctx_->ssl_context.set_verify_mode(asio::ssl::verify_none);
+            ssl_context_.set_verify_mode(asio::ssl::verify_peer);
+            if (!config_.caFile.empty()) {
+                ssl_context_.load_verify_file(config_.caFile);
+            } else {
+                ssl_context_.set_default_verify_paths();
+            }
         }
 
         thread_ = std::thread([this]() {
-            ctx_->io_context.run();
+            io_context_.run();
         });
     }
 
@@ -65,58 +167,28 @@ public:
         shutdown();
     }
 
-    std::pair<std::shared_ptr<rpc::Connection>, error::Error> connect() override {
-        asio::ip::tcp::resolver resolver(ctx_->io_context);
+    std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override {
+        try {
+            asio::ip::tcp::resolver resolver(io_context_);
+            auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
 
-        std::error_code resolve_ec;
-        auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port), resolve_ec);
-        if (resolve_ec) {
-            return {nullptr, error::Error("Failed to resolve host: " + resolve_ec.message())};
+            asio::ssl::stream<asio::ip::tcp::socket> socket(io_context_, ssl_context_);
+
+            if (config_.verifyPeer) {
+                 socket.set_verify_callback(asio::ssl::host_name_verification(config_.host));
+            }
+
+            asio::connect(socket.lowest_layer(), endpoints);
+            socket.handshake(asio::ssl::stream_base::client);
+
+            return {std::make_shared<ConnectionTLS>(std::move(socket)), nullptr};
+        } catch (const std::exception& e) {
+            return {nullptr, error::Error(e.what())};
         }
-
-        auto socket = std::make_shared<ssl_socket>(ctx_->io_context, ctx_->ssl_context);
-
-        // Set SNI hostname
-        if (!SSL_set_tlsext_host_name(socket->native_handle(), config_.host.c_str())) {
-            return {nullptr, error::Error("Failed to set SNI hostname")};
-        }
-
-        std::promise<error::Error> connect_promise;
-        auto connect_future = connect_promise.get_future();
-
-        asio::async_connect(socket->lowest_layer(), endpoints,
-            [&connect_promise, socket, this](const std::error_code& ec, const asio::ip::tcp::endpoint& /*endpoint*/) {
-                if (ec) {
-                    connect_promise.set_value(error::Error(ec.message()));
-                    return;
-                }
-
-                // Perform SSL handshake
-                socket->async_handshake(asio::ssl::stream_base::client,
-                    [&connect_promise](const std::error_code& ec) {
-                        if (ec) {
-                            connect_promise.set_value(error::Error("SSL handshake failed: " + ec.message()));
-                        } else {
-                            connect_promise.set_value(nullptr);
-                        }
-                    });
-            });
-
-        auto err = connect_future.get();
-        if (err) {
-            return {nullptr, err};
-        }
-
-        auto conn = std::make_shared<TCPTLSConnection>(socket, config_.noDelay);
-        conn->start();
-        return {conn, nullptr};
     }
 
     void shutdown() override {
-        if (ctx_ && !ctx_->io_context.stopped()) {
-            ctx_->work_guard.reset();
-            ctx_->io_context.stop();
-        }
+        io_context_.stop();
         if (thread_.joinable()) {
             thread_.join();
         }
@@ -124,7 +196,9 @@ public:
 
 private:
     ClientTransportTLSConfig config_;
-    std::shared_ptr<ClientTCPTLSContext> ctx_;
+    asio::io_context io_context_;
+    asio::ssl::context ssl_context_;
+    asio::executor_work_guard<asio::io_context::executor_type> work_guard_;
     std::thread thread_;
 };
 

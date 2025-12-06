@@ -5,7 +5,7 @@
 #include <csignal>
 
 #include "scg/server.h"
-#include "scg/ws/transport_server_no_tls.h"
+#include "scg/ws/transport_server_tls.h"
 #include "pingpong/pingpong.h"
 
 std::atomic<bool> running(true);
@@ -32,8 +32,6 @@ int main() {
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-
-
     // Configure logging
     scg::log::LoggingConfig logging;
     logging.level = scg::log::LogLevel::INFO;
@@ -50,14 +48,16 @@ int main() {
         printf("ERROR: %s\n", msg.c_str());
     };
 
-    // Configure transport
-    scg::ws::ServerTransportConfig transportConfig;
+    // Configure transport with TLS
+    scg::ws::ServerTransportTLSConfig transportConfig;
     transportConfig.port = 8000;
+    transportConfig.certFile = "../test/server.crt";
+    transportConfig.keyFile = "../test/server.key";
     transportConfig.logging = logging;
 
     // Configure server
     scg::rpc::ServerConfig config;
-    config.transport = std::make_shared<scg::ws::ServerTransportNoTLS>(transportConfig);
+    config.transport = std::make_shared<scg::ws::ServerTransportTLS>(transportConfig);
     config.errorHandler = [](const scg::error::Error& err) {
         printf("Server error: %s\n", err.message.c_str());
     };
@@ -72,8 +72,11 @@ int main() {
     // Start server (non-blocking)
     auto err = server->start();
     if (err) {
+        printf("Failed to start server: %s\n", err.message.c_str());
         return 1;
     }
+
+    printf("WebSocket TLS server started on port %d\n", transportConfig.port);
 
     // Main loop - poll for messages
     while (running) {

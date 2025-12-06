@@ -264,6 +264,25 @@ public:
             return std::make_pair(nullptr, error::Error("Server is not running"));
         }
 
+        // Check if there are any pending connections
+        if (pendingConnections_.empty()) {
+            return std::make_pair(nullptr, nullptr);
+        }
+
+        // Get the next pending connection
+        auto conn = pendingConnections_.front();
+        pendingConnections_.pop();
+
+        return std::make_pair(conn, nullptr);
+    }
+
+    void poll() override {
+        std::unique_lock<std::mutex> lock(mu_);
+
+        if (!running_) {
+            return;
+        }
+
         // Poll ASIO for any ready handlers (non-blocking). Handlers acquire the
         // same mutex, so release it while websocketpp invokes them to avoid
         // deadlocks when callbacks attempt to lock.
@@ -275,22 +294,6 @@ public:
         } catch (const std::exception&) {
             // Ignore errors
         }
-        lock.lock();
-
-        if (!running_) {
-            return std::make_pair(nullptr, error::Error("Server is not running"));
-        }
-
-        // Check if there are any pending connections
-        if (pendingConnections_.empty()) {
-            return std::make_pair(nullptr, nullptr);
-        }
-
-        // Get the next pending connection
-        auto conn = pendingConnections_.front();
-        pendingConnections_.pop();
-
-        return std::make_pair(conn, nullptr);
     }
 
     error::Error close() override {
