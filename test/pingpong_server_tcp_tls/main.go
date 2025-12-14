@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/rpc/tcp"
@@ -24,6 +26,15 @@ type pingpongServer struct {
 }
 
 func (s *pingpongServer) Ping(ctx context.Context, req *pingpong.PingRequest) (*pingpong.PongResponse, error) {
+	md := rpc.GetMetadataFromContext(ctx)
+	if md != nil {
+		if sleepStr, ok, _ := md.GetString("sleep"); ok {
+			if sleepMs, err := strconv.Atoi(sleepStr); err == nil && sleepMs > 0 {
+				time.Sleep(time.Duration(sleepMs) * time.Millisecond)
+			}
+		}
+	}
+
 	return &pingpong.PongResponse{
 		Pong: pingpong.Pong{
 			Count:   req.Ping.Count + 1,

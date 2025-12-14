@@ -121,7 +121,7 @@ func generateClientCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		}
 		args.ClientMethods = append(args.ClientMethods, ClientMethodArgs{
 			MethodNameCamelCase:      util.EnsureCamelCase(name),
-			MethodIDVarName:          methodIDVarName(util.EnsureCamelCase(name), util.EnsurePascalCase(name)),
+			MethodIDVarName:          methodIDVarName(svc.Name, name),
 			MethodID:                 methodID,
 			MethodRequestStructName:  methodArgType,
 			MethodResponseStructName: methodRetType,

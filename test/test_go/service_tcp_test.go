@@ -60,7 +60,7 @@ func (f *TCPTransportFactory) CreateClientTransport(id int) rpc.ClientTransport 
 }
 
 func (f *TCPTransportFactory) SupportsMultipleServers() bool {
-	return false // TCP doesn't support multiple servers on same port routing like NATS
+	return false // TCP doesn't support multiple servers on same port
 }
 
 func (f *TCPTransportFactory) Name() string {

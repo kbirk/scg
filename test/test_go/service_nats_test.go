@@ -33,7 +33,7 @@ func (f *NATSTransportFactory) CreateClientTransport(id int) rpc.ClientTransport
 }
 
 func (f *NATSTransportFactory) SupportsMultipleServers() bool {
-	return true // NATS supports multiple servers registering different services on same URL
+	return true // NATS naturally supports multiple subscribers
 }
 
 func (f *NATSTransportFactory) Name() string {

@@ -15,6 +15,8 @@ namespace unix_socket {
 
 struct ServerTransportConfig {
     std::string socketPath;
+    uint32_t maxSendMessageSize = 0; // 0 for no limit
+    uint32_t maxRecvMessageSize = 0; // 0 for no limit
 };
 
 class ServerTransportUnix : public scg::rpc::ServerTransport {
@@ -56,7 +58,7 @@ public:
             }
 
             // Connection accepted
-            return {std::make_shared<ConnectionUnix>(std::move(socket)), nullptr};
+            return {std::make_shared<ConnectionUnix>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
         } catch (const std::exception& e) {
             return {nullptr, error::Error(e.what())};
         }

@@ -71,12 +71,20 @@ public:
 	template <typename T>
 	std::pair<serialize::Reader, error::Error> call(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
 	{
-		auto [future, err] = sendMessage(ctx, serviceID, methodID, msg);
+		auto [future, requestID, err] = sendMessage(ctx, serviceID, methodID, msg);
 		if (err) {
 			return std::make_pair(serialize::Reader({}), err);
 		}
 
-		// TODO: respect any deadlines / timeouts on the context
+		if (ctx.hasDeadline()) {
+			auto status = future.wait_until(ctx.getDeadline());
+			if (status == std::future_status::timeout) {
+				// Remove request from map
+				std::lock_guard<std::mutex> lock(mu_);
+				requests_.erase(requestID);
+				return std::make_pair(serialize::Reader({}), error::Error("Request timed out"));
+			}
+		}
 
 		return receiveMessage(future);
 	}
@@ -211,7 +219,7 @@ protected:
 
 
 	template <typename T>
-	std::pair<std::future<serialize::Reader>,error::Error> sendMessage(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
+	std::tuple<std::future<serialize::Reader>, uint64_t, error::Error> sendMessage(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
 	{
 		uint64_t requestID = 0;
 		{
@@ -247,10 +255,10 @@ protected:
 		auto err = sendBytesUnsafe(writer.bytes());
 		if (err) {
 			requests_.erase(requestID);
-			return std::make_pair(std::future<serialize::Reader>(), err);
+			return std::make_tuple(std::future<serialize::Reader>(), 0, err);
 		}
 
-		return std::make_pair(promise->get_future(), nullptr);
+		return std::make_tuple(promise->get_future(), requestID, nullptr);
 	}
 
 	std::pair<serialize::Reader, error::Error> receiveMessage(std::future<serialize::Reader>& future)

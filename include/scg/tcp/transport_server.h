@@ -14,6 +14,8 @@ namespace tcp {
 
 struct ServerTransportConfig {
     int port;
+    uint32_t maxSendMessageSize = 0; // 0 for no limit
+    uint32_t maxRecvMessageSize = 0; // 0 for no limit
 };
 
 class ServerTransportTCP : public scg::rpc::ServerTransport {
@@ -54,7 +56,7 @@ public:
             }
 
             // Connection accepted
-            return {std::make_shared<ConnectionTCP>(std::move(socket)), nullptr};
+            return {std::make_shared<ConnectionTCP>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
         } catch (const std::exception& e) {
             return {nullptr, error::Error(e.what())};
         }

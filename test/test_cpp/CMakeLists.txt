@@ -37,47 +37,79 @@ add_executable(serialize_tests "serialize_tests.cpp")
 # UUID tests
 add_executable(uuid_tests "uuid_tests.cpp")
 
-# Client Websocket tests
-add_executable(client_ws_tests "client_ws_tests.cpp")
-
-# Client TCP tests
-add_executable(client_tcp_tests "client_tcp_tests.cpp")
-
-# Client Websocket with TLS tests
-add_executable(client_ws_tls_tests "client_ws_tls_tests.cpp")
-
-# Server Websocket tests
-add_executable(server_ws_test "server_ws_test.cpp")
-
-# Server Websocket TLS tests
-add_executable(server_ws_tls_test "server_ws_tls_test.cpp")
-
-# Server TCP test
-add_executable(server_tcp_test "server_tcp_test.cpp")
-
-# Client TCP TLS tests
-add_executable(client_tcp_tls_tests "client_tcp_tls_tests.cpp")
-
-# Server TCP TLS test
-add_executable(server_tcp_tls_test "server_tcp_tls_test.cpp")
-
 # Macro test
 add_executable(macro_test "macro_test.cpp")
 
-# Client Unix tests
-add_executable(client_unix_tests "client_unix_tests.cpp")
+# =============================================================================
+# Unified Test Suites (run in-process server + client for full test coverage)
+# =============================================================================
 
-# Server Unix test
+# TCP tests (includes TCP and TCP-TLS)
+add_executable(tcp_tests "tcp_tests.cpp")
+
+# Unix socket tests
+add_executable(unix_tests "unix_tests.cpp")
+
+# WebSocket tests (includes WebSocket and WebSocket-TLS)
+add_executable(ws_tests "ws_tests.cpp")
+
+# =============================================================================
+# Server Executables (for cross-language testing: Go Client + C++ Server)
+# =============================================================================
+
+# Server Websocket (for Go/other client testing)
+add_executable(server_ws_test "server_ws_test.cpp")
+
+# Server Websocket TLS (for Go/other client testing)
+add_executable(server_ws_tls_test "server_ws_tls_test.cpp")
+
+# Server TCP (for Go/other client testing)
+add_executable(server_tcp_test "server_tcp_test.cpp")
+
+# Server TCP TLS (for Go/other client testing)
+add_executable(server_tcp_tls_test "server_tcp_tls_test.cpp")
+
+# Server Unix (for Go/other client testing)
 add_executable(server_unix_test "server_unix_test.cpp")
 
+# =============================================================================
+# Client Executables (for cross-language testing: C++ Client + Go Server)
+# =============================================================================
+
+# Client TCP (connects to Go TCP server)
+add_executable(client_tcp_tests "client_tcp_tests.cpp")
+
+# Client TCP TLS (connects to Go TCP TLS server)
+add_executable(client_tcp_tls_tests "client_tcp_tls_tests.cpp")
+
+# Client Unix (connects to Go Unix server)
+add_executable(client_unix_tests "client_unix_tests.cpp")
+
+# Client WebSocket (connects to Go WebSocket server)
+add_executable(client_ws_tests "client_ws_tests.cpp")
+
+# Client WebSocket TLS (connects to Go WebSocket TLS server)
+add_executable(client_ws_tls_tests "client_ws_tls_tests.cpp")
+
+# =============================================================================
 # Link with libs
-target_link_libraries(client_ws_tests OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(client_ws_tls_tests OpenSSL::SSL OpenSSL::Crypto)
+# =============================================================================
+
+# Unified test suites
+target_link_libraries(tcp_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(unix_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(ws_tests OpenSSL::SSL OpenSSL::Crypto)
+
+# Server executables (cross-language testing)
 target_link_libraries(server_ws_test OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_ws_tls_test OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(client_tcp_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_tcp_test OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(client_tcp_tls_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_tcp_tls_test OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(client_unix_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_unix_test OpenSSL::SSL OpenSSL::Crypto)
+
+# Client executables (cross-language testing)
+target_link_libraries(client_tcp_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(client_tcp_tls_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(client_unix_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(client_ws_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(client_ws_tls_tests OpenSSL::SSL OpenSSL::Crypto)

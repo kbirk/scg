@@ -20,12 +20,14 @@ namespace tcp {
 struct ClientTransportConfig {
     std::string host;
     int port;
+    uint32_t maxSendMessageSize = 0; // 0 for no limit
+    uint32_t maxRecvMessageSize = 0; // 0 for no limit
 };
 
 class ConnectionTCP : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionTCP> {
 public:
-    ConnectionTCP(asio::ip::tcp::socket socket)
-        : socket_(std::move(socket)), closed_(false) {
+    ConnectionTCP(asio::ip::tcp::socket socket, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0)
+        : socket_(std::move(socket)), closed_(false), maxSendMessageSize_(maxSendMessageSize), maxRecvMessageSize_(maxRecvMessageSize) {
         socket_.set_option(asio::ip::tcp::no_delay(true));
     }
 
@@ -33,6 +35,11 @@ public:
         if (closed_) return error::Error("Connection closed");
 
         uint32_t len = static_cast<uint32_t>(data.size());
+
+        if (maxSendMessageSize_ > 0 && len > maxSendMessageSize_) {
+            return error::Error("Message size exceeds send limit");
+        }
+
         std::vector<uint8_t> buffer;
         buffer.reserve(4 + len);
         // Big endian length prefix
@@ -104,6 +111,11 @@ private:
             [this, self](std::error_code ec, std::size_t /*length*/) {
                 if (!ec) {
                     uint32_t len = (read_buffer_[0] << 24) | (read_buffer_[1] << 16) | (read_buffer_[2] << 8) | read_buffer_[3];
+                    if (maxRecvMessageSize_ > 0 && len > maxRecvMessageSize_) {
+                        if (failHandler_) failHandler_(error::Error("Message size exceeds receive limit"));
+                        close();
+                        return;
+                    }
                     read_body(len);
                 } else {
                     if (ec != asio::error::eof && failHandler_) failHandler_(error::Error(ec.message()));
@@ -135,6 +147,8 @@ private:
     std::deque<std::vector<uint8_t>> write_queue_;
     uint8_t read_buffer_[4];
     std::vector<uint8_t> body_buffer_;
+    uint32_t maxSendMessageSize_;
+    uint32_t maxRecvMessageSize_;
 };
 
 class ClientTransportTCP : public scg::rpc::ClientTransport {
@@ -156,7 +170,7 @@ public:
             auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
             asio::ip::tcp::socket socket(io_context_);
             asio::connect(socket, endpoints);
-            return {std::make_shared<ConnectionTCP>(std::move(socket)), nullptr};
+            return {std::make_shared<ConnectionTCP>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
         } catch (const std::exception& e) {
             return {nullptr, error::Error(e.what())};
         }

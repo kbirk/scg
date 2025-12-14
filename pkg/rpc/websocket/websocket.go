@@ -18,13 +18,20 @@ var upgrader = websocket.Upgrader{
 
 // WebSocketConnection implements the Connection interface for WebSocket
 type WebSocketConnection struct {
-	conn *websocket.Conn
-	mu   *sync.Mutex
+	conn               *websocket.Conn
+	mu                 *sync.Mutex
+	maxSendMessageSize uint32
+	maxRecvMessageSize uint32
 }
 
 func (c *WebSocketConnection) Send(data []byte, serviceID uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.maxSendMessageSize > 0 && uint32(len(data)) > c.maxSendMessageSize {
+		return fmt.Errorf("message size %d exceeds send limit %d", len(data), c.maxSendMessageSize)
+	}
+
 	return c.conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
@@ -35,8 +42,14 @@ func (c *WebSocketConnection) Receive() ([]byte, error) {
 		if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 			return nil, fmt.Errorf("connection closed")
 		}
+		return nil, err
 	}
-	return data, err
+
+	if c.maxRecvMessageSize > 0 && uint32(len(data)) > c.maxRecvMessageSize {
+		return nil, fmt.Errorf("message size %d exceeds receive limit %d", len(data), c.maxRecvMessageSize)
+	}
+
+	return data, nil
 }
 
 func (c *WebSocketConnection) Close() error {
@@ -45,28 +58,34 @@ func (c *WebSocketConnection) Close() error {
 
 // ServerTransport implements ServerTransport for WebSocket
 type ServerTransport struct {
-	Port     int
-	CertFile string
-	KeyFile  string
-	server   *http.Server
-	connCh   chan rpc.Connection
-	mu       *sync.Mutex
-	closed   bool
+	Port               int
+	CertFile           string
+	KeyFile            string
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
+	server             *http.Server
+	connCh             chan rpc.Connection
+	mu                 *sync.Mutex
+	closed             bool
 }
 
 type ServerTransportConfig struct {
-	Port     int
-	CertFile string // Optional: for TLS
-	KeyFile  string // Optional: for TLS
+	Port               int
+	CertFile           string // Optional: for TLS
+	KeyFile            string // Optional: for TLS
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewServerTransport(config ServerTransportConfig) *ServerTransport {
 	return &ServerTransport{
-		Port:     config.Port,
-		CertFile: config.CertFile,
-		KeyFile:  config.KeyFile,
-		connCh:   make(chan rpc.Connection, 16), // buffered channel for connections
-		mu:       &sync.Mutex{},
+		Port:               config.Port,
+		CertFile:           config.CertFile,
+		KeyFile:            config.KeyFile,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		connCh:             make(chan rpc.Connection, 16), // buffered channel for connections
+		mu:                 &sync.Mutex{},
 	}
 }
 
@@ -108,8 +127,10 @@ func (t *ServerTransport) handleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 
 	wsConn := &WebSocketConnection{
-		conn: conn,
-		mu:   &sync.Mutex{},
+		conn:               conn,
+		mu:                 &sync.Mutex{},
+		maxSendMessageSize: t.MaxSendMessageSize,
+		maxRecvMessageSize: t.MaxRecvMessageSize,
 	}
 
 	t.mu.Lock()
@@ -140,6 +161,10 @@ func (t *ServerTransport) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if t.closed {
+		return nil // Already closed
+	}
+
 	t.closed = true
 	close(t.connCh)
 
@@ -151,22 +176,28 @@ func (t *ServerTransport) Close() error {
 
 // ClientTransport implements ClientTransport for WebSocket
 type ClientTransport struct {
-	Host      string
-	Port      int
-	TLSConfig *tls.Config
+	Host               string
+	Port               int
+	TLSConfig          *tls.Config
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
 }
 
 type ClientTransportConfig struct {
-	Host      string
-	Port      int
-	TLSConfig *tls.Config
+	Host               string
+	Port               int
+	TLSConfig          *tls.Config
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewClientTransport(config ClientTransportConfig) *ClientTransport {
 	return &ClientTransport{
-		Host:      config.Host,
-		Port:      config.Port,
-		TLSConfig: config.TLSConfig,
+		Host:               config.Host,
+		Port:               config.Port,
+		TLSConfig:          config.TLSConfig,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
 	}
 }
 
@@ -190,7 +221,9 @@ func (t *ClientTransport) Connect() (rpc.Connection, error) {
 	}
 
 	return &WebSocketConnection{
-		conn: conn,
-		mu:   &sync.Mutex{},
+		conn:               conn,
+		mu:                 &sync.Mutex{},
+		maxSendMessageSize: t.MaxSendMessageSize,
+		maxRecvMessageSize: t.MaxRecvMessageSize,
 	}, nil
 }

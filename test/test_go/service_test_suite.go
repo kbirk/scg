@@ -10,6 +10,10 @@ import (
 	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
+	"github.com/kbirk/scg/pkg/rpc/nats"
+	"github.com/kbirk/scg/pkg/rpc/tcp"
+	"github.com/kbirk/scg/pkg/rpc/unix"
+	"github.com/kbirk/scg/pkg/rpc/websocket"
 	"github.com/kbirk/scg/test/files/output/basic"
 	"github.com/kbirk/scg/test/files/output/pingpong"
 
@@ -132,6 +136,18 @@ func RunTestSuite(t *testing.T, config TestSuiteConfig) {
 
 			t.Run("RapidConnectionChurn", func(t *testing.T) {
 				runRapidConnectionChurnTest(t, config.Factory, port)
+			})
+
+			t.Run("MaxMessageSize", func(t *testing.T) {
+				runMaxMessageSizeTest(t, config.Factory, port)
+			})
+
+			t.Run("ContextTimeout", func(t *testing.T) {
+				runContextTimeoutTest(t, config.Factory, port)
+			})
+
+			t.Run("ContextMetadata", func(t *testing.T) {
+				runContextMetadataTest(t, config.Factory, port)
 			})
 		}
 	}
@@ -1093,6 +1109,246 @@ func runSequentialRequestsTest(t *testing.T, factory TransportFactory, id int, u
 	}
 
 	t.Logf("All %d sequential requests completed successfully", numRequests)
+}
+
+// runMaxMessageSizeTest tests that messages exceeding the limit are rejected
+func runMaxMessageSizeTest(t *testing.T, factory TransportFactory, id int) {
+	// Create a factory wrapper that sets MaxMessageSize
+	limitedFactory := &LimitedTransportFactory{
+		delegate:           factory,
+		maxSendMessageSize: 1024, // 1KB limit
+		maxRecvMessageSize: 1024, // 1KB limit
+	}
+
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: limitedFactory.CreateServerTransport(id),
+		ErrHandler: func(err error) {
+			// Expected error on server side
+		},
+	})
+	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+
+	go func() {
+		server.ListenAndServe()
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: limitedFactory.CreateClientTransport(id),
+		ErrHandler: func(err error) {
+			// Expected error on client side
+		},
+	})
+
+	c := pingpong.NewPingPongClient(client)
+
+	// 1. Send small message (should succeed)
+	_, err := c.Ping(context.Background(), &pingpong.PingRequest{
+		Ping: pingpong.Ping{
+			Count: 1,
+			Payload: pingpong.TestPayload{
+				ValString: strings.Repeat("a", 100), // 100 bytes
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// 2. Send large message (should fail)
+	// Payload > 1024 bytes
+	_, err = c.Ping(context.Background(), &pingpong.PingRequest{
+		Ping: pingpong.Ping{
+			Count: 2,
+			Payload: pingpong.TestPayload{
+				ValString: strings.Repeat("a", 2000), // 2000 bytes
+			},
+		},
+	})
+	require.Error(t, err)
+	// The error message might vary depending on whether the client or server detected it first
+	// but the connection should be closed
+}
+
+func runContextTimeoutTest(t *testing.T, factory TransportFactory, port int) {
+	// Start server
+	serverTransport := factory.CreateServerTransport(port)
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: serverTransport,
+	})
+
+	pingPongSvc := &pingpongServer{}
+	pingpong.RegisterPingPongServer(server, pingPongSvc)
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			// Ignore transport closed error which happens on shutdown
+			if err.Error() != "transport is closed" {
+				t.Logf("Server error: %v", err)
+			}
+		}
+	}()
+	defer server.Shutdown(context.Background())
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Create client
+	clientTransport := factory.CreateClientTransport(port)
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: clientTransport,
+	})
+	defer client.Close()
+
+	svc := pingpong.NewPingPongClient(client)
+
+	// 1. Test successful call with long deadline
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req := &pingpong.PingRequest{
+		Ping: pingpong.Ping{
+			Count: 1,
+			Payload: pingpong.TestPayload{
+				ValString: "hello",
+			},
+		},
+	}
+
+	_, err := svc.Ping(ctx, req)
+	require.NoError(t, err, "Call with long deadline should succeed")
+
+	// 2. Test timeout
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+
+	// Add sleep metadata
+	md := rpc.NewMetadata()
+	md.PutString("sleep", "500")
+	ctx2 = rpc.NewContextWithMetadata(ctx2, md)
+
+	req2 := &pingpong.PingRequest{
+		Ping: pingpong.Ping{
+			Count: 2,
+			Payload: pingpong.TestPayload{
+				ValString: "timeout",
+			},
+		},
+	}
+
+	_, err = svc.Ping(ctx2, req2)
+	require.Error(t, err, "Call should timeout")
+	assert.Contains(t, err.Error(), "context deadline exceeded", "Error should be context deadline exceeded")
+}
+
+func runContextMetadataTest(t *testing.T, factory TransportFactory, port int) {
+	// Start server
+	serverTransport := factory.CreateServerTransport(port)
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: serverTransport,
+	})
+
+	pingPongSvc := &pingpongServer{}
+	pingpong.RegisterPingPongServer(server, pingPongSvc)
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			if err.Error() != "transport is closed" {
+				t.Logf("Server error: %v", err)
+			}
+		}
+	}()
+	defer server.Shutdown(context.Background())
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Create client
+	clientTransport := factory.CreateClientTransport(port)
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: clientTransport,
+	})
+	defer client.Close()
+
+	svc := pingpong.NewPingPongClient(client)
+
+	// Test with context metadata
+	md := rpc.NewMetadata()
+	md.PutString("key1", "value1")
+	md.PutString("key2", "value2")
+	md.PutString("token", "1234")
+	ctx := rpc.NewContextWithMetadata(context.Background(), md)
+
+	req := &pingpong.PingRequest{
+		Ping: pingpong.Ping{
+			Count: 42,
+		},
+	}
+
+	res, err := svc.Ping(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, int32(43), res.Pong.Count)
+}
+
+// LimitedTransportFactory wraps a TransportFactory to inject MaxMessageSize
+type LimitedTransportFactory struct {
+	delegate           TransportFactory
+	maxSendMessageSize uint32
+	maxRecvMessageSize uint32
+}
+
+func (f *LimitedTransportFactory) CreateServerTransport(id int) rpc.ServerTransport {
+	t := f.delegate.CreateServerTransport(id)
+	// Use reflection or type assertion to set MaxMessageSize if possible
+	// Since we modified the structs, we can try type assertion
+	switch v := t.(type) {
+	case *unix.ServerTransport:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	case *tcp.ServerTransport:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	case *tcp.ServerTransportTLS:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	case *websocket.ServerTransport:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	case *nats.ServerTransport:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	}
+	return t
+}
+
+func (f *LimitedTransportFactory) CreateClientTransport(id int) rpc.ClientTransport {
+	t := f.delegate.CreateClientTransport(id)
+	switch v := t.(type) {
+	case *unix.ClientTransport:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	case *tcp.ClientTransport:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	case *tcp.ClientTransportTLS:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	case *websocket.ClientTransport:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	case *nats.ClientTransport:
+		v.MaxSendMessageSize = f.maxSendMessageSize
+		v.MaxRecvMessageSize = f.maxRecvMessageSize
+	}
+	return t
+}
+
+func (f *LimitedTransportFactory) SupportsMultipleServers() bool {
+	return f.delegate.SupportsMultipleServers()
+}
+
+func (f *LimitedTransportFactory) Name() string {
+	return f.delegate.Name() + "Limited"
 }
 
 // Helper server implementations

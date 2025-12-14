@@ -18,6 +18,8 @@ struct ServerTransportTLSConfig {
     int port = 8443;
     std::string certFile;
     std::string keyFile;
+    uint32_t maxSendMessageSize = 0; // 0 for no limit
+    uint32_t maxRecvMessageSize = 0; // 0 for no limit
     log::LoggingConfig logging;
 };
 
@@ -41,14 +43,18 @@ typedef websocketpp::config::asio_tls::message_type WSMessage;
 // WebSocket server connection implementation (TLS)
 class WebSocketServerConnectionTLS : public rpc::Connection {
 public:
-    WebSocketServerConnectionTLS(WSServerTLS* server, WSConnectionHandle handle)
-        : server_(server), handle_(handle), closed_(false), ready_(false) {}
+    WebSocketServerConnectionTLS(WSServerTLS* server, WSConnectionHandle handle, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0)
+        : server_(server), handle_(handle), closed_(false), ready_(false), maxSendMessageSize_(maxSendMessageSize), maxRecvMessageSize_(maxRecvMessageSize) {}
 
     error::Error send(const std::vector<uint8_t>& data) override {
         std::lock_guard<std::mutex> lock(mu_);
 
         if (closed_) {
             return error::Error("Connection is closed");
+        }
+
+        if (maxSendMessageSize_ > 0 && data.size() > maxSendMessageSize_) {
+            return error::Error("Message size exceeds send limit");
         }
 
         if (!server_) {
@@ -116,6 +122,7 @@ public:
     // Internal methods called by transport
     void onMessage(std::shared_ptr<WSMessage> msg) {
         std::function<void(const std::vector<uint8_t>&)> handler;
+        std::function<void(const error::Error&)> failHandler;
         std::vector<uint8_t> data;
 
         {
@@ -125,6 +132,14 @@ public:
             }
 
             auto payload = msg->get_payload();
+            if (maxRecvMessageSize_ > 0 && payload.size() > maxRecvMessageSize_) {
+                failHandler = failHandler_;
+                if (failHandler) {
+                    failHandler(error::Error("Message size exceeds receive limit"));
+                }
+                return;
+            }
+
             data = std::vector<uint8_t>(payload.begin(), payload.end());
 
             if (!ready_ || !messageHandler_) {
@@ -183,6 +198,8 @@ private:
     std::function<void()> closeHandler_;
     bool closed_;
     bool ready_;  // Set to true when message handler is registered
+    uint32_t maxSendMessageSize_;
+    uint32_t maxRecvMessageSize_;
     std::queue<std::vector<uint8_t>> pendingMessages_;
     mutable std::mutex mu_;
 };
@@ -365,7 +382,7 @@ private:
         }
 
         // Create connection wrapper
-        auto conn = std::make_shared<WebSocketServerConnectionTLS>(&server_, hdl);
+        auto conn = std::make_shared<WebSocketServerConnectionTLS>(&server_, hdl, config_.maxSendMessageSize, config_.maxRecvMessageSize);
         conn->onOpen();
 
         // Add to active connections

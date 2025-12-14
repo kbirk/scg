@@ -17,6 +17,8 @@ struct ServerTransportTLSConfig {
     int port;
     std::string certFile;
     std::string keyFile;
+    uint32_t maxSendMessageSize = 0; // 0 for no limit
+    uint32_t maxRecvMessageSize = 0; // 0 for no limit
 };
 
 class ServerTransportTCPTLS : public scg::rpc::ServerTransport {
@@ -79,7 +81,7 @@ public:
                  return {nullptr, error::Error(std::string("Handshake failed: ") + e.what())};
             }
 
-            return {std::make_shared<ConnectionTLS>(std::move(ssl_stream)), nullptr};
+            return {std::make_shared<ConnectionTLS>(std::move(ssl_stream), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
         } catch (const std::exception& e) {
             return {nullptr, error::Error(e.what())};
         }

@@ -17,17 +17,24 @@ void signalHandler(int signum) {
 
 class PingPongServerImpl : public pingpong::PingPongServer {
 public:
-    std::pair<pingpong::PongResponse, scg::error::Error> ping(const scg::context::Context& ctx, const pingpong::PingRequest& req) override {
-        // Echo back the payload with incremented count
-        pingpong::PongResponse response;
-        response.pong.count = req.ping.count + 1;
-        response.pong.payload = req.ping.payload;
+	std::pair<pingpong::PongResponse, scg::error::Error> ping(const scg::context::Context& ctx, const pingpong::PingRequest& req) override {
+		// Check for "sleep" metadata
+		std::string sleepStr;
+		if (!ctx.get(sleepStr, "sleep")) {
+			int sleepMs = std::stoi(sleepStr);
+			if (sleepMs > 0) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+			}
+		}
 
-        return std::make_pair(response, nullptr);
-    }
-};
+		// Echo back the payload with incremented count
+		pingpong::PongResponse response;
+		response.pong.count = req.ping.count + 1;
+		response.pong.payload = req.ping.payload;
 
-int main() {
+		return std::make_pair(response, nullptr);
+	}
+};int main() {
     // Set up signal handler for graceful shutdown
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);

@@ -21,8 +21,10 @@ func setNoDelay(conn net.Conn, noDelay bool) error {
 
 // TCPConnection implements the Connection interface for TCP
 type TCPConnection struct {
-	conn net.Conn
-	mu   sync.Mutex
+	conn               net.Conn
+	mu                 sync.Mutex
+	maxSendMessageSize uint32
+	maxRecvMessageSize uint32
 }
 
 func (c *TCPConnection) Send(data []byte, serviceID uint64) error {
@@ -30,6 +32,11 @@ func (c *TCPConnection) Send(data []byte, serviceID uint64) error {
 	defer c.mu.Unlock()
 
 	length := uint32(len(data))
+
+	if c.maxSendMessageSize > 0 && length > c.maxSendMessageSize {
+		return fmt.Errorf("message size %d exceeds send limit %d", length, c.maxSendMessageSize)
+	}
+
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, length)
 
@@ -52,6 +59,10 @@ func (c *TCPConnection) Receive() ([]byte, error) {
 	}
 	length := binary.BigEndian.Uint32(header)
 
+	if c.maxRecvMessageSize > 0 && length > c.maxRecvMessageSize {
+		return nil, fmt.Errorf("message size %d exceeds receive limit %d", length, c.maxRecvMessageSize)
+	}
+
 	data := make([]byte, length)
 	if _, err := io.ReadFull(c.conn, data); err != nil {
 		if err == io.EOF {
@@ -68,24 +79,30 @@ func (c *TCPConnection) Close() error {
 
 // ServerTransport implements ServerTransport for TCP
 type ServerTransport struct {
-	Port     int
-	NoDelay  bool
-	listener net.Listener
-	connCh   chan rpc.Connection
-	mu       sync.Mutex
-	closed   bool
+	Port               int
+	NoDelay            bool
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
+	listener           net.Listener
+	connCh             chan rpc.Connection
+	mu                 sync.Mutex
+	closed             bool
 }
 
 type ServerTransportConfig struct {
-	Port    int
-	NoDelay bool // Disable Nagle's algorithm for better latency
+	Port               int
+	NoDelay            bool   // Disable Nagle's algorithm for better latency
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewServerTransport(config ServerTransportConfig) *ServerTransport {
 	return &ServerTransport{
-		Port:    config.Port,
-		NoDelay: config.NoDelay,
-		connCh:  make(chan rpc.Connection, 16),
+		Port:               config.Port,
+		NoDelay:            config.NoDelay,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		connCh:             make(chan rpc.Connection, 16),
 	}
 }
 
@@ -129,7 +146,9 @@ func (t *ServerTransport) acceptLoop() {
 		}
 
 		tcpConn := &TCPConnection{
-			conn: conn,
+			conn:               conn,
+			maxSendMessageSize: t.MaxSendMessageSize,
+			maxRecvMessageSize: t.MaxRecvMessageSize,
 		}
 
 		t.mu.Lock()
@@ -158,6 +177,10 @@ func (t *ServerTransport) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if t.closed {
+		return nil
+	}
+
 	t.closed = true
 	close(t.connCh)
 
@@ -169,22 +192,28 @@ func (t *ServerTransport) Close() error {
 
 // ClientTransport implements ClientTransport for TCP
 type ClientTransport struct {
-	Host    string
-	Port    int
-	NoDelay bool
+	Host               string
+	Port               int
+	NoDelay            bool
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
 }
 
 type ClientTransportConfig struct {
-	Host    string
-	Port    int
-	NoDelay bool // Disable Nagle's algorithm for better latency
+	Host               string
+	Port               int
+	NoDelay            bool   // Disable Nagle's algorithm for better latency
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewClientTransport(config ClientTransportConfig) *ClientTransport {
 	return &ClientTransport{
-		Host:    config.Host,
-		Port:    config.Port,
-		NoDelay: config.NoDelay,
+		Host:               config.Host,
+		Port:               config.Port,
+		NoDelay:            config.NoDelay,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
 	}
 }
 
@@ -201,6 +230,8 @@ func (t *ClientTransport) Connect() (rpc.Connection, error) {
 	}
 
 	return &TCPConnection{
-		conn: conn,
+		conn:               conn,
+		maxSendMessageSize: t.MaxSendMessageSize,
+		maxRecvMessageSize: t.MaxRecvMessageSize,
 	}, nil
 }

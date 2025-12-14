@@ -36,7 +36,7 @@ func (f *UnixTransportFactory) CreateClientTransport(id int) rpc.ClientTransport
 }
 
 func (f *UnixTransportFactory) SupportsMultipleServers() bool {
-	return false // Unix sockets don't support multiple servers on same path routing
+	return false // Unix sockets are point-to-point
 }
 
 func (f *UnixTransportFactory) Name() string {

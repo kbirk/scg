@@ -50,6 +50,18 @@ func (c *Client) GetMiddleware() []Middleware {
 	return c.conf.middleware
 }
 
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn != nil {
+		err := c.conn.Close()
+		c.conn = nil
+		return err
+	}
+	return nil
+}
+
 func (c *Client) handleError(err error) error {
 	c.logError("Encountered error: " + err.Error())
 	if c.conf.ErrHandler != nil {

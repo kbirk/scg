@@ -1,30 +1,34 @@
-// C++ Unix Client Tests - runs against an external Go server
-// Used for cross-language testing: C++ Client + Go Server
-
 #include "test_suite.h"
 #include "scg/unix/transport_server.h"
 #include "scg/unix/transport_client.h"
 
 // ============================================================================
-// Unix Client-Only Transport Factory (connects to external server)
+// Unix Socket Transport Factory
 // ============================================================================
 
-TransportFactory createUnixClientTransportFactory() {
+TransportFactory createUnixTransportFactory() {
     TransportFactory factory;
-    factory.name = "Unix-Client";
+    factory.name = "Unix";
 
-    // Server transport is not used in external server mode
     factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-        return nullptr;
+        scg::unix_socket::ServerTransportConfig transportConfig;
+        transportConfig.socketPath = "/tmp/scg_test_unix_" + std::to_string(id) + ".sock";
+        return std::make_shared<scg::unix_socket::ServerTransportUnix>(transportConfig);
     };
 
     factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
         scg::unix_socket::ClientTransportConfig transportConfig;
-        transportConfig.socketPath = "/tmp/scg_test_unix_0.sock";  // Must match Go server path (pingpong_server_unix)
+        transportConfig.socketPath = "/tmp/scg_test_unix_" + std::to_string(id) + ".sock";
         return std::make_shared<scg::unix_socket::ClientTransportUnix>(transportConfig);
     };
 
-    factory.createLimitedClientTransport = nullptr;
+    factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
+        scg::unix_socket::ClientTransportConfig transportConfig;
+        transportConfig.socketPath = "/tmp/scg_test_unix_" + std::to_string(id) + ".sock";
+        transportConfig.maxSendMessageSize = 1024;
+        transportConfig.maxRecvMessageSize = 1024;
+        return std::make_shared<scg::unix_socket::ClientTransportUnix>(transportConfig);
+    };
 
     return factory;
 }
@@ -33,14 +37,11 @@ TransportFactory createUnixClientTransportFactory() {
 // Test Suite Entry Point
 // ============================================================================
 
-void test_unix_client_suite() {
+void test_unix_suite() {
     TestSuiteConfig config;
-    config.factory = createUnixClientTransportFactory();
+    config.factory = createUnixTransportFactory();
     config.startingId = 0;
     config.maxRetries = 10;
-    config.useExternalServer = true;  // Connect to external Go server
-    config.skipGroupTests = true;     // Server groups require server control
-    config.skipEdgeTests = true;      // Edge tests require server control
     runTestSuite(config);
 }
 
@@ -48,6 +49,6 @@ void test_unix_client_suite() {
 #define TEST(x) {#x, x}
 
 TEST_LIST = {
-    TEST(test_unix_client_suite),
+    TEST(test_unix_suite),
     { NULL, NULL }
 };

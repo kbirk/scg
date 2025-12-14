@@ -14,30 +14,36 @@ import (
 
 // ServerTransportTLS implements ServerTransport for TCP with TLS
 type ServerTransportTLS struct {
-	Port     int
-	NoDelay  bool
-	CertFile string
-	KeyFile  string
-	listener net.Listener
-	connCh   chan rpc.Connection
-	mu       sync.Mutex
-	closed   bool
+	Port               int
+	NoDelay            bool
+	CertFile           string
+	KeyFile            string
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
+	listener           net.Listener
+	connCh             chan rpc.Connection
+	mu                 sync.Mutex
+	closed             bool
 }
 
 type ServerTransportTLSConfig struct {
-	Port     int
-	NoDelay  bool   // Disable Nagle's algorithm (default: true)
-	CertFile string // Server certificate file (PEM)
-	KeyFile  string // Server private key file (PEM)
+	Port               int
+	NoDelay            bool   // Disable Nagle's algorithm (default: true)
+	CertFile           string // Server certificate file (PEM)
+	KeyFile            string // Server private key file (PEM)
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewServerTransportTLS(config ServerTransportTLSConfig) *ServerTransportTLS {
 	return &ServerTransportTLS{
-		Port:     config.Port,
-		NoDelay:  config.NoDelay,
-		CertFile: config.CertFile,
-		KeyFile:  config.KeyFile,
-		connCh:   make(chan rpc.Connection, 16),
+		Port:               config.Port,
+		NoDelay:            config.NoDelay,
+		CertFile:           config.CertFile,
+		KeyFile:            config.KeyFile,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		connCh:             make(chan rpc.Connection, 16),
 	}
 }
 
@@ -92,7 +98,9 @@ func (t *ServerTransportTLS) acceptLoop() {
 		}
 
 		tcpConn := &TCPConnection{
-			conn: conn,
+			conn:               conn,
+			maxSendMessageSize: t.MaxSendMessageSize,
+			maxRecvMessageSize: t.MaxRecvMessageSize,
 		}
 
 		t.mu.Lock()
@@ -121,6 +129,10 @@ func (t *ServerTransportTLS) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if t.closed {
+		return nil
+	}
+
 	t.closed = true
 	close(t.connCh)
 
@@ -137,6 +149,8 @@ type ClientTransportTLS struct {
 	NoDelay            bool
 	InsecureSkipVerify bool
 	CAFile             string
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
 }
 
 type ClientTransportTLSConfig struct {
@@ -145,6 +159,8 @@ type ClientTransportTLSConfig struct {
 	NoDelay            bool   // Disable Nagle's algorithm (default: true)
 	InsecureSkipVerify bool   // Skip certificate verification (for testing)
 	CAFile             string // Optional CA certificate file for verification
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewClientTransportTLS(config ClientTransportTLSConfig) *ClientTransportTLS {
@@ -154,6 +170,8 @@ func NewClientTransportTLS(config ClientTransportTLSConfig) *ClientTransportTLS 
 		NoDelay:            config.NoDelay,
 		InsecureSkipVerify: config.InsecureSkipVerify,
 		CAFile:             config.CAFile,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
 	}
 }
 
@@ -187,6 +205,8 @@ func (t *ClientTransportTLS) Connect() (rpc.Connection, error) {
 	}
 
 	return &TCPConnection{
-		conn: conn,
+		conn:               conn,
+		maxSendMessageSize: t.MaxSendMessageSize,
+		maxRecvMessageSize: t.MaxRecvMessageSize,
 	}, nil
 }

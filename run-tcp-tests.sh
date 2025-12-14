@@ -63,11 +63,28 @@ else
 fi
 
 # ========================================
-# C++ TCP Tests (C++ Client + C++ Server)
+# C++ TCP Tests  (C++ Client + C++ Server)
 # ========================================
 echo -e "\n${YELLOW}Running C++ TCP tests (C++ Client + C++ Server)...${NC}"
 
-# Start server
+run_with_timeout "C++ TCP tests" ./tcp_tests
+status=$?
+
+if [ $status -eq 0 ]; then
+	echo -e "${GREEN}C++ TCP tests passed${NC}"
+else
+	echo -e "${RED}C++ TCP tests failed${NC}"
+	exit 1
+fi
+
+sleep 1
+
+# ========================================
+# Cross-Language Tests: Go Client + C++ Server (TCP)
+# ========================================
+echo -e "\n${YELLOW}Running TCP tests (Go Client + C++ Server)...${NC}"
+
+# Start C++ TCP server
 ./server_tcp_test > server.log 2>&1 &
 pid=$!
 echo "Started C++ TCP server (PID: $pid)"
@@ -75,8 +92,13 @@ echo "Started C++ TCP server (PID: $pid)"
 # Wait for server to start
 sleep 1
 
-# Run client tests
-run_with_timeout "C++ TCP client tests" ./client_tcp_tests
+if ! kill -0 $pid 2>/dev/null; then
+	echo -e "${RED}Failed to start C++ TCP server${NC}"
+	exit 1
+fi
+
+# Run Go client tests with external server option
+run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestTCPExternalServer ../test/test_go/service_tcp_test.go ../test/test_go/service_test_suite.go ../test/test_go/test_utils.go
 status=$?
 
 # Stop server
@@ -85,13 +107,47 @@ wait $pid 2>/dev/null || true
 pid=""
 
 if [ $status -eq 0 ]; then
-	echo -e "${GREEN}C++ TCP tests (C++ Client + C++ Server) passed${NC}"
+	echo -e "${GREEN}TCP tests (Go Client + C++ Server) passed${NC}"
 else
-	echo -e "${RED}C++ TCP tests (C++ Client + C++ Server) failed${NC}"
+	echo -e "${RED}TCP tests (Go Client + C++ Server) failed${NC}"
 	exit 1
 fi
 
 sleep 1
+
+# ========================================
+# Cross-Language Tests: Go Client + C++ Server (TCP TLS)
+# ========================================
+echo -e "\n${YELLOW}Running TCP TLS tests (Go Client + C++ Server)...${NC}"
+
+# Start C++ TCP TLS server
+./server_tcp_tls_test > server.log 2>&1 &
+pid=$!
+echo "Started C++ TCP TLS server (PID: $pid)"
+
+# Wait for server to start
+sleep 1
+
+if ! kill -0 $pid 2>/dev/null; then
+	echo -e "${RED}Failed to start C++ TCP TLS server${NC}"
+	exit 1
+fi
+
+# Run Go client tests with external server option
+run_with_timeout "Go Client + C++ TLS Server tests" go test -v -count=1 -run TestTCPTLSExternalServer ../test/test_go/service_tcp_test.go ../test/test_go/service_test_suite.go ../test/test_go/test_utils.go
+status=$?
+
+# Stop server
+kill $pid 2>/dev/null || true
+wait $pid 2>/dev/null || true
+pid=""
+
+if [ $status -eq 0 ]; then
+	echo -e "${GREEN}TCP TLS tests (Go Client + C++ Server) passed${NC}"
+else
+	echo -e "${RED}TCP TLS tests (Go Client + C++ Server) failed${NC}"
+	exit 1
+fi
 
 # ========================================
 # TCP Tests (C++ Client + Go Server)
@@ -131,44 +187,13 @@ fi
 sleep 1
 
 # ========================================
-# C++ TCP TLS Tests (C++ Client + C++ Server)
-# ========================================
-echo -e "\n${YELLOW}Running C++ TCP TLS tests (C++ Client + C++ Server)...${NC}"
-
-# Start TLS server
-./server_tcp_tls_test > server.log 2>&1 &
-pid=$!
-echo "Started C++ TCP TLS server (PID: $pid)"
-
-# Wait for server to start
-sleep 1
-
-# Run client TLS tests
-run_with_timeout "C++ TCP TLS client tests" ./client_tcp_tls_tests
-status=$?
-
-# Stop server
-kill $pid 2>/dev/null || true
-wait $pid 2>/dev/null || true
-pid=""
-
-if [ $status -eq 0 ]; then
-	echo -e "${GREEN}C++ TCP TLS tests (C++ Client + C++ Server) passed${NC}"
-else
-	echo -e "${RED}C++ TCP TLS tests (C++ Client + C++ Server) failed${NC}"
-	exit 1
-fi
-
-sleep 1
-
-# ========================================
 # TCP TLS Tests (C++ Client + Go Server)
 # ========================================
 echo -e "\n${YELLOW}Running TCP TLS tests (C++ Client + Go Server)...${NC}"
 
 # Build and start Go TCP TLS server
 go build -o pingpong_tcp_tls ../test/pingpong_server_tcp_tls/main.go
-./pingpong_tcp_tls --cert="../test/server.crt" --key="../test/server.key" > server.log 2>&1 &
+./pingpong_tcp_tls --cert=../test/server.crt --key=../test/server.key > server.log 2>&1 &
 pid=$!
 echo "Started Go TCP TLS server (PID: $pid)"
 
@@ -193,82 +218,6 @@ if [ $status -eq 0 ]; then
 	echo -e "${GREEN}TCP TLS tests (C++ Client + Go Server) passed${NC}"
 else
 	echo -e "${RED}TCP TLS tests (C++ Client + Go Server) failed${NC}"
-	exit 1
-fi
-
-sleep 1
-
-# ========================================
-# TCP Tests (Go Client + C++ Server)
-# ========================================
-echo -e "\n${YELLOW}Running TCP tests (Go Client + C++ Server)...${NC}"
-
-# Start C++ TCP server
-./server_tcp_test > server.log 2>&1 &
-pid=$!
-echo "Started C++ TCP server (PID: $pid)"
-
-# Wait for server to start
-sleep 1
-
-if ! kill -0 $pid 2>/dev/null; then
-	echo -e "${RED}Failed to start C++ TCP server${NC}"
-	exit 1
-fi
-
-# Run Go client tests against external server
-cd ..
-run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestTCPExternalServer ./test/test_go/service_tcp_test.go ./test/test_go/service_test_suite.go ./test/test_go/test_utils.go
-status=$?
-cd .build
-
-# Stop server
-kill $pid 2>/dev/null || true
-wait $pid 2>/dev/null || true
-pid=""
-
-if [ $status -eq 0 ]; then
-	echo -e "${GREEN}TCP tests (Go Client + C++ Server) passed${NC}"
-else
-	echo -e "${RED}TCP tests (Go Client + C++ Server) failed${NC}"
-	exit 1
-fi
-
-sleep 1
-
-# ========================================
-# TCP TLS Tests (Go Client + C++ Server)
-# ========================================
-echo -e "\n${YELLOW}Running TCP TLS tests (Go Client + C++ Server)...${NC}"
-
-# Start C++ TCP TLS server
-./server_tcp_tls_test > server.log 2>&1 &
-pid=$!
-echo "Started C++ TCP TLS server (PID: $pid)"
-
-# Wait for server to start
-sleep 1
-
-if ! kill -0 $pid 2>/dev/null; then
-	echo -e "${RED}Failed to start C++ TCP TLS server${NC}"
-	exit 1
-fi
-
-# Run Go client TLS tests against external server
-cd ..
-run_with_timeout "Go Client + C++ Server TLS tests" go test -v -count=1 -run TestTCPTLSExternalServer ./test/test_go/service_tcp_test.go ./test/test_go/service_test_suite.go ./test/test_go/test_utils.go
-status=$?
-cd .build
-
-# Stop server
-kill $pid 2>/dev/null || true
-wait $pid 2>/dev/null || true
-pid=""
-
-if [ $status -eq 0 ]; then
-	echo -e "${GREEN}TCP TLS tests (Go Client + C++ Server) passed${NC}"
-else
-	echo -e "${RED}TCP TLS tests (Go Client + C++ Server) failed${NC}"
 	exit 1
 fi
 

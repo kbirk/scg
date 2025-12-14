@@ -18,6 +18,8 @@ namespace ws {
 struct ClientTransportConfig {
     std::string host = "localhost";
     int port = 8080;
+    uint32_t maxSendMessageSize = 0; // 0 for no limit
+    uint32_t maxRecvMessageSize = 0; // 0 for no limit
     log::LoggingConfig logging;
 };
 
@@ -41,12 +43,16 @@ typedef websocketpp::config::asio_client::message_type WSMessage;
 // WebSocket connection implementation (no TLS)
 class WebSocketConnection : public rpc::Connection {
 public:
-    WebSocketConnection(WSClientNoTLS* client, WSConnectionHandle handle)
-        : client_(client), handle_(handle) {}
+    WebSocketConnection(WSClientNoTLS* client, WSConnectionHandle handle, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0)
+        : client_(client), handle_(handle), maxSendMessageSize_(maxSendMessageSize), maxRecvMessageSize_(maxRecvMessageSize) {}
 
     error::Error send(const std::vector<uint8_t>& data) override {
         if (!client_) {
             return error::Error("Connection is not available");
+        }
+
+        if (maxSendMessageSize_ > 0 && data.size() > maxSendMessageSize_) {
+            return error::Error("Message size exceeds send limit");
         }
 
         std::error_code ec;
@@ -86,6 +92,12 @@ public:
     void onMessage(std::shared_ptr<WSMessage> msg) {
         if (messageHandler_ && msg->get_opcode() == websocketpp::frame::opcode::binary) {
             auto payload = msg->get_payload();
+            if (maxRecvMessageSize_ > 0 && payload.size() > maxRecvMessageSize_) {
+                if (failHandler_) {
+                    failHandler_(error::Error("Message size exceeds receive limit"));
+                }
+                return;
+            }
             std::vector<uint8_t> data(payload.begin(), payload.end());
             messageHandler_(data);
         }
@@ -110,6 +122,8 @@ public:
 private:
     WSClientNoTLS* client_;
     WSConnectionHandle handle_;
+    uint32_t maxSendMessageSize_;
+    uint32_t maxRecvMessageSize_;
     std::function<void(const std::vector<uint8_t>&)> messageHandler_;
     std::function<void(const error::Error&)> failHandler_;
     std::function<void()> closeHandler_;
@@ -146,7 +160,7 @@ public:
         }
 
         auto handle = conn->get_handle();
-        auto wsConn = std::make_shared<WebSocketConnection>(&client_, handle);
+        auto wsConn = std::make_shared<WebSocketConnection>(&client_, handle, config_.maxSendMessageSize, config_.maxRecvMessageSize);
 
         // Create a promise to wait for connection completion
         auto promise = std::make_shared<std::promise<error::Error>>();
@@ -185,10 +199,14 @@ public:
 
     void shutdown() override {
         if (thread_) {
-            // this flags the `run` method to exit once all connections are closed
+            // Stop perpetual mode so run() can exit
             client_.stop_perpetual();
 
-            // wait until the `run` method exits
+            // Force the io_service to stop immediately rather than waiting for
+            // the close handshake timeout (5 seconds by default)
+            client_.get_io_service().stop();
+
+            // Wait for the run() thread to exit
             thread_->join();
             thread_.reset();
         }

@@ -13,8 +13,10 @@ import (
 
 // UnixConnection implements the Connection interface for Unix sockets
 type UnixConnection struct {
-	conn net.Conn
-	mu   sync.Mutex
+	conn               net.Conn
+	mu                 sync.Mutex
+	maxSendMessageSize uint32
+	maxRecvMessageSize uint32
 }
 
 func (c *UnixConnection) Send(data []byte, serviceID uint64) error {
@@ -22,6 +24,11 @@ func (c *UnixConnection) Send(data []byte, serviceID uint64) error {
 	defer c.mu.Unlock()
 
 	length := uint32(len(data))
+
+	if c.maxSendMessageSize > 0 && length > c.maxSendMessageSize {
+		return fmt.Errorf("message size %d exceeds send limit %d", length, c.maxSendMessageSize)
+	}
+
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, length)
 
@@ -44,6 +51,10 @@ func (c *UnixConnection) Receive() ([]byte, error) {
 	}
 	length := binary.BigEndian.Uint32(header)
 
+	if c.maxRecvMessageSize > 0 && length > c.maxRecvMessageSize {
+		return nil, fmt.Errorf("message size %d exceeds receive limit %d", length, c.maxRecvMessageSize)
+	}
+
 	data := make([]byte, length)
 	if _, err := io.ReadFull(c.conn, data); err != nil {
 		if err == io.EOF {
@@ -60,21 +71,27 @@ func (c *UnixConnection) Close() error {
 
 // ServerTransport implements ServerTransport for Unix sockets
 type ServerTransport struct {
-	SocketPath string
-	listener   net.Listener
-	connCh     chan rpc.Connection
-	mu         sync.Mutex
-	closed     bool
+	SocketPath         string
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
+	listener           net.Listener
+	connCh             chan rpc.Connection
+	mu                 sync.Mutex
+	closed             bool
 }
 
 type ServerTransportConfig struct {
-	SocketPath string // Path to the Unix socket file
+	SocketPath         string // Path to the Unix socket file
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewServerTransport(config ServerTransportConfig) *ServerTransport {
 	return &ServerTransport{
-		SocketPath: config.SocketPath,
-		connCh:     make(chan rpc.Connection, 16),
+		SocketPath:         config.SocketPath,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		connCh:             make(chan rpc.Connection, 16),
 	}
 }
 
@@ -117,7 +134,9 @@ func (t *ServerTransport) acceptLoop() {
 		}
 
 		unixConn := &UnixConnection{
-			conn: conn,
+			conn:               conn,
+			maxSendMessageSize: t.MaxSendMessageSize,
+			maxRecvMessageSize: t.MaxRecvMessageSize,
 		}
 
 		t.mu.Lock()
@@ -146,6 +165,10 @@ func (t *ServerTransport) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if t.closed {
+		return nil
+	}
+
 	t.closed = true
 	close(t.connCh)
 
@@ -162,16 +185,22 @@ func (t *ServerTransport) Close() error {
 
 // ClientTransport implements ClientTransport for Unix sockets
 type ClientTransport struct {
-	SocketPath string
+	SocketPath         string
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
 }
 
 type ClientTransportConfig struct {
-	SocketPath string // Path to the Unix socket file
+	SocketPath         string // Path to the Unix socket file
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewClientTransport(config ClientTransportConfig) *ClientTransport {
 	return &ClientTransport{
-		SocketPath: config.SocketPath,
+		SocketPath:         config.SocketPath,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
 	}
 }
 
@@ -182,6 +211,8 @@ func (t *ClientTransport) Connect() (rpc.Connection, error) {
 	}
 
 	return &UnixConnection{
-		conn: conn,
+		conn:               conn,
+		maxSendMessageSize: t.MaxSendMessageSize,
+		maxRecvMessageSize: t.MaxRecvMessageSize,
 	}, nil
 }

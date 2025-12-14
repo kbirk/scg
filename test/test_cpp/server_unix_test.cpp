@@ -18,6 +18,15 @@ void signalHandler(int signum) {
 class PingPongServerImpl : public pingpong::PingPongServer {
 public:
 	std::pair<pingpong::PongResponse, scg::error::Error> ping(const scg::context::Context& ctx, const pingpong::PingRequest& req) override {
+		// Check for "sleep" metadata
+		std::string sleepStr;
+		if (!ctx.get(sleepStr, "sleep")) {
+			int sleepMs = std::stoi(sleepStr);
+			if (sleepMs > 0) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+			}
+		}
+
 		// Echo back the payload with incremented count
 		pingpong::PongResponse response;
 		response.pong.count = req.ping.count + 1;

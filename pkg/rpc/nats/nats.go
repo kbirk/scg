@@ -10,24 +10,30 @@ import (
 
 // ServerTransport implements ServerTransport for NATS using request/response pattern
 type ServerTransport struct {
-	URL    string
-	nc     *nats.Conn
-	subs   map[uint64]*nats.Subscription
-	connCh chan rpc.Connection
-	mu     *sync.Mutex
-	closed bool
+	URL                string
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
+	nc                 *nats.Conn
+	subs               map[uint64]*nats.Subscription
+	connCh             chan rpc.Connection
+	mu                 *sync.Mutex
+	closed             bool
 }
 
 type ServerTransportConfig struct {
-	URL string
+	URL                string
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewServerTransport(config ServerTransportConfig) *ServerTransport {
 	return &ServerTransport{
-		URL:    config.URL,
-		subs:   make(map[uint64]*nats.Subscription),
-		connCh: make(chan rpc.Connection, 100),
-		mu:     &sync.Mutex{},
+		URL:                config.URL,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		subs:               make(map[uint64]*nats.Subscription),
+		connCh:             make(chan rpc.Connection, 100),
+		mu:                 &sync.Mutex{},
 	}
 }
 
@@ -49,8 +55,10 @@ func (t *ServerTransport) subscribeToService(serviceID uint64) error {
 
 	sub, err := t.nc.Subscribe(subject, func(msg *nats.Msg) {
 		conn := &natsServerConnection{
-			msg:     msg,
-			request: msg.Data,
+			msg:                msg,
+			request:            msg.Data,
+			maxSendMessageSize: t.MaxSendMessageSize,
+			maxRecvMessageSize: t.MaxRecvMessageSize,
 		}
 
 		t.mu.Lock()
@@ -130,15 +138,22 @@ func (t *ServerTransport) Close() error {
 }
 
 type natsServerConnection struct {
-	msg      *nats.Msg
-	request  []byte
-	mu       sync.Mutex
-	received bool
+	msg                *nats.Msg
+	request            []byte
+	mu                 sync.Mutex
+	received           bool
+	maxSendMessageSize uint32
+	maxRecvMessageSize uint32
 }
 
 func (c *natsServerConnection) Send(data []byte, serviceID uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.maxSendMessageSize > 0 && uint32(len(data)) > c.maxSendMessageSize {
+		return fmt.Errorf("message size %d exceeds send limit %d", len(data), c.maxSendMessageSize)
+	}
+
 	return c.msg.Respond(data)
 }
 
@@ -151,6 +166,11 @@ func (c *natsServerConnection) Receive() ([]byte, error) {
 	}
 
 	c.received = true
+
+	if c.maxRecvMessageSize > 0 && uint32(len(c.request)) > c.maxRecvMessageSize {
+		return nil, fmt.Errorf("message size %d exceeds receive limit %d", len(c.request), c.maxRecvMessageSize)
+	}
+
 	return c.request, nil
 }
 
@@ -159,19 +179,25 @@ func (c *natsServerConnection) Close() error {
 }
 
 type ClientTransport struct {
-	URL string
-	nc  *nats.Conn
-	mu  *sync.Mutex
+	URL                string
+	MaxSendMessageSize uint32
+	MaxRecvMessageSize uint32
+	nc                 *nats.Conn
+	mu                 *sync.Mutex
 }
 
 type ClientTransportConfig struct {
-	URL string
+	URL                string
+	MaxSendMessageSize uint32 // Maximum send message size in bytes (0 for no limit)
+	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
 func NewClientTransport(config ClientTransportConfig) *ClientTransport {
 	return &ClientTransport{
-		URL: config.URL,
-		mu:  &sync.Mutex{},
+		URL:                config.URL,
+		MaxSendMessageSize: config.MaxSendMessageSize,
+		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		mu:                 &sync.Mutex{},
 	}
 }
 
@@ -199,22 +225,30 @@ func (t *ClientTransport) Connect() (rpc.Connection, error) {
 	}
 
 	return &natsClientConnection{
-		transport:  t,
-		inbox:      inbox,
-		sub:        sub,
-		responseCh: responseCh,
+		transport:          t,
+		inbox:              inbox,
+		sub:                sub,
+		responseCh:         responseCh,
+		maxSendMessageSize: t.MaxSendMessageSize,
+		maxRecvMessageSize: t.MaxRecvMessageSize,
 	}, nil
 }
 
 // natsClientConnection implements Connection for NATS
 type natsClientConnection struct {
-	transport  *ClientTransport
-	inbox      string
-	sub        *nats.Subscription
-	responseCh chan *nats.Msg
+	transport          *ClientTransport
+	inbox              string
+	sub                *nats.Subscription
+	responseCh         chan *nats.Msg
+	maxSendMessageSize uint32
+	maxRecvMessageSize uint32
 }
 
 func (c *natsClientConnection) Send(data []byte, serviceID uint64) error {
+	if c.maxSendMessageSize > 0 && uint32(len(data)) > c.maxSendMessageSize {
+		return fmt.Errorf("message size %d exceeds send limit %d", len(data), c.maxSendMessageSize)
+	}
+
 	subject := fmt.Sprintf("rpc.%d", serviceID)
 
 	msg := &nats.Msg{
@@ -235,6 +269,11 @@ func (c *natsClientConnection) Receive() ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("connection closed")
 	}
+
+	if c.maxRecvMessageSize > 0 && uint32(len(msg.Data)) > c.maxRecvMessageSize {
+		return nil, fmt.Errorf("message size %d exceeds receive limit %d", len(msg.Data), c.maxRecvMessageSize)
+	}
+
 	return msg.Data, nil
 }
 

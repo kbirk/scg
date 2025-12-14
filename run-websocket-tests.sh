@@ -64,139 +64,24 @@ else
 fi
 
 # ========================================
-# WebSocket No TLS Tests (C++ Client + Go Server)
+# C++ WebSocket Tests (C++ Client + C++ Server)
+# Covers both WebSocket and WebSocket-TLS
 # ========================================
-echo -e "\n${YELLOW}Running WebSocket (no TLS) tests - C++ Client + Go Server...${NC}"
+echo -e "\n${YELLOW}Running C++ WebSocket tests (C++ Client + C++ Server)...${NC}"
 
-# Build and start pingpong server
-go build -o pingpong ../test/pingpong_server_ws/main.go
-./pingpong > output.txt 2>&1 &
-pid=$!
-sleep 1
-
-if ! kill -0 $pid 2>/dev/null; then
-	echo -e "${RED}Failed to start pingpong server${NC}"
-	exit 1
-fi
-
-echo -e "${GREEN}PingPong Go server started (pid: $pid)${NC}"
-
-# Run client tests
-if run_with_timeout "C++ Client + Go Server tests" ./client_ws_tests; then
-	echo -e "${GREEN}C++ Client + Go Server tests passed${NC}"
+if run_with_timeout "C++ WebSocket tests" ./ws_tests; then
+	echo -e "${GREEN}C++ WebSocket tests passed${NC}"
 else
-	echo -e "${RED}C++ Client + Go Server tests failed${NC}"
-	kill $pid 2>/dev/null || true
+	echo -e "${RED}C++ WebSocket tests failed${NC}"
 	exit 1
 fi
 
-# Stop server
-kill $pid 2>/dev/null || true
-wait $pid 2>/dev/null || true
-pid=""
 sleep 1
 
 # ========================================
-# WebSocket No TLS Tests (C++ Client + C++ Server)
+# Cross-Language Tests: Go Client + C++ Server (WebSocket)
 # ========================================
-echo -e "\n${YELLOW}Running WebSocket (no TLS) tests - C++ Client + C++ Server...${NC}"
-
-# Start C++ server
-./server_ws_test > output.txt 2>&1 &
-pid=$!
-sleep 1
-
-if ! kill -0 $pid 2>/dev/null; then
-	echo -e "${RED}Failed to start C++ server${NC}"
-	exit 1
-fi
-
-echo -e "${GREEN}C++ server started (pid: $pid)${NC}"
-
-# Run C++ client tests
-if run_with_timeout "C++ Client + C++ Server tests" ./client_ws_tests; then
-	echo -e "${GREEN}C++ Client + C++ Server tests passed${NC}"
-else
-	echo -e "${RED}C++ Client + C++ Server tests failed${NC}"
-	kill $pid 2>/dev/null || true
-	exit 1
-fi
-
-# Stop server
-kill $pid 2>/dev/null || true
-wait $pid 2>/dev/null || true
-pid=""
-sleep 1
-
-# ========================================
-# WebSocket TLS Tests (C++ Client + Go Server)
-# ========================================
-echo -e "\n${YELLOW}Running WebSocket (TLS) tests - C++ Client + Go Server...${NC}"
-
-# Build and start pingpong server with TLS
-go build -o pingpong_tls ../test/pingpong_server_tls/main.go
-./pingpong_tls --cert="../test/server.crt" --key="../test/server.key" > output.txt 2>&1 &
-pid=$!
-sleep 1
-
-if ! kill -0 $pid 2>/dev/null; then
-	echo -e "${RED}Failed to start pingpong TLS server${NC}"
-	exit 1
-fi
-
-echo -e "${GREEN}PingPong TLS server started (pid: $pid)${NC}"
-
-# Run client TLS tests
-if run_with_timeout "C++ Client + Go Server TLS tests" ./client_ws_tls_tests; then
-	echo -e "${GREEN}WebSocket TLS (C++ Client + Go Server) tests passed${NC}"
-else
-	echo -e "${RED}WebSocket TLS (C++ Client + Go Server) tests failed${NC}"
-	kill $pid 2>/dev/null || true
-	exit 1
-fi
-
-# Stop server
-kill $pid 2>/dev/null || true
-wait $pid 2>/dev/null || true
-pid=""
-sleep 1
-
-# ========================================
-# WebSocket TLS Tests (C++ Client + C++ Server)
-# ========================================
-echo -e "\n${YELLOW}Running WebSocket (TLS) tests - C++ Client + C++ Server...${NC}"
-
-# Start C++ TLS server
-./server_ws_tls_test > output.txt 2>&1 &
-pid=$!
-sleep 1
-
-if ! kill -0 $pid 2>/dev/null; then
-	echo -e "${RED}Failed to start C++ TLS server${NC}"
-	exit 1
-fi
-
-echo -e "${GREEN}C++ TLS server started (pid: $pid)${NC}"
-
-# Run client TLS tests
-if run_with_timeout "C++ Client + C++ Server TLS tests" ./client_ws_tls_tests; then
-	echo -e "${GREEN}WebSocket TLS (C++ Client + C++ Server) tests passed${NC}"
-else
-	echo -e "${RED}WebSocket TLS (C++ Client + C++ Server) tests failed${NC}"
-	kill $pid 2>/dev/null || true
-	exit 1
-fi
-
-# Stop server
-kill $pid 2>/dev/null || true
-wait $pid 2>/dev/null || true
-pid=""
-sleep 1
-
-# ========================================
-# WebSocket No TLS Tests (Go Client + C++ Server)
-# ========================================
-echo -e "\n${YELLOW}Running WebSocket (no TLS) tests - Go Client + C++ Server...${NC}"
+echo -e "\n${YELLOW}Running WebSocket tests (Go Client + C++ Server)...${NC}"
 
 # Start C++ WebSocket server
 ./server_ws_test > output.txt 2>&1 &
@@ -226,9 +111,9 @@ pid=""
 sleep 1
 
 # ========================================
-# WebSocket TLS Tests (Go Client + C++ Server)
+# Cross-Language Tests: Go Client + C++ Server (WebSocket TLS)
 # ========================================
-echo -e "\n${YELLOW}Running WebSocket (TLS) tests - Go Client + C++ Server...${NC}"
+echo -e "\n${YELLOW}Running WebSocket TLS tests (Go Client + C++ Server)...${NC}"
 
 # Start C++ WebSocket TLS server
 ./server_ws_tls_test > output.txt 2>&1 &
@@ -255,6 +140,80 @@ fi
 kill $pid 2>/dev/null || true
 wait $pid 2>/dev/null || true
 pid=""
+sleep 1
+
+# ========================================
+# Cross-Language Tests: C++ Client + Go Server (WebSocket)
+# ========================================
+echo -e "\n${YELLOW}Running WebSocket tests (C++ Client + Go Server)...${NC}"
+
+# Build and start Go WebSocket server
+go build -o pingpong_ws ../test/pingpong_server_ws/main.go
+./pingpong_ws > server.log 2>&1 &
+pid=$!
+echo "Started Go WebSocket server (PID: $pid)"
+
+# Wait for server to start
+sleep 1
+
+if ! kill -0 $pid 2>/dev/null; then
+	echo -e "${RED}Failed to start Go WebSocket server${NC}"
+	exit 1
+fi
+
+# Run C++ client tests
+run_with_timeout "C++ Client + Go Server tests" ./client_ws_tests
+status=$?
+
+# Stop server
+kill $pid 2>/dev/null || true
+wait $pid 2>/dev/null || true
+pid=""
+
+if [ $status -eq 0 ]; then
+	echo -e "${GREEN}WebSocket tests (C++ Client + Go Server) passed${NC}"
+else
+	echo -e "${RED}WebSocket tests (C++ Client + Go Server) failed${NC}"
+	exit 1
+fi
+
+sleep 1
+
+# ========================================
+# Cross-Language Tests: C++ Client + Go Server (WebSocket TLS)
+# ========================================
+echo -e "\n${YELLOW}Running WebSocket TLS tests (C++ Client + Go Server)...${NC}"
+
+# Build and start Go WebSocket TLS server
+go build -o pingpong_ws_tls ../test/pingpong_server_ws_tls/main.go
+./pingpong_ws_tls --cert=../test/server.crt --key=../test/server.key > server.log 2>&1 &
+pid=$!
+echo "Started Go WebSocket TLS server (PID: $pid)"
+
+# Wait for server to start
+sleep 1
+
+if ! kill -0 $pid 2>/dev/null; then
+	echo -e "${RED}Failed to start Go WebSocket TLS server${NC}"
+	exit 1
+fi
+
+# Run C++ client TLS tests
+run_with_timeout "C++ Client + Go Server TLS tests" ./client_ws_tls_tests
+status=$?
+
+# Stop server
+kill $pid 2>/dev/null || true
+wait $pid 2>/dev/null || true
+pid=""
+
+if [ $status -eq 0 ]; then
+	echo -e "${GREEN}WebSocket TLS tests (C++ Client + Go Server) passed${NC}"
+else
+	echo -e "${RED}WebSocket TLS tests (C++ Client + Go Server) failed${NC}"
+	exit 1
+fi
+
 sleep 1
 
 # ========================================
