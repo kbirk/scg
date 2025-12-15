@@ -80,7 +80,7 @@ void test_websocket_suite() {
     TestSuiteConfig config;
     config.factory = createWebSocketTransportFactory();
     config.startingId = 0;
-    config.maxRetries = 30;  // WebSocket needs more retries due to slower connection establishment
+    config.maxRetries = 10;
     runTestSuite(config);
 }
 
@@ -88,7 +88,7 @@ void test_websocket_tls_suite() {
     TestSuiteConfig config;
     config.factory = createWebSocketTLSTransportFactory();
     config.startingId = 0;
-    config.maxRetries = 30;  // WebSocket needs more retries due to slower connection establishment
+    config.maxRetries = 10;
     runTestSuite(config);
 }
 

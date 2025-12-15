@@ -668,6 +668,80 @@ inline void runServerGroupsTest(TestContext& ctx) {
     printf("Server Groups test passed\n");
 }
 
+// Test nested server groups with cascading middleware
+inline void runServerNestedGroupsTest(TestContext& ctx) {
+    if (ctx.isUsingExternalServer()) {
+        printf("Skipping Server Nested Groups test (using external server)\n");
+        return;
+    }
+
+    printf("Running Server Nested Groups test...\n");
+
+    // Create a middleware that always rejects
+    auto alwaysRejectMiddleware = [](
+        scg::context::Context& ctx,
+        const scg::type::Message& req,
+        scg::middleware::Handler next
+    ) -> std::pair<scg::type::Message*, scg::error::Error> {
+        return std::make_pair(nullptr, scg::error::Error("rejected"));
+    };
+
+    ctx.startServerWithSetup([&](scg::rpc::Server* server) {
+        auto testerAImpl = new TesterAServerImpl();
+        auto testerBImpl = new TesterBServerImpl();
+
+        // Outer group has auth middleware
+        server->group([&](scg::rpc::Server* s) {
+            s->addMiddleware(authMiddleware);
+            basic::registerTesterAServer(s, testerAImpl);
+
+            // Nested group adds reject middleware (both auth AND reject apply)
+            s->group([&](scg::rpc::Server* inner) {
+                inner->addMiddleware(alwaysRejectMiddleware);
+                basic::registerTesterBServer(inner, testerBImpl);
+            });
+        });
+    });
+
+    auto client = ctx.createClient();
+
+    basic::TesterAClient clientA(client);
+    basic::TesterBClient clientB(client);
+
+    // Test A without token - should fail with "no metadata" (auth middleware)
+    {
+        scg::context::Context context;
+        basic::TestRequestA req;
+        req.a = "A";
+
+        auto [res, err] = clientA.test(context, req);
+        TEST_CHECK(err != nullptr);
+        if (err) {
+            TEST_CHECK(err.message == "no metadata");
+            printf("TesterA without token: %s (expected)\n", err.message.c_str());
+        }
+    }
+
+    // Test B with valid token - should fail with "rejected" (passes auth but rejected by nested middleware)
+    {
+        scg::context::Context context;
+        context.put("token", VALID_TOKEN);
+        basic::TestRequestB req;
+        req.b = "B";
+
+        auto [res, err] = clientB.test(context, req);
+        TEST_CHECK(err != nullptr);
+        if (err) {
+            TEST_CHECK(err.message == "rejected");
+            printf("TesterB with valid token: %s (expected - rejected by nested middleware)\n", err.message.c_str());
+        }
+    }
+
+    client->disconnect();
+    ctx.stopServer();
+    printf("Server Nested Groups test passed\n");
+}
+
 // Test duplicate service registration throws
 inline void runDuplicateServiceTest(TestContext& ctx) {
     if (ctx.isUsingExternalServer()) {
@@ -751,6 +825,74 @@ inline void runGracefulShutdownTest(TestContext& ctx) {
 
     client->disconnect();
     printf("Graceful Shutdown test passed\n");
+}
+
+// Test high concurrency with request/response verification
+inline void runConcurrencyTest(TestContext& ctx) {
+    printf("Running Concurrency test...\n");
+
+    ctx.startServer();
+    auto client = ctx.createClient();
+
+    pingpong::PingPongClient pingPongClient(client);
+
+    const int NUM_THREADS = 50;
+    const int REQUESTS_PER_THREAD = 20;
+
+    std::atomic<int> successCount{0};
+    std::atomic<int> errorCount{0};
+    std::vector<std::thread> threads;
+
+    printf("Starting %d threads, each sending %d requests\n", NUM_THREADS, REQUESTS_PER_THREAD);
+
+    for (int t = 0; t < NUM_THREADS; t++) {
+        threads.emplace_back([&, t]() {
+            for (int j = 0; j < REQUESTS_PER_THREAD; j++) {
+                int32_t expectedCount = t * REQUESTS_PER_THREAD + j;
+                std::string expectedPayload = "thread-" + std::to_string(t) + "-request-" + std::to_string(j);
+
+                scg::context::Context context;
+                context.put("token", VALID_TOKEN);
+                pingpong::PingRequest req;
+                req.ping.count = expectedCount;
+                req.ping.payload.valString = expectedPayload;
+
+                auto [res, err] = pingPongClient.ping(context, req);
+
+                if (err) {
+                    errorCount++;
+                    continue;
+                }
+
+                if (res.pong.count != expectedCount + 1) {
+                    errorCount++;
+                    continue;
+                }
+
+                if (res.pong.payload.valString != expectedPayload) {
+                    errorCount++;
+                    continue;
+                }
+
+                successCount++;
+            }
+        });
+    }
+
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    int totalRequests = NUM_THREADS * REQUESTS_PER_THREAD;
+    printf("Completed: %d successful, %d errors out of %d total requests\n",
+           successCount.load(), errorCount.load(), totalRequests);
+
+    TEST_CHECK(successCount.load() == totalRequests);
+    TEST_CHECK(errorCount.load() == 0);
+
+    client->disconnect();
+    ctx.stopServer();
+    printf("Concurrency test passed\n");
 }
 
 // Test empty payload
@@ -1101,6 +1243,12 @@ inline void runTestSuite(const TestSuiteConfig& config) {
             }
 
             {
+                printf("\n=== Running Server Nested Groups Test ===\n");
+                TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+                runServerNestedGroupsTest(ctx);
+            }
+
+            {
                 printf("\n=== Running Duplicate Service Test ===\n");
                 TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
                 runDuplicateServiceTest(ctx);
@@ -1147,6 +1295,12 @@ inline void runTestSuite(const TestSuiteConfig& config) {
     }
 
     // Tests that work with external server
+    {
+        printf("\n=== Running Concurrency Test ===\n");
+        TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+        runConcurrencyTest(ctx);
+    }
+
     {
         printf("\n=== Running Empty Payload Test ===\n");
         TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
