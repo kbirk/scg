@@ -216,9 +216,14 @@ func (t *ClientTransport) Connect() (rpc.Connection, error) {
 	// Create inbox and subscription for this connection
 	inbox := nats.NewInbox()
 	responseCh := make(chan *nats.Msg)
+	closed := make(chan struct{})
 
 	sub, err := t.nc.Subscribe(inbox, func(msg *nats.Msg) {
-		responseCh <- msg
+		select {
+		case responseCh <- msg:
+		case <-closed:
+			// Connection closed, discard message
+		}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to inbox: %w", err)
@@ -229,6 +234,7 @@ func (t *ClientTransport) Connect() (rpc.Connection, error) {
 		inbox:              inbox,
 		sub:                sub,
 		responseCh:         responseCh,
+		closed:             closed,
 		maxSendMessageSize: t.MaxSendMessageSize,
 		maxRecvMessageSize: t.MaxRecvMessageSize,
 	}, nil
@@ -240,6 +246,7 @@ type natsClientConnection struct {
 	inbox              string
 	sub                *nats.Subscription
 	responseCh         chan *nats.Msg
+	closed             chan struct{}
 	maxSendMessageSize uint32
 	maxRecvMessageSize uint32
 }
@@ -278,6 +285,10 @@ func (c *natsClientConnection) Receive() ([]byte, error) {
 }
 
 func (c *natsClientConnection) Close() error {
+	// Signal closed first to prevent sends to responseCh
+	if c.closed != nil {
+		close(c.closed)
+	}
 	if c.sub != nil {
 		c.sub.Unsubscribe()
 	}
