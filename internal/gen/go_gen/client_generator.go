@@ -15,6 +15,11 @@ type ClientMethodArgs struct {
 	MethodID                 uint64
 	MethodRequestStructName  string
 	MethodResponseStructName string
+	ReturnsStream            bool
+	StreamStructName         string
+	StreamNamePascalCase     string
+	StreamHandlerInterface   string
+	HasServerMethods         bool
 }
 
 type ClientArgs struct {
@@ -36,7 +41,17 @@ func New{{.ClientNamePascalCase}}Client(client *rpc.Client) *{{.ClientNamePascal
 	}
 }
 
-{{range .ClientMethods}}
+{{range .ClientMethods}}{{if .ReturnsStream}}
+func (c *{{$.ClientNamePascalCase}}Client) {{.MethodNamePascalCase}}(ctx context.Context{{if .HasServerMethods}}, handler {{.StreamHandlerInterface}}{{end}}, req *{{.MethodRequestStructName}}) (*{{.StreamStructName}}, error) {
+	stream, err := c.client.OpenStream(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req)
+	if err != nil {
+		return nil, err
+	}
+	streamClient := New{{.StreamNamePascalCase}}StreamClient(stream{{if .HasServerMethods}}, handler{{end}})
+	{{if .HasServerMethods}}stream.SetProcessor(streamClient){{end}}
+	return streamClient, nil
+}
+{{else}}
 func (c *{{$.ClientNamePascalCase}}Client) {{.MethodNamePascalCase}}(ctx context.Context, req *{{.MethodRequestStructName}}) (*{{.MethodResponseStructName}}, error) {
 
 	handler := func (ctx context.Context, req rpc.Message) (rpc.Message, error) {
@@ -64,12 +79,16 @@ func (c *{{$.ClientNamePascalCase}}Client) {{.MethodNamePascalCase}}(ctx context
 	}
 	return r, nil
 }
-{{end}}
+{{end}}{{end}}
 `
 
 var (
 	clientTemplate = template.Must(template.New("clientTemplateGo").Parse(clientTemplateStr))
 )
+
+func getStreamClientHandlerInterfaceName(streamName string) string {
+	return util.EnsurePascalCase(streamName) + "StreamHandler"
+}
 
 func generateClientGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (string, error) {
 
@@ -91,10 +110,39 @@ func generateClientGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		if err != nil {
 			return "", err
 		}
-		methodArgType, methodRetType, err := generateServiceMethodParams(method)
-		if err != nil {
-			return "", err
+
+		var streamStructName, streamHandlerInterface string
+		var methodArgType, methodRetType string
+		var hasServerMethods bool
+
+		if method.ReturnsStream {
+			// For stream returns, use the stream client struct name
+			streamStructName = getStreamClientStructName(method.StreamName)
+			streamHandlerInterface = getStreamClientHandlerInterfaceName(method.StreamName)
+			methodArgType, err = mapDataTypeDefinitionToGoType(method.Argument)
+			if err != nil {
+				return "", err
+			}
+			// Return type is not used for stream methods
+			methodRetType = ""
+
+			// Get stream definition to check for server methods (which client must handle)
+			stream, ok := pkg.StreamDefinitions[method.StreamName]
+			if ok {
+				for _, streamMethod := range stream.Methods {
+					if streamMethod.Direction == parse.StreamMethodDirectionServer {
+						hasServerMethods = true
+						break
+					}
+				}
+			}
+		} else {
+			methodArgType, methodRetType, err = generateServiceMethodParams(method)
+			if err != nil {
+				return "", err
+			}
 		}
+
 		args.ClientMethods = append(args.ClientMethods, ClientMethodArgs{
 			MethodNamePascalCase:     util.EnsurePascalCase(name),
 			MethodNameCamelCase:      util.EnsureCamelCase(name),
@@ -102,6 +150,11 @@ func generateClientGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 			MethodID:                 methodID,
 			MethodRequestStructName:  methodArgType,
 			MethodResponseStructName: methodRetType,
+			ReturnsStream:            method.ReturnsStream,
+			StreamStructName:         streamStructName,
+			StreamNamePascalCase:     util.EnsurePascalCase(method.StreamName),
+			StreamHandlerInterface:   streamHandlerInterface,
+			HasServerMethods:         hasServerMethods,
 		})
 	}
 

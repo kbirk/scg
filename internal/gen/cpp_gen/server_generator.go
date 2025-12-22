@@ -148,6 +148,11 @@ func generateServerCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 	}
 
 	for name, method := range svc.Methods {
+		// Skip methods that return streams - they need special handling
+		if method.ReturnsStream {
+			continue
+		}
+
 		methodID, err := pkg.HashStringToMethodID(svc.Name, name)
 		if err != nil {
 			return "", err

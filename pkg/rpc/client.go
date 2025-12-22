@@ -17,7 +17,9 @@ type Client struct {
 	conn      Connection
 	transport ClientTransport
 	requests  map[uint64]chan *serialize.Reader
+	streams   map[uint64]*Stream
 	requestID uint64
+	streamID  uint64
 	running   bool
 }
 
@@ -38,7 +40,9 @@ func NewClient(conf ClientConfig) *Client {
 		transport: conf.Transport,
 		mu:        &sync.Mutex{},
 		requestID: seedRequestID(),
+		streamID:  seedRequestID(),
 		requests:  make(map[uint64]chan *serialize.Reader),
+		streams:   make(map[uint64]*Stream),
 	}
 }
 
@@ -148,29 +152,19 @@ func (c *Client) connectUnsafe() error {
 				return
 			}
 
-			if prefix != ResponsePrefix {
+			// Handle different message types
+			if prefix == ResponsePrefix {
+				c.handleRPCResponse(reader)
+			} else if prefix == StreamMessagePrefix {
+				c.handleStreamMessage(reader)
+			} else if prefix == StreamResponsePrefix {
+				c.handleStreamResponse(reader)
+			} else if prefix == StreamClosePrefix {
+				c.handleStreamClose(reader)
+			} else {
 				c.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
 				return
 			}
-
-			var requestID uint64
-			err = serialize.DeserializeUInt64(&requestID, reader)
-			if err != nil {
-				c.handleError(err)
-				return
-			}
-
-			c.mu.Lock()
-			ch, ok := c.requests[requestID]
-			delete(c.requests, requestID)
-			c.mu.Unlock()
-
-			if !ok {
-				c.handleError(fmt.Errorf("unrecognized request id: %d", requestID))
-				return
-			}
-
-			ch <- reader
 		}
 	}()
 
@@ -256,4 +250,196 @@ func (c *Client) Call(ctx context.Context, serviceID uint64, methodID uint64, ms
 	}
 
 	return c.receiveMessage(ctx, ch)
+}
+
+func (c *Client) handleRPCResponse(reader *serialize.Reader) {
+	var requestID uint64
+	err := serialize.DeserializeUInt64(&requestID, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	c.mu.Lock()
+	ch, ok := c.requests[requestID]
+	delete(c.requests, requestID)
+	c.mu.Unlock()
+
+	if !ok {
+		c.handleError(fmt.Errorf("unrecognized request id: %d", requestID))
+		return
+	}
+
+	ch <- reader
+}
+
+// handleStreamMessage handles incoming unsolicited stream messages from server
+func (c *Client) handleStreamMessage(reader *serialize.Reader) {
+	// get the context
+	ctx := context.Background()
+	err := DeserializeContext(&ctx, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	var streamID uint64
+	err = serialize.DeserializeUInt64(&streamID, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	var requestID uint64
+	err = serialize.DeserializeUInt64(&requestID, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	var methodID uint64
+	err = serialize.DeserializeUInt64(&methodID, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	c.mu.Lock()
+	stream, ok := c.streams[streamID]
+	c.mu.Unlock()
+
+	if !ok {
+		c.handleError(fmt.Errorf("unrecognized stream id: %d", streamID))
+		return
+	}
+
+	// Route to stream processor
+	err = stream.HandleIncomingMessage(methodID, requestID, reader)
+	if err != nil {
+		c.handleError(err)
+	}
+}
+
+func (c *Client) handleStreamResponse(reader *serialize.Reader) {
+	// get the context
+	ctx := context.Background()
+	err := DeserializeContext(&ctx, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	var streamID uint64
+	err = serialize.DeserializeUInt64(&streamID, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	var requestID uint64
+	err = serialize.DeserializeUInt64(&requestID, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	c.mu.Lock()
+	stream, ok := c.streams[streamID]
+	c.mu.Unlock()
+
+	if !ok {
+		c.handleError(fmt.Errorf("unrecognized stream id: %d", streamID))
+		return
+	}
+
+	stream.HandleMessageResponse(requestID, reader)
+}
+
+func (c *Client) handleStreamClose(reader *serialize.Reader) {
+	var streamID uint64
+	err := serialize.DeserializeUInt64(&streamID, reader)
+	if err != nil {
+		c.handleError(err)
+		return
+	}
+
+	c.mu.Lock()
+	stream, ok := c.streams[streamID]
+	delete(c.streams, streamID)
+	c.mu.Unlock()
+
+	if ok {
+		stream.HandleClose()
+	}
+}
+
+// OpenStream opens a new stream and returns it
+func (c *Client) OpenStream(ctx context.Context, serviceID uint64, methodID uint64, msg Message) (*Stream, error) {
+	// Get next stream ID and request ID
+	c.mu.Lock()
+	streamID := c.streamID
+	c.streamID++
+	requestID := c.requestID
+	c.requestID++
+	c.mu.Unlock()
+
+	// Serialize stream open message
+	writer := serialize.NewFixedSizeWriter(
+		int(serialize.BitsToBytes(
+			BitSizePrefix() +
+				BitSizeContext(ctx) +
+				serialize.BitSizeUInt64(requestID) +
+				serialize.BitSizeUInt64(streamID) +
+				serialize.BitSizeUInt64(serviceID) +
+				serialize.BitSizeUInt64(methodID) +
+				msg.BitSize())))
+
+	SerializePrefix(writer, StreamOpenPrefix)
+	SerializeContext(writer, ctx)
+	serialize.SerializeUInt64(writer, requestID)
+	serialize.SerializeUInt64(writer, streamID)
+	serialize.SerializeUInt64(writer, serviceID)
+	serialize.SerializeUInt64(writer, methodID)
+	msg.Serialize(writer)
+	bs := writer.Bytes()
+
+	// Ensure connection and register request
+	c.mu.Lock()
+	err := c.connectUnsafe()
+	if err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
+
+	ch := make(chan *serialize.Reader)
+	c.requests[requestID] = ch
+	c.mu.Unlock()
+
+	// Send stream open message
+	err = c.conn.Send(bs, serviceID)
+	if err != nil {
+		c.mu.Lock()
+		delete(c.requests, requestID)
+		c.mu.Unlock()
+		return nil, c.handleError(err)
+	}
+
+	// Wait for response
+	_, err = c.receiveMessage(ctx, ch)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create stream with error handler wrapper
+	errHandler := func(err error) {
+		c.handleError(err)
+	}
+	stream := NewStream(streamID, serviceID, c.conn, errHandler)
+
+	// Register stream
+	c.mu.Lock()
+	c.streams[streamID] = stream
+	c.mu.Unlock()
+
+	return stream, nil
 }

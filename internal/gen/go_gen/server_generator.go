@@ -16,6 +16,12 @@ type ServiceMethodArgs struct {
 	MethodID                 uint64
 	MethodRequestStructName  string
 	MethodResponseStructName string
+	ReturnsStream            bool
+	StreamStructName         string
+	StreamInterfaceName      string
+	StreamNamePascalCase     string
+	HasClientMethods         bool
+	HasServerMethods         bool
 }
 
 type ServerArgs struct {
@@ -34,12 +40,17 @@ const (
 	{{.MethodIDVarName}} uint64 = {{.MethodID}}{{end}}
 )
 
-type {{.ServerNamePascalCase}} interface { {{- range .ServiceMethods}}
-	{{.MethodNamePascalCase}}(context.Context, *{{.MethodRequestStructName}}) (*{{.MethodResponseStructName}}, error){{end}}
+type {{.ServerNamePascalCase}} interface { {{- range .ServiceMethods}}{{if .ReturnsStream}}
+	{{.MethodNamePascalCase}}(context.Context, *{{.MethodRequestStructName}}) (*{{.StreamStructName}}, error){{else}}
+	{{.MethodNamePascalCase}}(context.Context, *{{.MethodRequestStructName}}) (*{{.MethodResponseStructName}}, error){{end}}{{end}}
 }
 
 func Register{{.ServerNamePascalCase}}(server *rpc.Server, {{.ServerNameCamelCase}} {{.ServerNamePascalCase}}) {
-	server.RegisterServer({{.ServiceIDVarName}}, "{{.ServiceName}}", &{{.ServerStubStructName}}{ server, {{.ServerNameCamelCase}} })
+	stub := &{{.ServerStubStructName}}{ server, {{.ServerNameCamelCase}} }
+	server.RegisterServer({{.ServiceIDVarName}}, "{{.ServiceName}}", stub)
+	{{range .ServiceMethods}}{{if .ReturnsStream}}
+	// Register stream handler for {{.MethodNamePascalCase}}
+	server.RegisterStream({{$.ServiceIDVarName}}, {{.MethodIDVarName}}, stub.streamHandler{{.MethodNamePascalCase}}){{end}}{{end}}
 }
 
 type {{.ServerStubStructName}} struct {
@@ -47,7 +58,36 @@ type {{.ServerStubStructName}} struct {
 	impl {{.ServerNamePascalCase}}
 }
 
-{{range .ServiceMethods}}
+{{range .ServiceMethods}}{{if .ReturnsStream}}
+// Stream handler for {{.MethodNamePascalCase}}
+func (s *{{$.ServerStubStructName}}) streamHandler{{.MethodNamePascalCase}}(stream *rpc.Stream, reader *serialize.Reader) error {
+	// Deserialize the request message
+	req := &{{.MethodRequestStructName}}{}
+	err := req.Deserialize(reader)
+	if err != nil {
+		return err
+	}
+
+	// Call the user's implementation to get the stream with handler
+	streamWrapper, err := s.impl.{{.MethodNamePascalCase}}(stream.Context(), req)
+	if err != nil {
+		return err
+	}
+
+	// Set the stream's internal rpc.Stream
+	streamWrapper.setStream(stream)
+
+	// If the stream has client methods, register the message processor
+	{{if .HasClientMethods}}stream.SetProcessor(streamWrapper){{end}}
+
+	// Wait for the stream to close (user's goroutine will manage lifecycle)
+	<-stream.Wait()
+
+	return nil
+}
+{{end}}{{end}}
+
+{{range .ServiceMethods}}{{if not .ReturnsStream}}
 func (s *{{$.ServerStubStructName}}) handle{{.MethodNamePascalCase}}(ctx context.Context, middleware []rpc.Middleware, requestID uint64, reader *serialize.Reader) []byte {
 	req := &{{.MethodRequestStructName}}{}
 	err := req.Deserialize(reader)
@@ -70,7 +110,7 @@ func (s *{{$.ServerStubStructName}}) handle{{.MethodNamePascalCase}}(ctx context
 
 	return rpc.RespondWithMessage(requestID, resp)
 }
-{{end}}
+{{end}}{{end}}
 func (s *{{$.ServerStubStructName}}) HandleWrapper(ctx context.Context, middleware []rpc.Middleware, requestID uint64, reader *serialize.Reader) []byte {
 	var methodID uint64
 	err := serialize.DeserializeUInt64(&methodID, reader)
@@ -78,9 +118,9 @@ func (s *{{$.ServerStubStructName}}) HandleWrapper(ctx context.Context, middlewa
 		return rpc.RespondWithError(requestID, err)
 	}
 
-	switch methodID { {{- range .ServiceMethods}}
+	switch methodID { {{- range .ServiceMethods}}{{if not .ReturnsStream}}
 	case {{.MethodIDVarName}}:
-		return s.handle{{.MethodNamePascalCase}}(ctx, middleware, requestID, reader){{end}}
+		return s.handle{{.MethodNamePascalCase}}(ctx, middleware, requestID, reader){{end}}{{end}}
 	default:
 		return rpc.RespondWithError(requestID, fmt.Errorf("unrecognized methodID %d", methodID))
 	}
@@ -145,10 +185,40 @@ func generateServerGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		if err != nil {
 			return "", err
 		}
-		methodArgType, methodRetType, err := generateServiceMethodParams(method)
-		if err != nil {
-			return "", err
+
+		var streamStructName, streamInterfaceName string
+		var methodArgType, methodRetType string
+		var hasClientMethods, hasServerMethods bool
+
+		if method.ReturnsStream {
+			// For stream returns, use the stream server struct and interface names
+			streamStructName = getStreamServerStructName(method.StreamName)
+			streamInterfaceName = getStreamServerInterfaceName(method.StreamName)
+			methodArgType, err = mapDataTypeDefinitionToGoType(method.Argument)
+			if err != nil {
+				return "", err
+			}
+			// Return type is not used for stream methods
+			methodRetType = ""
+
+			// Get stream definition to check for client/server methods
+			stream, ok := pkg.StreamDefinitions[method.StreamName]
+			if ok {
+				for _, streamMethod := range stream.Methods {
+					if streamMethod.Direction == parse.StreamMethodDirectionClient {
+						hasClientMethods = true
+					} else if streamMethod.Direction == parse.StreamMethodDirectionServer {
+						hasServerMethods = true
+					}
+				}
+			}
+		} else {
+			methodArgType, methodRetType, err = generateServiceMethodParams(method)
+			if err != nil {
+				return "", err
+			}
 		}
+
 		args.ServiceMethods = append(args.ServiceMethods, ServiceMethodArgs{
 			MethodNamePascalCase:     util.EnsurePascalCase(name),
 			MethodNameCamelCase:      util.EnsureCamelCase(name),
@@ -156,6 +226,12 @@ func generateServerGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 			MethodID:                 methodID,
 			MethodRequestStructName:  methodArgType,
 			MethodResponseStructName: methodRetType,
+			ReturnsStream:            method.ReturnsStream,
+			StreamStructName:         streamStructName,
+			StreamInterfaceName:      streamInterfaceName,
+			StreamNamePascalCase:     util.EnsurePascalCase(method.StreamName),
+			HasClientMethods:         hasClientMethods,
+			HasServerMethods:         hasServerMethods,
 		})
 	}
 

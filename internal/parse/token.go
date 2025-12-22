@@ -9,6 +9,8 @@ const (
 	ServiceTokenType
 	ServiceMethodTokenType
 	ServiceMethodParamTokenType
+	StreamTokenType
+	StreamMethodTokenType
 	PackageTokenType
 	TypedefTokenType
 	EnumTokenType

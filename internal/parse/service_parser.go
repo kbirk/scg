@@ -9,14 +9,16 @@ import (
 
 var (
 	serviceRegex       = regexp.MustCompile(`(?s)service\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
-	serviceMethodRegex = regexp.MustCompile(`^rpc\s+([a-zA-Z][a-zA-Z_0-9]*)\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*returns\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*;\s*$`)
+	serviceMethodRegex = regexp.MustCompile(`^rpc\s+([a-zA-Z][a-zA-Z_0-9]*)\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*returns\s*\(\s*(stream\s+)?((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*;\s*$`)
 )
 
 type ServiceMethodDefinition struct {
-	Name     string
-	Argument *DataTypeDefinition
-	Return   *DataTypeDefinition
-	Token    *Token
+	Name          string
+	Argument      *DataTypeDefinition
+	Return        *DataTypeDefinition
+	ReturnsStream bool   // true if returns (stream StreamName)
+	StreamName    string // the stream type name if ReturnsStream is true
+	Token         *Token
 }
 
 type ServiceDefinition struct {
@@ -86,16 +88,17 @@ func tokenizeServiceMethods(input *Token) ([]*Token, *ParsingError) {
 func parseMethodDefinition(input *Token) (*ServiceMethodDefinition, *ParsingError) {
 
 	match, perr := FindOneMatch(serviceMethodRegex, input)
-	if perr != nil || len(match.Captures) != 3 {
+	if perr != nil || len(match.Captures) != 4 {
 		return nil, &ParsingError{
-			Message: perr.Message,
+			Message: "invalid service method definition",
 			Token:   input,
 		}
 	}
 
 	name := match.Captures[0].Content
 	argumentType := match.Captures[1]
-	returnType := match.Captures[2]
+	streamKeyword := match.Captures[2] // might be nil if not a stream
+	returnType := match.Captures[3]
 
 	argumentDefinition, perr := parseDataTypeDefinition(argumentType)
 	if perr != nil {
@@ -108,22 +111,32 @@ func parseMethodDefinition(input *Token) (*ServiceMethodDefinition, *ParsingErro
 		}
 	}
 
+	// Check if this returns a stream
+	returnsStream := streamKeyword != nil && strings.TrimSpace(streamKeyword.Content) == "stream"
+
 	returnDefinition, perr := parseDataTypeDefinition(returnType)
 	if perr != nil {
 		return nil, perr
 	}
 	if returnDefinition.Type != DataTypeCustom {
 		return nil, &ParsingError{
-			Message: "invalid method return type, must be a message type",
+			Message: "invalid method return type, must be a message or stream type",
 			Token:   returnType,
 		}
 	}
 
+	streamName := ""
+	if returnsStream {
+		streamName = returnDefinition.CustomType
+	}
+
 	return &ServiceMethodDefinition{
-		Name:     name,
-		Argument: argumentDefinition,
-		Return:   returnDefinition,
-		Token:    input,
+		Name:          name,
+		Argument:      argumentDefinition,
+		Return:        returnDefinition,
+		ReturnsStream: returnsStream,
+		StreamName:    streamName,
+		Token:         input,
 	}, nil
 }
 

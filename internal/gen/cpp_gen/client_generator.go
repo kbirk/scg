@@ -15,6 +15,8 @@ type ClientMethodArgs struct {
 	MethodID                 uint64
 	MethodRequestStructName  string
 	MethodResponseStructName string
+	ReturnsStream            bool
+	StreamClientClassName    string
 }
 
 type ClientArgs struct {
@@ -36,7 +38,16 @@ public:
 
 	inline explicit
 	{{.ClientNamePascalCase}}Client(std::shared_ptr<scg::rpc::Client> client) : client_(client) {}
-	{{range .ClientMethods}}
+	{{range .ClientMethods}}{{if .ReturnsStream}}
+	inline std::pair<std::shared_ptr<{{.StreamClientClassName}}>, scg::error::Error> {{.MethodNameCamelCase}}(scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) const
+	{
+		auto [stream, err] = client_->openStream<{{.MethodRequestStructName}}>(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req);
+		if (err) {
+			return std::make_pair(nullptr, err);
+		}
+		return std::make_pair(std::make_shared<{{.StreamClientClassName}}>(stream), nullptr);
+	}
+	{{else}}
 	inline std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) const
 	{
 		{{.MethodResponseStructName}} resp;
@@ -63,7 +74,7 @@ public:
 		auto& middleware = client_->middleware();
 		return scg::middleware::applyHandlerChain(c, req, middleware, handler).second;
 	}
-	{{end}}
+	{{end}}{{end}}
 
 private:
 	std::shared_ptr<scg::rpc::Client> client_;
@@ -115,17 +126,33 @@ func generateClientCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		if err != nil {
 			return "", err
 		}
-		methodArgType, methodRetType, err := generateServiceMethodParams(method)
-		if err != nil {
-			return "", err
+
+		methodArgs := ClientMethodArgs{
+			MethodNameCamelCase: util.EnsureCamelCase(name),
+			MethodIDVarName:     methodIDVarName(svc.Name, name),
+			MethodID:            methodID,
+			ReturnsStream:       method.ReturnsStream,
 		}
-		args.ClientMethods = append(args.ClientMethods, ClientMethodArgs{
-			MethodNameCamelCase:      util.EnsureCamelCase(name),
-			MethodIDVarName:          methodIDVarName(svc.Name, name),
-			MethodID:                 methodID,
-			MethodRequestStructName:  methodArgType,
-			MethodResponseStructName: methodRetType,
-		})
+
+		if method.ReturnsStream {
+			// For stream returns, we only need the request type
+			argType, err := mapDataTypeDefinitionToCppType(method.Argument)
+			if err != nil {
+				return "", err
+			}
+			methodArgs.MethodRequestStructName = argType
+			methodArgs.StreamClientClassName = getStreamClientClassName(method.StreamName)
+		} else {
+			// For normal returns, we need both request and response types
+			methodArgType, methodRetType, err := generateServiceMethodParams(method)
+			if err != nil {
+				return "", err
+			}
+			methodArgs.MethodRequestStructName = methodArgType
+			methodArgs.MethodResponseStructName = methodRetType
+		}
+
+		args.ClientMethods = append(args.ClientMethods, methodArgs)
 	}
 
 	buf := &bytes.Buffer{}

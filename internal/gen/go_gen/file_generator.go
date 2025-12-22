@@ -11,15 +11,17 @@ import (
 )
 
 type FileArgs struct {
-	Header   string
-	Package  string
-	Imports  string
-	Enums    string
-	Typedefs string
-	Consts   string
-	Messages string
-	Servers  string
-	Clients  string
+	Header        string
+	Package       string
+	Imports       string
+	Enums         string
+	Typedefs      string
+	Consts        string
+	Messages      string
+	Servers       string
+	Clients       string
+	StreamServers string
+	StreamClients string
 }
 
 const fileTemplateStr = `
@@ -32,6 +34,8 @@ const fileTemplateStr = `
 {{.Messages}}
 {{.Servers}}
 {{.Clients}}
+{{.StreamServers}}
+{{.StreamClients}}
 `
 
 var (
@@ -109,16 +113,36 @@ func generateFileGoCode(basePackage string, pkg *parse.Package, file *parse.File
 		clientCode = append(clientCode, client)
 	}
 
+	var streamServerCode []string
+	for _, stream := range file.StreamsSortedByKey() {
+		streamServer, err := generateStreamServerGoCode(pkg, stream)
+		if err != nil {
+			return "", err
+		}
+		streamServerCode = append(streamServerCode, streamServer)
+	}
+
+	var streamClientCode []string
+	for _, stream := range file.StreamsSortedByKey() {
+		streamClient, err := generateStreamClientGoCode(pkg, stream)
+		if err != nil {
+			return "", err
+		}
+		streamClientCode = append(streamClientCode, streamClient)
+	}
+
 	args := FileArgs{
-		Header:   headerCode,
-		Package:  pkgCode,
-		Imports:  importCode,
-		Enums:    strings.Join(enumCode, "\n"),
-		Typedefs: strings.Join(typedefCode, "\n"),
-		Consts:   strings.Join(constsCode, "\n"),
-		Messages: strings.Join(messageCode, "\n"),
-		Servers:  strings.Join(serverCode, "\n"),
-		Clients:  strings.Join(clientCode, "\n"),
+		Header:        headerCode,
+		Package:       pkgCode,
+		Imports:       importCode,
+		Enums:         strings.Join(enumCode, "\n"),
+		Typedefs:      strings.Join(typedefCode, "\n"),
+		Consts:        strings.Join(constsCode, "\n"),
+		Messages:      strings.Join(messageCode, "\n"),
+		Servers:       strings.Join(serverCode, "\n"),
+		Clients:       strings.Join(clientCode, "\n"),
+		StreamServers: strings.Join(streamServerCode, "\n"),
+		StreamClients: strings.Join(streamClientCode, "\n"),
 	}
 
 	buf := &bytes.Buffer{}
@@ -129,7 +153,7 @@ func generateFileGoCode(basePackage string, pkg *parse.Package, file *parse.File
 
 	formattedCode, err := format.Source(buf.Bytes())
 	if err != nil {
-		return "", errors.Wrap(err, "failed to gofmt code:\n"+string(buf.Bytes()))
+		return "", errors.Wrap(err, "failed to gofmt code:\n"+buf.String())
 	}
 
 	return string(formattedCode), nil

@@ -18,6 +18,8 @@ type ServerTransport struct {
 	connCh             chan rpc.Connection
 	mu                 *sync.Mutex
 	closed             bool
+	// Track persistent connections by reply inbox for streaming
+	activeConns map[string]*natsServerConnection
 }
 
 type ServerTransportConfig struct {
@@ -34,6 +36,7 @@ func NewServerTransport(config ServerTransportConfig) *ServerTransport {
 		subs:               make(map[uint64]*nats.Subscription),
 		connCh:             make(chan rpc.Connection, 100),
 		mu:                 &sync.Mutex{},
+		activeConns:        make(map[string]*natsServerConnection),
 	}
 }
 
@@ -54,22 +57,61 @@ func (t *ServerTransport) subscribeToService(serviceID uint64) error {
 	subject := fmt.Sprintf("rpc.%d", serviceID)
 
 	sub, err := t.nc.Subscribe(subject, func(msg *nats.Msg) {
-		conn := &natsServerConnection{
-			msg:                msg,
-			request:            msg.Data,
-			maxSendMessageSize: t.MaxSendMessageSize,
-			maxRecvMessageSize: t.MaxRecvMessageSize,
+		t.mu.Lock()
+
+		// Check if we already have an active connection for this reply inbox
+		var conn *natsServerConnection
+		if msg.Reply != "" {
+			conn = t.activeConns[msg.Reply]
 		}
 
-		t.mu.Lock()
-		closed := t.closed
-		t.mu.Unlock()
+		if conn == nil {
+			// Create new connection
+			conn = &natsServerConnection{
+				msg:                msg,
+				request:            msg.Data,
+				maxSendMessageSize: t.MaxSendMessageSize,
+				maxRecvMessageSize: t.MaxRecvMessageSize,
+				nc:                 t.nc,
+				replyTo:            msg.Reply,
+				closed:             make(chan struct{}),
+				responseCh:         make(chan []byte, 100),
+			}
 
-		if !closed {
+			// Track this connection if it has a reply inbox (for streaming)
+			if msg.Reply != "" {
+				t.activeConns[msg.Reply] = conn
+
+				// Clean up when connection closes
+				go func(inbox string) {
+					<-conn.closed
+					t.mu.Lock()
+					delete(t.activeConns, inbox)
+					t.mu.Unlock()
+				}(msg.Reply)
+			}
+
+			closed := t.closed
+			t.mu.Unlock()
+
+			if !closed {
+				select {
+				case t.connCh <- conn:
+				default:
+					msg.Respond([]byte("server busy"))
+					conn.Close()
+				}
+			}
+		} else {
+			// Route to existing connection for streaming
+			t.mu.Unlock()
+
 			select {
-			case t.connCh <- conn:
+			case conn.responseCh <- msg.Data:
+			case <-conn.closed:
+				// Connection closed, drop message
 			default:
-				msg.Respond([]byte("server busy"))
+				// Channel full, drop message
 			}
 		}
 	})
@@ -122,6 +164,12 @@ func (t *ServerTransport) Close() error {
 	t.closed = true
 	close(t.connCh)
 
+	// Close all active streaming connections
+	for _, conn := range t.activeConns {
+		conn.Close()
+	}
+	t.activeConns = make(map[string]*natsServerConnection)
+
 	for _, sub := range t.subs {
 		if err := sub.Unsubscribe(); err != nil {
 			return err
@@ -144,6 +192,12 @@ type natsServerConnection struct {
 	received           bool
 	maxSendMessageSize uint32
 	maxRecvMessageSize uint32
+	// For streaming support
+	nc            *nats.Conn
+	responseCh    chan []byte
+	replyTo       string
+	closed        chan struct{}
+	alreadyClosed bool
 }
 
 func (c *natsServerConnection) Send(data []byte, serviceID uint64) error {
@@ -154,27 +208,75 @@ func (c *natsServerConnection) Send(data []byte, serviceID uint64) error {
 		return fmt.Errorf("message size %d exceeds send limit %d", len(data), c.maxSendMessageSize)
 	}
 
+	// For streaming, use the persistent reply subject
+	if c.replyTo != "" && c.nc != nil {
+		return c.nc.Publish(c.replyTo, data)
+	}
+
+	// For regular RPC, use one-time response
 	return c.msg.Respond(data)
 }
 
 func (c *natsServerConnection) Receive() ([]byte, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
-	if c.received {
+	// First receive is always the initial request
+	if !c.received {
+		c.received = true
+		request := c.request
+
+		if c.maxRecvMessageSize > 0 && uint32(len(request)) > c.maxRecvMessageSize {
+			c.mu.Unlock()
+			return nil, fmt.Errorf("message size %d exceeds receive limit %d", len(request), c.maxRecvMessageSize)
+		}
+
+		c.mu.Unlock()
+		return request, nil
+	}
+
+	// For subsequent receives (streaming), wait on response channel
+	if c.responseCh == nil {
+		c.mu.Unlock()
 		return nil, fmt.Errorf("connection closed")
 	}
 
-	c.received = true
+	responseCh := c.responseCh
+	closed := c.closed
+	c.mu.Unlock()
 
-	if c.maxRecvMessageSize > 0 && uint32(len(c.request)) > c.maxRecvMessageSize {
-		return nil, fmt.Errorf("message size %d exceeds receive limit %d", len(c.request), c.maxRecvMessageSize)
+	select {
+	case msg, ok := <-responseCh:
+		if !ok {
+			return nil, fmt.Errorf("connection closed")
+		}
+
+		if c.maxRecvMessageSize > 0 && uint32(len(msg)) > c.maxRecvMessageSize {
+			return nil, fmt.Errorf("message size %d exceeds receive limit %d", len(msg), c.maxRecvMessageSize)
+		}
+
+		return msg, nil
+	case <-closed:
+		return nil, fmt.Errorf("connection closed")
 	}
-
-	return c.request, nil
 }
 
 func (c *natsServerConnection) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.alreadyClosed {
+		return nil
+	}
+	c.alreadyClosed = true
+
+	if c.closed != nil {
+		close(c.closed)
+	}
+
+	if c.responseCh != nil {
+		close(c.responseCh)
+	}
+
 	return nil
 }
 
