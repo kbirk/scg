@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/kbirk/scg/pkg/rpc"
@@ -53,7 +54,26 @@ func (c *WebSocketConnection) Receive() ([]byte, error) {
 }
 
 func (c *WebSocketConnection) Close() error {
-	return c.conn.Close()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Send a proper close frame before closing the connection
+	// Use a short deadline to avoid blocking indefinitely
+	deadline := time.Now().Add(time.Second)
+	err := c.conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		deadline,
+	)
+
+	// Close the underlying connection regardless of whether the close frame was sent
+	closeErr := c.conn.Close()
+
+	// Return the write error if it occurred, otherwise the close error
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 // ServerTransport implements ServerTransport for WebSocket
