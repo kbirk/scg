@@ -275,11 +275,33 @@ func resolveDefinitions(parse *Parse) *ParsingError {
 					return perr
 				}
 
-				perr = resolveServiceArgumentType(parse, method, method.Return)
-				if perr != nil {
-					perr.Filename = file.Name
-					perr.Content = file.Content
-					return perr
+				if method.ReturnsStream {
+					// Verify the stream exists
+					pkg, ok := parse.Packages[file.Package.Name]
+					if !ok {
+						return &ParsingError{
+							Message:  fmt.Sprintf("package %s not found", file.Package.Name),
+							Token:    method.Token,
+							Filename: file.Name,
+							Content:  file.Content,
+						}
+					}
+					_, ok = pkg.StreamDefinitions[method.StreamName]
+					if !ok {
+						return &ParsingError{
+							Message:  fmt.Sprintf("stream %s not found", method.StreamName),
+							Token:    method.Token,
+							Filename: file.Name,
+							Content:  file.Content,
+						}
+					}
+				} else {
+					perr = resolveServiceArgumentType(parse, method, method.Return)
+					if perr != nil {
+						perr.Filename = file.Name
+						perr.Content = file.Content
+						return perr
+					}
 				}
 			}
 		}

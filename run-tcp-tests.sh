@@ -80,6 +80,23 @@ fi
 sleep 1
 
 # ========================================
+# C++ TCP Streaming Tests (C++ Client + C++ Server)
+# ========================================
+echo -e "\n${YELLOW}Running C++ TCP Streaming tests (C++ Client + C++ Server)...${NC}"
+
+run_with_timeout "C++ TCP Streaming tests" ./streaming_tcp_tests
+status=$?
+
+if [ $status -eq 0 ]; then
+	echo -e "${GREEN}C++ TCP Streaming tests passed${NC}"
+else
+	echo -e "${RED}C++ TCP Streaming tests failed${NC}"
+	exit 1
+fi
+
+sleep 1
+
+# ========================================
 # Cross-Language Tests: Go Client + C++ Server (TCP)
 # ========================================
 echo -e "\n${YELLOW}Running TCP tests (Go Client + C++ Server)...${NC}"

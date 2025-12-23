@@ -91,6 +91,14 @@ add_executable(client_ws_tests "client_ws_tests.cpp")
 # Client WebSocket TLS (connects to Go WebSocket TLS server)
 add_executable(client_ws_tls_tests "client_ws_tls_tests.cpp")
 
+# Streaming tests (C++ client and server)
+add_executable(streaming_tcp_tests "streaming_tcp_tests.cpp")
+add_executable(streaming_unix_tests "streaming_unix_tests.cpp")
+add_executable(streaming_ws_tests "streaming_ws_tests.cpp")
+
+# Streaming interop tests
+add_executable(streaming_interop_client "streaming_interop_client.cpp")
+
 # =============================================================================
 # Link with libs
 # =============================================================================
@@ -113,3 +121,11 @@ target_link_libraries(client_tcp_tls_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_unix_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_ws_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_ws_tls_tests OpenSSL::SSL OpenSSL::Crypto)
+
+# Streaming test executables
+target_link_libraries(streaming_tcp_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(streaming_unix_tests OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(streaming_ws_tests OpenSSL::SSL OpenSSL::Crypto)
+
+# Streaming interop executables
+target_link_libraries(streaming_interop_client OpenSSL::SSL OpenSSL::Crypto)

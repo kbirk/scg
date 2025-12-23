@@ -18,6 +18,15 @@ type ServerMethodArgs struct {
 	MethodResponseStructName string
 }
 
+type StreamMethodArgs struct {
+	MethodNamePascalCase    string
+	MethodNameCamelCase     string
+	MethodIDVarName         string
+	MethodID                uint64
+	MethodRequestStructName string
+	StreamClassName         string
+}
+
 type ServerArgs struct {
 	ServerNamePascalCase string
 	ServerNameCamelCase  string
@@ -26,10 +35,12 @@ type ServerArgs struct {
 	ServerStubClassName  string
 	ServiceID            uint64
 	ServerMethods        []ServerMethodArgs
+	StreamMethods        []StreamMethodArgs
 }
 
 const serverTemplateStr = `
 static constexpr uint64_t {{.ServiceIDVarName}} = {{.ServiceID}}UL;{{- range .ServerMethods}}
+static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}{{range .StreamMethods}}
 static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}
 
 class {{.ServerNamePascalCase}} {
@@ -37,6 +48,8 @@ public:
 	virtual ~{{.ServerNamePascalCase}}() = default;
 	{{range .ServerMethods}}
 	virtual std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(const scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) = 0;
+	{{end}}{{range .StreamMethods}}
+	virtual std::pair<std::shared_ptr<{{.StreamClassName}}>, scg::error::Error> {{.MethodNameCamelCase}}(const scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) = 0;
 	{{end}}
 };
 
@@ -103,6 +116,32 @@ inline void register{{.ServerNamePascalCase}}(scg::rpc::Server* server, {{.Serve
 	};
 
 	server->registerService({{.ServiceIDVarName}}, "{{.ServiceName}}", handler);
+{{range .StreamMethods}}
+	// Register stream handler for {{.MethodNamePascalCase}}
+	server->registerStream({{$.ServiceIDVarName}}, {{.MethodIDVarName}}, [impl](std::shared_ptr<scg::rpc::Stream> stream, scg::serialize::Reader& reader) {
+		// Deserialize request
+		{{.MethodRequestStructName}} req;
+		auto err = reader.read(req);
+		if (err) {
+			// Error - stream will be cleaned up
+			return;
+		}
+
+		// Call user implementation
+		auto [streamWrapper, callErr] = impl->{{.MethodNameCamelCase}}(stream->context(), req);
+		if (callErr) {
+			// Error - stream will be cleaned up
+			return;
+		}
+
+		// Set the internal stream
+		streamWrapper->setStream(stream);
+
+		// Store the wrapper to keep it alive for the duration of the stream
+		// The stream will call the processor's methods as messages arrive
+		stream->setUserData(streamWrapper);
+	});
+{{end}}
 }
 `
 
@@ -144,6 +183,7 @@ func generateServerCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		ServiceIDVarName:     serverServiceIDVarName(svc.Name),
 		ServiceID:            serverID,
 		ServerMethods:        []ServerMethodArgs{},
+		StreamMethods:        []StreamMethodArgs{},
 		ServerStubClassName:  getServerStubClassName(svc.Name),
 	}
 
@@ -152,6 +192,28 @@ func generateServerCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		if err != nil {
 			return "", err
 		}
+
+		// Handle stream-returning methods differently
+		if method.ReturnsStream {
+			methodArgType, _, err := generateServiceMethodParams(method)
+			if err != nil {
+				return "", err
+			}
+
+			// Get the stream server class name
+			streamClassName := getStreamServerClassName(method.StreamName)
+
+			args.StreamMethods = append(args.StreamMethods, StreamMethodArgs{
+				MethodNamePascalCase:    util.EnsurePascalCase(name),
+				MethodNameCamelCase:     util.EnsureCamelCase(name),
+				MethodIDVarName:         serverMethodIDVarName(svc.Name, name),
+				MethodID:                methodID,
+				MethodRequestStructName: methodArgType,
+				StreamClassName:         streamClassName,
+			})
+			continue
+		}
+
 		methodArgType, methodRetType, err := generateServiceMethodParams(method)
 		if err != nil {
 			return "", err

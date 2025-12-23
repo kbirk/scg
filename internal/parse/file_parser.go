@@ -33,6 +33,7 @@ type File struct {
 	Consts                 map[string]*ConstDeclaration
 	Enums                  map[string]*EnumDefinition
 	ServiceDefinitions     map[string]*ServiceDefinition
+	StreamDefinitions      map[string]*StreamDefinition
 	MessageDefinitions     map[string]*MessageDefinition
 }
 
@@ -250,6 +251,21 @@ func (f *File) ServicesSortedByKey() []*ServiceDefinition {
 	values := make([]*ServiceDefinition, 0, len(f.ServiceDefinitions))
 	for _, k := range keys {
 		values = append(values, f.ServiceDefinitions[k])
+	}
+	return values
+}
+
+func (f *File) StreamsSortedByKey() []*StreamDefinition {
+	keys := make([]string, 0, len(f.StreamDefinitions))
+	for k := range f.StreamDefinitions {
+		keys = append(keys, k)
+	}
+
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	values := make([]*StreamDefinition, 0, len(f.StreamDefinitions))
+	for _, k := range keys {
+		values = append(values, f.StreamDefinitions[k])
 	}
 	return values
 }
@@ -490,6 +506,40 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 		}
 	}
 
+	streamDefinitions, perr := parseStreamDefinitions(tokens)
+	if perr != nil {
+		return nil, perr
+	}
+	// if package is omitted, use the file's package name
+	for _, stream := range streamDefinitions {
+
+		stream.File = f
+
+		for _, method := range stream.Methods {
+			// if package is omitted, use the file's package name
+			perr := populateDataTypePackageIfMissing(pkg.Name, method.Argument)
+			if perr != nil {
+				return nil, perr
+			}
+			// add custom type dependencies
+			perr = addCustomTypeDependency(dependencies, method.Argument)
+			if perr != nil {
+				return nil, perr
+			}
+
+			// if package is omitted, use the file's package name
+			perr = populateDataTypePackageIfMissing(pkg.Name, method.Return)
+			if perr != nil {
+				return nil, perr
+			}
+			// add custom type dependencies
+			perr = addCustomTypeDependency(dependencies, method.Return)
+			if perr != nil {
+				return nil, perr
+			}
+		}
+	}
+
 	externalCustomTypeDependencies := make(map[string]*CustomTypeDependency)
 	for _, dep := range dependencies {
 		// check if the custom type is defined in this file
@@ -508,6 +558,11 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 			continue
 		}
 
+		_, ok = streamDefinitions[dep.CustomTypeName]
+		if ok {
+			continue
+		}
+
 		// custom type depdenency is not defined in this file
 		externalCustomTypeDependencies[dep.CustomTypeName] = dep
 	}
@@ -520,6 +575,7 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 	f.Typedefs = typedefs
 	f.MessageDefinitions = messageDefinitions
 	f.ServiceDefinitions = serviceDefinitions
+	f.StreamDefinitions = streamDefinitions
 
 	return f, nil
 }

@@ -20,6 +20,7 @@
 #include "scg/logger.h"
 #include "scg/middleware.h"
 #include "scg/transport.h"
+#include "scg/stream.h"
 
 namespace scg {
 namespace rpc {
@@ -38,11 +39,12 @@ class Client {
 public:
 
 	Client(const ClientConfig& config) : config_(config), status_(ConnectionStatus::NOT_CONNECTED) {
-		// randomize the starting request id
+		// randomize the starting request id and stream id
 		std::random_device rd;
 		std::mt19937_64 gen(rd());
 		std::uniform_int_distribution<uint64_t> dis;
 		requestID_ = dis(gen);
+		streamID_ = dis(gen);
 	}
 
 	virtual ~Client() {
@@ -64,6 +66,7 @@ public:
 		std::lock_guard<std::mutex> lock(mu_);
 
 		failPendingRequestsUnsafe("Connection closed");
+		closeAllStreamsUnsafe();
 
 		return disconnectUnsafe();
 	}
@@ -97,6 +100,92 @@ public:
 	void middleware(scg::middleware::Middleware middleware)
 	{
 		middleware_.push_back(middleware);
+	}
+
+	// Open a new stream
+	template <typename T>
+	std::pair<std::shared_ptr<Stream>, error::Error> openStream(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
+	{
+		// Generate IDs
+		uint64_t requestID = 0;
+		uint64_t streamID = 0;
+
+		// Register the request and generate ID
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			requestID = requestID_++;
+			streamID = streamID_++;
+		}
+
+		using scg::serialize::bit_size; // adl trickery
+
+		// Build STREAM_OPEN message
+		serialize::FixedSizeWriter writer(
+			scg::serialize::bits_to_bytes(
+				bit_size(STREAM_OPEN_PREFIX) +
+				bit_size(ctx) +
+				bit_size(requestID) +
+				bit_size(streamID) +
+				bit_size(serviceID) +
+				bit_size(methodID) +
+				bit_size(msg)));
+
+		writer.write(STREAM_OPEN_PREFIX);
+		writer.write(ctx);
+		writer.write(requestID);
+		writer.write(streamID);
+		writer.write(serviceID);
+		writer.write(methodID);
+		writer.write(msg);
+
+		std::unique_lock<std::mutex> lock(mu_);
+
+		auto promise = std::make_shared<std::promise<serialize::Reader>>();
+
+		requests_[requestID] = promise;
+
+		auto err = sendBytesUnsafe(writer.bytes());
+
+		if (err) {
+			requests_.erase(requestID);
+			return std::make_pair(nullptr, err);
+		}
+
+		auto future = promise->get_future();
+
+		// Unlock while waiting
+		lock.unlock();
+
+		// Wait for the response with deadline if specified
+		if (ctx.hasDeadline()) {
+
+			auto status = future.wait_until(ctx.getDeadline());
+
+			if (status == std::future_status::timeout) {
+				std::lock_guard<std::mutex> lock2(mu_);
+				requests_.erase(requestID);
+				return std::make_pair(nullptr, error::Error("Request timed out"));
+			}
+		}
+
+		auto [reader, recvErr] = receiveMessage(future);
+		if (recvErr) {
+			return std::make_pair(nullptr, recvErr);
+		}
+
+		auto errorHandler = [this](const error::Error& err) {
+			// Handle stream errors - could be logged if needed
+			(void)err; // Suppress unused variable warning
+		};
+
+		auto stream = std::make_shared<Stream>(streamID, serviceID, connection_, errorHandler);
+
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			streams_[streamID] = stream;
+		}
+
+		return std::make_pair(stream, nullptr);
 	}
 
 protected:
@@ -164,7 +253,8 @@ protected:
 		}
 
 		if (status_ == ConnectionStatus::CONNECTED && connection_) {
-			return connection_->send(msg);
+			auto result = connection_->send(msg);
+			return result;
 		}
 
 		return error::Error("Connection not available");
@@ -182,15 +272,67 @@ protected:
 	}
 
 	void onMessage(const std::vector<uint8_t>& data) {
+		std::cerr << "[Client] onMessage called, " << data.size() << " bytes" << std::endl;
 		serialize::Reader reader(data);
 
 		using scg::serialize::deserialize;
 
 		std::array<uint8_t, 16> prefix;
 		auto err = deserialize(prefix, reader);
-		if (err || prefix != RESPONSE_PREFIX) {
-			// We cannot resolve the promise here as we don't have the request ID
-			// We disconnect here to prevent the client from deadlocking
+		if (err) {
+			std::cerr << "[Client] ERROR: Failed to deserialize prefix" << std::endl;
+			disconnect();
+			return;
+		}
+
+		if (prefix == RESPONSE_PREFIX) {
+			std::cerr << "[Client] Routing to handleRPCResponse" << std::endl;
+			handleRPCResponse(reader);
+		} else if (prefix == STREAM_RESPONSE_PREFIX) {
+			std::cerr << "[Client] Routing to handleStreamResponse" << std::endl;
+			handleStreamResponse(reader);
+		} else if (prefix == STREAM_MESSAGE_PREFIX) {
+			std::cerr << "[Client] Routing to handleStreamMessage" << std::endl;
+			handleStreamMessage(reader);
+		} else if (prefix == STREAM_CLOSE_PREFIX) {
+			std::cerr << "[Client] Routing to handleStreamClose" << std::endl;
+			handleStreamClose(reader);
+		} else {
+			std::cerr << "[Client] ERROR: Unknown prefix, disconnecting" << std::endl;
+			// Unknown prefix, disconnect
+			disconnect();
+		}
+	}
+
+	void handleRPCResponse(serialize::Reader& reader) {
+		std::cerr << "[Client] handleRPCResponse called" << std::endl;
+		uint64_t requestID = 0;
+		auto err = serialize::deserialize(requestID, reader);
+		if (err) {
+			std::cerr << "[Client] ERROR: Failed to deserialize requestID" << std::endl;
+			disconnect();
+			return;
+		}
+
+		std::cerr << "[Client] Looking up requestID=" << requestID << std::endl;
+
+		std::lock_guard<std::mutex> lock(mu_);
+
+		auto iter = requests_.find(requestID);
+		if (iter != requests_.end()) {
+			std::cerr << "[Client] Found request, fulfilling promise" << std::endl;
+			iter->second->set_value(reader);
+			requests_.erase(requestID);
+		} else {
+			std::cerr << "[Client] ERROR: RequestID not found in map, disconnecting" << std::endl;
+			disconnectUnsafe();
+		}
+	}
+
+	void handleStreamResponse(serialize::Reader& reader) {
+		uint64_t streamID = 0;
+		auto err = serialize::deserialize(streamID, reader);
+		if (err) {
 			disconnect();
 			return;
 		}
@@ -198,23 +340,70 @@ protected:
 		uint64_t requestID = 0;
 		err = serialize::deserialize(requestID, reader);
 		if (err) {
-			// We cannot resolve the promise here as we don't have the request ID
-			// We disconnect here to prevent the client from deadlocking
 			disconnect();
 			return;
 		}
 
 		std::lock_guard<std::mutex> lock(mu_);
 
-		auto iter = requests_.find(requestID);
-		if (iter != requests_.end()) {
-			iter->second->set_value(reader);
-		} else {
-			disconnectUnsafe();  // Already holding lock, use unsafe version
+		auto iter = streams_.find(streamID);
+		if (iter != streams_.end()) {
+			iter->second->handleMessageResponse(requestID, reader);
+		}
+	}
+
+	void handleStreamMessage(serialize::Reader& reader) {
+		uint64_t streamID = 0;
+		auto err = serialize::deserialize(streamID, reader);
+		if (err) {
+			disconnect();
 			return;
 		}
 
-		requests_.erase(requestID);
+		uint64_t requestID = 0;
+		err = serialize::deserialize(requestID, reader);
+		if (err) {
+			disconnect();
+			return;
+		}
+
+		uint64_t methodID = 0;
+		err = serialize::deserialize(methodID, reader);
+		if (err) {
+			disconnect();
+			return;
+		}
+
+		std::lock_guard<std::mutex> lock(mu_);
+
+		auto iter = streams_.find(streamID);
+		if (iter != streams_.end()) {
+			iter->second->handleIncomingMessage(methodID, requestID, reader);
+		}
+	}
+
+	void handleStreamClose(serialize::Reader& reader) {
+		uint64_t streamID = 0;
+		auto err = serialize::deserialize(streamID, reader);
+		if (err) {
+			disconnect();
+			return;
+		}
+
+		std::lock_guard<std::mutex> lock(mu_);
+
+		auto iter = streams_.find(streamID);
+		if (iter != streams_.end()) {
+			iter->second->handleClose();
+			streams_.erase(streamID);
+		}
+	}
+
+	void closeAllStreamsUnsafe() {
+		for (auto& pair : streams_) {
+			pair.second->handleClose();
+		}
+		streams_.clear();
 	}
 
 
@@ -291,7 +480,9 @@ private:
 	std::vector<scg::middleware::Middleware> middleware_;
 
 	uint64_t requestID_;
+	uint64_t streamID_;
 	std::map<uint64_t, std::shared_ptr<std::promise<serialize::Reader>>> requests_;
+	std::map<uint64_t, std::shared_ptr<Stream>> streams_;
 
 };
 

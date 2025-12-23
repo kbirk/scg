@@ -9,15 +9,17 @@ import (
 )
 
 type FileArgs struct {
-	Header     string
-	Namespaces []string
-	Imports    string
-	Enums      string
-	Typedefs   string
-	Consts     string
-	Messages   string
-	Servers    string
-	Clients    string
+	Header        string
+	Namespaces    []string
+	Imports       string
+	Enums         string
+	Typedefs      string
+	Consts        string
+	Messages      string
+	StreamClients string
+	StreamServers string
+	Servers       string
+	Clients       string
 }
 
 const fileTemplateStr = `
@@ -28,6 +30,8 @@ namespace {{.}} { {{end}}
 {{.Typedefs}}
 {{.Consts}}
 {{.Messages}}
+{{.StreamClients}}
+{{.StreamServers}}
 {{.Servers}}
 {{.Clients}}{{ range .Namespaces }}
 } {{end}}
@@ -87,6 +91,24 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 		messageCode = append(messageCode, message)
 	}
 
+	var streamClientCode []string
+	for _, stream := range file.StreamsSortedByKey() {
+		streamClient, err := generateStreamClientCppCode(pkg, stream)
+		if err != nil {
+			return "", err
+		}
+		streamClientCode = append(streamClientCode, streamClient)
+	}
+
+	var streamServerCode []string
+	for _, stream := range file.StreamsSortedByKey() {
+		streamServer, err := generateStreamServerCppCode(pkg, stream)
+		if err != nil {
+			return "", err
+		}
+		streamServerCode = append(streamServerCode, streamServer)
+	}
+
 	var serverCode []string
 	for _, svc := range file.ServiceDefinitions {
 		service, err := generateServerCppCode(pkg, svc)
@@ -106,15 +128,17 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 	}
 
 	args := FileArgs{
-		Header:     headerCode,
-		Namespaces: namespaces,
-		Imports:    importCode,
-		Enums:      strings.Join(enumCode, "\n"),
-		Typedefs:   strings.Join(typedefCode, "\n"),
-		Consts:     strings.Join(constsCode, "\n"),
-		Messages:   strings.Join(messageCode, "\n"),
-		Servers:    strings.Join(serverCode, "\n"),
-		Clients:    strings.Join(clientCode, "\n"),
+		Header:        headerCode,
+		Namespaces:    namespaces,
+		Imports:       importCode,
+		Enums:         strings.Join(enumCode, "\n"),
+		Typedefs:      strings.Join(typedefCode, "\n"),
+		Consts:        strings.Join(constsCode, "\n"),
+		Messages:      strings.Join(messageCode, "\n"),
+		StreamClients: strings.Join(streamClientCode, "\n"),
+		StreamServers: strings.Join(streamServerCode, "\n"),
+		Servers:       strings.Join(serverCode, "\n"),
+		Clients:       strings.Join(clientCode, "\n"),
 	}
 
 	buf := &bytes.Buffer{}

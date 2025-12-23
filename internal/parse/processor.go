@@ -64,16 +64,19 @@ type PackageDependency struct {
 }
 
 type Package struct {
-	Name                   string
-	Declaration            *PackageDeclaration
-	PackageDependencies    map[string]*PackageDependency
-	Enums                  map[string]*EnumDefinition
-	Typedefs               map[string]*TypedefDeclaration
-	Consts                 map[string]*ConstDeclaration
-	ServiceDefinitions     map[string]*ServiceDefinition
-	MessageDefinitions     map[string]*MessageDefinition
-	serverIDCollisionCheck map[uint64]string
-	methodIDCollisionCheck map[uint64]map[uint64]string
+	Name                         string
+	Declaration                  *PackageDeclaration
+	PackageDependencies          map[string]*PackageDependency
+	Enums                        map[string]*EnumDefinition
+	Typedefs                     map[string]*TypedefDeclaration
+	Consts                       map[string]*ConstDeclaration
+	ServiceDefinitions           map[string]*ServiceDefinition
+	StreamDefinitions            map[string]*StreamDefinition
+	MessageDefinitions           map[string]*MessageDefinition
+	serverIDCollisionCheck       map[uint64]string
+	methodIDCollisionCheck       map[uint64]map[uint64]string
+	streamIDCollisionCheck       map[uint64]string
+	streamMethodIDCollisionCheck map[uint64]map[uint64]string
 }
 
 func (p *Package) HashStringToServiceID(serviceName string) (uint64, error) {
@@ -117,6 +120,52 @@ func (p *Package) HashStringToMethodID(serviceName string, methodName string) (u
 		return 0, fmt.Errorf("MethodID collision detected: %s and %s both hash to %d", methodName, existing, methodID)
 	}
 	existingMethodIDs[methodID] = methodName
+	p.methodIDCollisionCheck[serviceID] = existingMethodIDs
+	return methodID, nil
+}
+
+func (p *Package) HashStringToStreamID(streamName string) (uint64, error) {
+
+	_, ok := p.StreamDefinitions[streamName]
+	if !ok {
+		return 0, fmt.Errorf("Stream not found: %s", streamName)
+	}
+
+	if p.streamIDCollisionCheck == nil {
+		p.streamIDCollisionCheck = map[uint64]string{}
+	}
+
+	streamID := uint64(util.HashStringToUInt64(streamName))
+	existing, ok := p.streamIDCollisionCheck[streamID]
+	if ok && existing != streamName {
+		return 0, fmt.Errorf("StreamID collision detected: %s and %s both hash to %d", streamName, existing, streamID)
+	}
+	p.streamIDCollisionCheck[streamID] = streamName
+	return streamID, nil
+}
+
+func (p *Package) HashStringToStreamMethodID(streamName string, methodName string) (uint64, error) {
+
+	if p.streamMethodIDCollisionCheck == nil {
+		p.streamMethodIDCollisionCheck = map[uint64]map[uint64]string{}
+	}
+
+	streamID, err := p.HashStringToStreamID(streamName)
+	if err != nil {
+		return 0, err
+	}
+
+	methodID := uint64(util.HashStringToUInt64(methodName))
+	existingMethodIDs, ok := p.streamMethodIDCollisionCheck[streamID]
+	if !ok {
+		existingMethodIDs = map[uint64]string{}
+	}
+	existing, ok := existingMethodIDs[methodID]
+	if ok && existing != methodName {
+		return 0, fmt.Errorf("StreamMethodID collision detected: %s and %s both hash to %d", methodName, existing, methodID)
+	}
+	existingMethodIDs[methodID] = methodName
+	p.streamMethodIDCollisionCheck[streamID] = existingMethodIDs
 	return methodID, nil
 }
 
@@ -262,6 +311,7 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 				Typedefs:            map[string]*TypedefDeclaration{},
 				MessageDefinitions:  map[string]*MessageDefinition{},
 				ServiceDefinitions:  map[string]*ServiceDefinition{},
+				StreamDefinitions:   map[string]*StreamDefinition{},
 			}
 		}
 		// append definitions from the file to the package
@@ -322,6 +372,18 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 				}
 			}
 			parse.Packages[f.Package.Name].ServiceDefinitions[k] = v
+		}
+		for k, v := range f.StreamDefinitions {
+			_, ok := parse.Packages[f.Package.Name].StreamDefinitions[k]
+			if ok {
+				return nil, &ParsingError{
+					Message:  fmt.Sprintf("Stream %s defined multiple times", k),
+					Token:    v.Token,
+					Filename: f.Name,
+					Content:  f.Content,
+				}
+			}
+			parse.Packages[f.Package.Name].StreamDefinitions[k] = v
 		}
 		for k, v := range f.MessageDefinitions {
 			_, ok := parse.Packages[f.Package.Name].MessageDefinitions[k]

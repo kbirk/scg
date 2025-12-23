@@ -16,6 +16,7 @@ import (
 	"github.com/kbirk/scg/pkg/rpc/websocket"
 	"github.com/kbirk/scg/test/files/output/basic"
 	"github.com/kbirk/scg/test/files/output/pingpong"
+	"github.com/kbirk/scg/test/files/output/streaming"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -163,6 +164,21 @@ func RunTestSuite(t *testing.T, config TestSuiteConfig) {
 	t.Run("SequentialRequests", func(t *testing.T) {
 		runSequentialRequestsTest(t, config.Factory, port, config.UseExternalServer)
 	})
+
+	// Streaming tests
+	if !config.UseExternalServer {
+		t.Run("StreamingBidirectional", func(t *testing.T) {
+			runStreamingBidirectionalTest(t, config.Factory, port)
+		})
+
+		t.Run("StreamingServerNotifications", func(t *testing.T) {
+			runStreamingServerNotificationsTest(t, config.Factory, port)
+		})
+
+		t.Run("StreamingConcurrentMessages", func(t *testing.T) {
+			runStreamingConcurrentMessagesTest(t, config.Factory, port)
+		})
+	}
 }
 
 // runPingPongTest tests basic ping-pong functionality
@@ -1413,4 +1429,276 @@ func (s *counterPingPongServerGeneric) Ping(ctx context.Context, req *pingpong.P
 			Payload: req.Ping.Payload,
 		},
 	}, nil
+}
+
+// Streaming test implementations
+
+// Server-side handler for client→server messages
+type chatStreamServerHandler struct {
+	messagesReceived []string
+	mu               sync.Mutex
+}
+
+func (h *chatStreamServerHandler) SendMessage(ctx context.Context, req *streaming.ChatMessage) (*streaming.ChatResponse, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messagesReceived = append(h.messagesReceived, req.Text)
+	return &streaming.ChatResponse{
+		Status:    "received",
+		MessageID: uint64(len(h.messagesReceived)),
+	}, nil
+}
+
+// Server implementation for streaming tests
+type chatServiceImpl struct {
+	notificationCount int
+	notificationDelay time.Duration
+}
+
+func (s *chatServiceImpl) OpenChat(ctx context.Context, req *streaming.Empty) (*streaming.ChatStreamStreamServer, error) {
+	handler := &chatStreamServerHandler{
+		messagesReceived: make([]string, 0),
+	}
+	stream := streaming.NewChatStreamStreamServer(handler)
+
+	// Spawn goroutine to send periodic notifications
+	if s.notificationCount > 0 {
+		go func() {
+			defer stream.Close()
+
+			for i := 0; i < s.notificationCount; i++ {
+				time.Sleep(s.notificationDelay)
+				notification := &streaming.ServerNotification{
+					Message: fmt.Sprintf("Notification %d", i),
+					Type:    "test",
+				}
+				_, err := stream.SendNotification(ctx, notification)
+				if err != nil {
+					return
+				}
+			}
+		}()
+	}
+
+	return stream, nil
+}
+
+// Client-side handler for server→client messages
+type chatStreamClientHandler struct {
+	notificationsReceived []string
+	mu                    sync.Mutex
+}
+
+func (h *chatStreamClientHandler) SendNotification(ctx context.Context, req *streaming.ServerNotification) (*streaming.Empty, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.notificationsReceived = append(h.notificationsReceived, req.Message)
+	return &streaming.Empty{}, nil
+}
+
+// runStreamingBidirectionalTest tests basic bidirectional streaming
+func runStreamingBidirectionalTest(t *testing.T, factory TransportFactory, id int) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: factory.CreateServerTransport(id),
+		ErrHandler: func(err error) {
+			t.Logf("Server error: %v", err)
+		},
+	})
+
+	chatService := &chatServiceImpl{
+		notificationCount: 3,
+		notificationDelay: 100 * time.Millisecond,
+	}
+	streaming.RegisterChatServiceServer(server, chatService)
+
+	go func() {
+		server.ListenAndServe()
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	chatClient := streaming.NewChatServiceClient(client)
+
+	clientHandler := &chatStreamClientHandler{
+		notificationsReceived: make([]string, 0),
+	}
+
+	stream, err := chatClient.OpenChat(context.Background(), clientHandler, &streaming.Empty{})
+	require.NoError(t, err)
+	defer stream.Close()
+
+	// Send messages from client to server
+	for i := 0; i < 5; i++ {
+		msg := &streaming.ChatMessage{
+			Text:      fmt.Sprintf("Test message %d", i),
+			Sender:    "TestClient",
+			Timestamp: uint64(time.Now().Unix()),
+		}
+
+		resp, err := stream.SendMessage(context.Background(), msg)
+		require.NoError(t, err)
+		assert.Equal(t, "received", resp.Status)
+		assert.Equal(t, uint64(i+1), resp.MessageID)
+	}
+
+	// Wait for server to send all notifications
+	time.Sleep(500 * time.Millisecond)
+
+	// Check client received notifications
+	clientHandler.mu.Lock()
+	notifCount := len(clientHandler.notificationsReceived)
+	clientHandler.mu.Unlock()
+
+	assert.Equal(t, 3, notifCount, "Should receive 3 notifications")
+
+	err = stream.Close()
+	require.NoError(t, err)
+
+	err = server.Shutdown(context.Background())
+	require.NoError(t, err)
+}
+
+// runStreamingServerNotificationsTest tests server→client unsolicited messages
+func runStreamingServerNotificationsTest(t *testing.T, factory TransportFactory, id int) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: factory.CreateServerTransport(id),
+		ErrHandler: func(err error) {
+			t.Logf("Server error: %v", err)
+		},
+	})
+
+	chatService := &chatServiceImpl{
+		notificationCount: 5,
+		notificationDelay: 50 * time.Millisecond,
+	}
+	streaming.RegisterChatServiceServer(server, chatService)
+
+	go func() {
+		server.ListenAndServe()
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	chatClient := streaming.NewChatServiceClient(client)
+
+	clientHandler := &chatStreamClientHandler{
+		notificationsReceived: make([]string, 0),
+	}
+
+	stream, err := chatClient.OpenChat(context.Background(), clientHandler, &streaming.Empty{})
+	require.NoError(t, err)
+	defer stream.Close()
+
+	// Wait for all server notifications
+	time.Sleep(400 * time.Millisecond)
+
+	clientHandler.mu.Lock()
+	notifCount := len(clientHandler.notificationsReceived)
+	notifications := make([]string, len(clientHandler.notificationsReceived))
+	copy(notifications, clientHandler.notificationsReceived)
+	clientHandler.mu.Unlock()
+
+	assert.Equal(t, 5, notifCount, "Should receive 5 notifications")
+
+	// Verify notification content
+	for i, notif := range notifications {
+		expected := fmt.Sprintf("Notification %d", i)
+		assert.Equal(t, expected, notif)
+	}
+
+	err = stream.Close()
+	require.NoError(t, err)
+
+	err = server.Shutdown(context.Background())
+	require.NoError(t, err)
+}
+
+// runStreamingConcurrentMessagesTest tests concurrent bidirectional messages
+func runStreamingConcurrentMessagesTest(t *testing.T, factory TransportFactory, id int) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: factory.CreateServerTransport(id),
+		ErrHandler: func(err error) {
+			t.Logf("Server error: %v", err)
+		},
+	})
+
+	chatService := &chatServiceImpl{
+		notificationCount: 10,
+		notificationDelay: 20 * time.Millisecond,
+	}
+	streaming.RegisterChatServiceServer(server, chatService)
+
+	go func() {
+		server.ListenAndServe()
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	chatClient := streaming.NewChatServiceClient(client)
+
+	clientHandler := &chatStreamClientHandler{
+		notificationsReceived: make([]string, 0),
+	}
+
+	stream, err := chatClient.OpenChat(context.Background(), clientHandler, &streaming.Empty{})
+	require.NoError(t, err)
+	defer stream.Close()
+
+	// Send messages concurrently
+	var wg sync.WaitGroup
+	numMessages := 20
+	successCount := atomic.Int32{}
+
+	for i := 0; i < numMessages; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			msg := &streaming.ChatMessage{
+				Text:      fmt.Sprintf("Concurrent message %d", idx),
+				Sender:    "TestClient",
+				Timestamp: uint64(time.Now().Unix()),
+			}
+
+			resp, err := stream.SendMessage(context.Background(), msg)
+			if err == nil && resp.Status == "received" {
+				successCount.Add(1)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// All messages should succeed
+	assert.Equal(t, int32(numMessages), successCount.Load(), "All messages should be sent successfully")
+
+	// Wait for server notifications
+	time.Sleep(300 * time.Millisecond)
+
+	clientHandler.mu.Lock()
+	notifCount := len(clientHandler.notificationsReceived)
+	clientHandler.mu.Unlock()
+
+	assert.Equal(t, 10, notifCount, "Should receive 10 notifications")
+
+	err = stream.Close()
+	require.NoError(t, err)
+
+	err = server.Shutdown(context.Background())
+	require.NoError(t, err)
 }

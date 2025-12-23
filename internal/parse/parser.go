@@ -11,6 +11,7 @@ var (
 		"service": ServiceTokenType,
 		"message": MessageTokenType,
 		"enum":    EnumTokenType,
+		"stream":  StreamTokenType,
 	}
 	packageDeclaration = map[string]TokenType{
 		"package": PackageTokenType,

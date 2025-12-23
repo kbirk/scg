@@ -1,0 +1,29 @@
+package streaming;
+
+message ChatMessage {
+	string text = 0;
+	string sender = 1;
+	uint64 timestamp = 2;
+}
+
+message ChatResponse {
+	string status = 0;
+	uint64 messageId = 1;
+}
+
+message ServerNotification {
+	string message = 0;
+	string type = 1;
+}
+
+message Empty {
+}
+
+stream ChatStream {
+	client SendMessage (ChatMessage) returns (ChatResponse);
+	server SendNotification (ServerNotification) returns (Empty);
+}
+
+service ChatService {
+	rpc OpenChat (Empty) returns (stream ChatStream);
+}
