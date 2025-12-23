@@ -121,7 +121,7 @@ public:
 // ============================================================================
 
 // Auth middleware for testing
-inline std::pair<scg::type::Message*, scg::error::Error> authMiddleware(
+inline std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> authMiddleware(
     scg::context::Context& ctx,
     const scg::type::Message& req,
     scg::middleware::Handler next
@@ -244,7 +244,7 @@ public:
 
         server_ = std::make_shared<scg::rpc::Server>(serverConfig);
         impl_ = std::make_shared<PingPongServerImpl>();
-        pingpong::registerPingPongServer(server_.get(), impl_.get());
+        pingpong::registerPingPongServer(server_.get(), impl_);
 
         auto err = server_->start();
         TEST_CHECK(!err);
@@ -463,12 +463,12 @@ inline void runMiddlewareTest(TestContext& ctx) {
             scg::context::Context& ctx,
             const scg::type::Message& req,
             scg::middleware::Handler next
-        ) -> std::pair<scg::type::Message*, scg::error::Error> {
+        ) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
             serverMiddlewareCount++;
             return next(ctx, req);
         });
 
-        auto impl = new PingPongServerImpl();
+        auto impl = std::make_shared<PingPongServerImpl>();
         pingpong::registerPingPongServer(server, impl);
     });
 
@@ -479,7 +479,7 @@ inline void runMiddlewareTest(TestContext& ctx) {
         scg::context::Context& ctx,
         const scg::type::Message& req,
         scg::middleware::Handler next
-    ) -> std::pair<scg::type::Message*, scg::error::Error> {
+    ) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
         clientMiddlewareCount++;
         return next(ctx, req);
     });
@@ -518,7 +518,7 @@ inline void runAuthFailTest(TestContext& ctx) {
 
     ctx.startServerWithSetup([](scg::rpc::Server* server) {
         server->addMiddleware(authMiddleware);
-        auto impl = new PingPongServerImpl();
+        auto impl = std::make_shared<PingPongServerImpl>();
         pingpong::registerPingPongServer(server, impl);
     });
 
@@ -553,7 +553,7 @@ inline void runAuthSuccessTest(TestContext& ctx) {
 
     ctx.startServerWithSetup([](scg::rpc::Server* server) {
         server->addMiddleware(authMiddleware);
-        auto impl = new PingPongServerImpl();
+        auto impl = std::make_shared<PingPongServerImpl>();
         pingpong::registerPingPongServer(server, impl);
     });
 
@@ -584,7 +584,7 @@ inline void runServerErrorTest(TestContext& ctx) {
     printf("Running Server Error test...\n");
 
     ctx.startServerWithSetup([](scg::rpc::Server* server) {
-        auto impl = new PingPongServerFail();
+        auto impl = std::make_shared<PingPongServerFail>();
         pingpong::registerPingPongServer(server, impl);
     });
 
@@ -617,17 +617,17 @@ inline void runServerGroupsTest(TestContext& ctx) {
     printf("Running Server Groups test...\n");
 
     ctx.startServerWithSetup([](scg::rpc::Server* server) {
-        auto testerAImpl = new TesterAServerImpl();
-        auto testerBImpl = new TesterBServerImpl();
+        auto testerAImpl = std::make_shared<TesterAServerImpl>();
+        auto testerBImpl = std::make_shared<TesterBServerImpl>();
 
         // Group A has auth middleware
-        server->group([&](scg::rpc::Server* s) {
+        server->group([=](scg::rpc::Server* s) {
             s->addMiddleware(authMiddleware);
             basic::registerTesterAServer(s, testerAImpl);
         });
 
         // Group B has no middleware
-        server->group([&](scg::rpc::Server* s) {
+        server->group([=](scg::rpc::Server* s) {
             basic::registerTesterBServer(s, testerBImpl);
         });
     });
@@ -682,21 +682,21 @@ inline void runServerNestedGroupsTest(TestContext& ctx) {
         scg::context::Context& ctx,
         const scg::type::Message& req,
         scg::middleware::Handler next
-    ) -> std::pair<scg::type::Message*, scg::error::Error> {
+    ) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
         return std::make_pair(nullptr, scg::error::Error("rejected"));
     };
 
     ctx.startServerWithSetup([&](scg::rpc::Server* server) {
-        auto testerAImpl = new TesterAServerImpl();
-        auto testerBImpl = new TesterBServerImpl();
+        auto testerAImpl = std::make_shared<TesterAServerImpl>();
+        auto testerBImpl = std::make_shared<TesterBServerImpl>();
 
         // Outer group has auth middleware
-        server->group([&](scg::rpc::Server* s) {
+        server->group([=](scg::rpc::Server* s) {
             s->addMiddleware(authMiddleware);
             basic::registerTesterAServer(s, testerAImpl);
 
             // Nested group adds reject middleware (both auth AND reject apply)
-            s->group([&](scg::rpc::Server* inner) {
+            s->group([=, &alwaysRejectMiddleware](scg::rpc::Server* inner) {
                 inner->addMiddleware(alwaysRejectMiddleware);
                 basic::registerTesterBServer(inner, testerBImpl);
             });
@@ -756,8 +756,8 @@ inline void runDuplicateServiceTest(TestContext& ctx) {
 
     auto server = std::make_shared<scg::rpc::Server>(serverConfig);
 
-    auto impl1 = new PingPongServerImpl();
-    auto impl2 = new PingPongServerImpl();
+    auto impl1 = std::make_shared<PingPongServerImpl>();
+    auto impl2 = std::make_shared<PingPongServerImpl>();
 
     pingpong::registerPingPongServer(server.get(), impl1);
 

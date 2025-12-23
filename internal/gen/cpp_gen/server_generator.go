@@ -42,7 +42,7 @@ public:
 
 class {{.ServerStubClassName}} {
 public:
-	{{.ServerStubClassName}}({{.ServerNamePascalCase}}* impl) : impl_(impl) {}
+	{{.ServerStubClassName}}(std::shared_ptr<{{.ServerNamePascalCase}}> impl) : impl_(impl) {}
 
 	{{range .ServerMethods}}
 	std::vector<uint8_t> handle{{.MethodNamePascalCase}}(const scg::context::Context& ctx, const std::vector<scg::middleware::Middleware>& middleware, uint64_t requestID, scg::serialize::Reader& reader) {
@@ -52,12 +52,12 @@ public:
 			return scg::rpc::respondWithError(requestID, err);
 		}
 
-		auto handler = [this, &req](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<scg::type::Message*, scg::error::Error> {
+		auto handler = [this, &req](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
 			auto [resp, err] = impl_->{{.MethodNameCamelCase}}(ctx, req);
 			if (err) {
 				return std::make_pair(nullptr, err);
 			}
-			return std::make_pair(new {{.MethodResponseStructName}}(resp), nullptr);
+			return std::make_pair(std::make_shared<{{.MethodResponseStructName}}>(resp), nullptr);
 		};
 
 		auto result = scg::middleware::applyHandlerChain(const_cast<scg::context::Context&>(ctx), req, middleware, handler);
@@ -65,14 +65,12 @@ public:
 			return scg::rpc::respondWithError(requestID, result.second);
 		}
 
-		auto* resp = dynamic_cast<{{.MethodResponseStructName}}*>(result.first);
+		auto resp = std::dynamic_pointer_cast<{{.MethodResponseStructName}}>(result.first);
 		if (!resp) {
-			delete result.first;
 			return scg::rpc::respondWithError(requestID, scg::error::Error("Invalid response type"));
 		}
 
 		auto response = scg::rpc::respondWithMessage(requestID, *resp);
-		delete resp;
 		return response;
 	}
 	{{end}}
@@ -92,11 +90,11 @@ public:
 	}
 
 private:
-	{{.ServerNamePascalCase}}* impl_;
+	std::shared_ptr<{{.ServerNamePascalCase}}> impl_;
 };
 
-inline void register{{.ServerNamePascalCase}}(scg::rpc::Server* server, {{.ServerNamePascalCase}}* impl) {
-	auto stub = new {{.ServerStubClassName}}(impl);
+inline void register{{.ServerNamePascalCase}}(scg::rpc::Server* server, std::shared_ptr<{{.ServerNamePascalCase}}> impl) {
+	auto stub = std::make_shared<{{.ServerStubClassName}}>(impl);
 
 	auto handler = [stub](const scg::context::Context& ctx, const std::vector<scg::middleware::Middleware>& middleware, uint64_t requestID, scg::serialize::Reader& reader) -> std::vector<uint8_t> {
 		return stub->handleWrapper(ctx, middleware, requestID, reader);

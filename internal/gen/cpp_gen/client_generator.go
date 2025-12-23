@@ -46,18 +46,18 @@ public:
 
 	inline scg::error::Error {{.MethodNameCamelCase}}({{.MethodResponseStructName}}* resp, scg::context::Context& c, const {{.MethodRequestStructName}}& req) const
 	{
-		auto handler = [this, req, resp](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<scg::type::Message*, scg::error::Error> {
+		auto handler = [this, req, resp](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
 			auto [reader, err] = client_->call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req);
 			if (err) {
-				return std::pair(nullptr, err);
+				return std::make_pair(nullptr, err);
 			}
 
 			err = reader.read(*resp);
 			if (err) {
-				return std::pair(nullptr, err);
+				return std::make_pair(nullptr, err);
 			}
 
-			return std::pair(resp, nullptr);
+			return std::make_pair(std::shared_ptr<scg::type::Message>(resp, [](scg::type::Message*){}), nullptr);
 		};
 
 		auto& middleware = client_->middleware();

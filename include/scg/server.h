@@ -121,23 +121,23 @@ public:
 		return middleware_;
 	}
 
-	void setParent(ServerGroup* parent) {
+	void setParent(std::shared_ptr<ServerGroup> parent) {
 		parent_ = parent;
 	}
 
-	ServerGroup* parent() const {
-		return parent_;
+	std::shared_ptr<ServerGroup> parent() const {
+		return parent_.lock();
 	}
 
-	void addChild(ServerGroup* child) {
+	void addChild(std::shared_ptr<ServerGroup> child) {
 		children_.push_back(child);
 	}
 
 private:
 	std::map<uint64_t, ServiceHandler> services_;
 	std::vector<middleware::Middleware> middleware_;
-	ServerGroup* parent_ = nullptr;
-	std::vector<ServerGroup*> children_;
+	std::weak_ptr<ServerGroup> parent_;
+	std::vector<std::shared_ptr<ServerGroup>> children_;
 };
 
 // Main server class
@@ -149,8 +149,8 @@ public:
 		, running_(false)
 		, nextConnectionID_(1)
 	{
-		rootGroup_ = std::make_unique<ServerGroup>();
-		activeGroup_ = rootGroup_.get();
+		rootGroup_ = std::make_shared<ServerGroup>();
+		activeGroup_ = rootGroup_;
 	}
 
 	~Server() {
@@ -260,33 +260,39 @@ public:
 			throw std::runtime_error("Service with id " + std::to_string(serviceID) + " already registered");
 		}
 
-		activeGroup_->registerService(serviceID, handler);
-		groupByServiceID_[serviceID] = activeGroup_;
+		if (activeGroup_) {
+			activeGroup_->registerService(serviceID, handler);
+			groupByServiceID_[serviceID] = activeGroup_;
+		}
 	}
 
 	// Add middleware to the current group
 	void addMiddleware(middleware::Middleware m) {
 		std::lock_guard<std::mutex> lock(mu_);
-		activeGroup_->addMiddleware(m);
+		if (activeGroup_) {
+			activeGroup_->addMiddleware(m);
+		}
 	}
 
 	// Create a new service group
 	void group(std::function<void(Server*)> fn) {
 		std::lock_guard<std::mutex> lock(mu_);
 
-		auto newGroup = std::make_unique<ServerGroup>();
+		auto newGroup = std::make_shared<ServerGroup>();
 		newGroup->setParent(activeGroup_);
-		activeGroup_->addChild(newGroup.get());
+		if (activeGroup_) {
+			activeGroup_->addChild(newGroup);
+		}
 
 		auto prevGroup = activeGroup_;
-		activeGroup_ = newGroup.get();
+		activeGroup_ = newGroup;
 
 		mu_.unlock(); // Unlock before calling user function
 		fn(this);
 		mu_.lock();
 
 		activeGroup_ = prevGroup;
-		ownedGroups_.push_back(std::move(newGroup));
+		ownedGroups_.push_back(newGroup);
 	}
 
 private:
@@ -488,8 +494,8 @@ private:
 		}
 
 		// Build middleware stack from root to leaf
-		std::vector<ServerGroup*> groups;
-		ServerGroup* group = it->second;
+		std::vector<std::shared_ptr<ServerGroup>> groups;
+		auto group = it->second;
 		while (group) {
 			groups.push_back(group);
 			group = group->parent();
@@ -567,10 +573,10 @@ private:
 	ServerConfig config_;
 	std::shared_ptr<ServerTransport> transport_;
 
-	std::unique_ptr<ServerGroup> rootGroup_;
-	ServerGroup* activeGroup_;
-	std::map<uint64_t, ServerGroup*> groupByServiceID_;
-	std::vector<std::unique_ptr<ServerGroup>> ownedGroups_;
+	std::shared_ptr<ServerGroup> rootGroup_;
+	std::shared_ptr<ServerGroup> activeGroup_;
+	std::map<uint64_t, std::shared_ptr<ServerGroup>> groupByServiceID_;
+	std::vector<std::shared_ptr<ServerGroup>> ownedGroups_;
 
 	bool running_;
 	std::map<uint64_t, std::shared_ptr<ServerConnection>> connections_;

@@ -57,7 +57,7 @@ public:
 
     // Create and register service implementation
     auto impl = std::make_shared<PingPongServerImpl>();
-    pingpong::registerPingPongServer(server.get(), impl.get());
+    pingpong::registerPingPongServer(server.get(), impl);
 
     // Start server (non-blocking)
     auto err = server->start();
