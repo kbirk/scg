@@ -50,12 +50,46 @@ public:
 {{end}}
 };
 
-class {{.StreamServerClassName}} {
+class {{.StreamServerClassName}} : public scg::rpc::MessageProcessor {
 public:
 	inline explicit
-	{{.StreamServerClassName}}(std::shared_ptr<scg::rpc::Stream> stream) : stream_(stream) {}
+	{{.StreamServerClassName}}(std::shared_ptr<{{.StreamHandlerClassName}}> handler) : handler_(handler), stream_(nullptr) {}
 
 	virtual ~{{.StreamServerClassName}}() = default;
+
+	inline void setStream(std::shared_ptr<scg::rpc::Stream> stream)
+	{
+		stream_ = stream;
+		stream_->setProcessor(this);
+	}
+{{if .HasClientMethods}}
+	// MessageProcessor interface implementation
+	inline std::pair<std::vector<uint8_t>, scg::error::Error> processMessage(uint64_t methodID, scg::serialize::Reader& reader) override
+	{
+		scg::context::Context ctx = stream_->context();
+		switch (methodID) {
+{{range .ClientMethods}}
+		case {{.MethodIDVarName}}:
+		{
+			{{.MethodRequestStructName}} req;
+			auto err = reader.read(req);
+			if (err) {
+				return std::make_pair(std::vector<uint8_t>{}, err);
+			}
+			auto [resp, handlerErr] = handler_->handle{{.MethodNamePascalCase}}(ctx, *this, req);
+			if (handlerErr) {
+				return std::make_pair(std::vector<uint8_t>{}, handlerErr);
+			}
+			scg::serialize::Writer writer;
+			writer.write(resp);
+			return std::make_pair(writer.bytes(), nullptr);
+		}
+{{end}}
+		default:
+			return std::make_pair(std::vector<uint8_t>{}, scg::error::Error("Unknown method ID"));
+		}
+	}
+{{end}}
 {{if .HasServerMethods}}
 	// Server-side methods (server sends to client)
 {{range .ServerMethods}}
@@ -87,6 +121,7 @@ public:
 	}
 
 protected:
+	std::shared_ptr<{{.StreamHandlerClassName}}> handler_;
 	std::shared_ptr<scg::rpc::Stream> stream_;
 };
 `

@@ -81,8 +81,23 @@ fi
 
 sleep 1
 
+# ========================================# C++ Unix Streaming Tests (C++ Client + C++ Server)
 # ========================================
-# Cross-Language Tests: Go Client + C++ Server (Unix)
+echo -e "\n${YELLOW}Running C++ Unix Streaming tests (C++ Client + C++ Server)...${NC}"
+
+run_with_timeout "C++ Unix Streaming tests" ./streaming_unix_tests
+status=$?
+
+if [ $status -eq 0 ]; then
+	echo -e "${GREEN}C++ Unix Streaming tests passed${NC}"
+else
+	echo -e "${RED}C++ Unix Streaming tests failed${NC}"
+	exit 1
+fi
+
+sleep 1
+
+# ========================================# Cross-Language Tests: Go Client + C++ Server (Unix)
 # ========================================
 echo -e "\n${YELLOW}Running Unix socket tests (Go Client + C++ Server)...${NC}"
 

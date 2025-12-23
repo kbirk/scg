@@ -79,6 +79,20 @@ fi
 sleep 1
 
 # ========================================
+# C++ WebSocket Streaming Tests (C++ Client + C++ Server)
+# ========================================
+echo -e "\n${YELLOW}Running C++ WebSocket Streaming tests (C++ Client + C++ Server)...${NC}"
+
+if run_with_timeout "C++ WebSocket Streaming tests" ./streaming_ws_tests; then
+	echo -e "${GREEN}C++ WebSocket Streaming tests passed${NC}"
+else
+	echo -e "${RED}C++ WebSocket Streaming tests failed${NC}"
+	exit 1
+fi
+
+sleep 1
+
+# ========================================
 # Cross-Language Tests: Go Client + C++ Server (WebSocket)
 # ========================================
 echo -e "\n${YELLOW}Running WebSocket tests (Go Client + C++ Server)...${NC}"
