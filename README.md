@@ -6,7 +6,7 @@ Similar to protobuf + gRPC, but worse in every conceivable way.
 
 Message code is generated for both golang and C++ with JSON and binary serialization.
 
-RPCs are implemented over pluggable transports (WebSocket and NATS currently supported). Client and server code is generated for golang. Only client code is generated for C++.
+RPCs are implemented over pluggable transports (WebSocket and TCP currently supported). Client and server code is generated for both golang and C++.
 
 Serialization uses bitpacked variable-length integer encoding with zigzag encoding for signed integers.
 
@@ -22,7 +22,7 @@ go install github.com/kbirk/scg/cmd/scg-cpp@latest
 ### Golang:
 
 -   Websockets: [gorilla/websocket](https://github.com/gorilla/websocket)
--   NATS: [nats-io/nats.go](https://github.com/nats-io/nats.go)
+-   TCP
 
 ### C++:
 
@@ -154,7 +154,7 @@ if err != nil {
 
 ## RPCs
 
-The RPC system supports pluggable transports through the `Transport` interface. Both WebSocket and NATS transports are provided.
+The RPC system supports pluggable transports through the `Transport` interface. Both WebSocket and TCP transports are provided.
 
 ### Transport Interface
 
@@ -213,29 +213,97 @@ pingpong.RegisterPingPongServer(server, &pingpongServer{})
 server.ListenAndServe()
 ```
 
-### Go Server with NATS
+### C++ Server
 
-For NATS transport, use the NATS transport instead:
+C++ server code is available for WebSocket and TCP transports. The server uses a poll-based architecture:
 
-```go
-import (
-    "github.com/kbirk/scg/pkg/rpc"
-    "github.com/kbirk/scg/pkg/rpc/nats"
-    "github.com/yourname/repo/pingpong"
-)
+```cpp
+#include "scg/server.h"
+#include "scg/ws/transport_server_no_tls.h"
+#include "pingpong/pingpong.h"
 
-server := rpc.NewServer(rpc.ServerConfig{
-    Transport: nats.NewServerTransport(
-        nats.ServerTransportConfig{
-            URL: "nats://localhost:4222",
-        }),
-    ErrHandler: func(err error) {
-        log.Printf("Server error: %v", err)
-    },
-})
+// Implement the service interface
+class PingPongServerImpl : public pingpong::PingPongServer {
+public:
+    std::pair<pingpong::PongResponse, scg::error::Error> ping(
+        const scg::context::Context& ctx,
+        const pingpong::PingRequest& req) override {
 
-pingpong.RegisterPingPongServer(server, &pingpongServer{})
-server.ListenAndServe()
+        pingpong::PongResponse response;
+        response.pong.count = req.ping.count + 1;
+        response.pong.payload = req.ping.payload;
+
+        return std::make_pair(response, nullptr);
+    }
+};
+
+int main() {
+    // Configure logging
+    scg::log::LoggingConfig logging;
+    logging.level = scg::log::LogLevel::INFO;
+    logging.infoLogger = [](std::string msg) {
+        printf("INFO: %s\n", msg.c_str());
+    };
+    logging.errorLogger = [](std::string msg) {
+        printf("ERROR: %s\n", msg.c_str());
+    };
+
+    // Configure WebSocket transport
+    scg::ws::ServerTransportConfig transportConfig;
+    transportConfig.port = 8080;
+    transportConfig.logging = logging;
+
+    // Configure server
+    scg::rpc::ServerConfig config;
+    config.transport = std::make_shared<scg::ws::ServerTransportNoTLS>(transportConfig);
+    config.errorHandler = [](const scg::error::Error& err) {
+        printf("Server error: %s\n", err.message.c_str());
+    };
+
+    // Create server
+    auto server = std::make_shared<scg::rpc::Server>(config);
+
+    // Register service implementation
+    auto impl = std::make_shared<PingPongServerImpl>();
+    pingpong::registerPingPongServer(server.get(), impl);
+
+    // Start server (non-blocking)
+    server->start();
+
+    // Main loop - poll for messages
+    while (true) {
+        server->process();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    return 0;
+}
+```
+
+For TLS connections, use `scg::ws::ServerTransportTLS`:
+
+```cpp
+#include "scg/ws/transport_server_tls.h"
+
+scg::ws::ServerTransportConfig transportConfig;
+transportConfig.port = 8443;
+transportConfig.certFile = "server.crt";
+transportConfig.keyFile = "server.key";
+transportConfig.logging = logging;
+
+config.transport = std::make_shared<scg::ws::ServerTransportTLS>(transportConfig);
+```
+
+For TCP connections, use `scg::tcp::ServerTransportNoTLS` or `scg::tcp::ServerTransportTLS`:
+
+```cpp
+#include "scg/tcp/transport_server_no_tls.h"
+
+scg::tcp::ServerTransportConfig transportConfig;
+transportConfig.port = 8080;
+transportConfig.logging = logging;
+
+config.transport = std::make_shared<scg::tcp::ServerTransportNoTLS>(transportConfig);
 ```
 
 ### Go Client
@@ -277,49 +345,15 @@ if err != nil {
 fmt.Println(resp.Pong.Count)
 ```
 
-### Go Client with NATS
-
-For NATS transport:
-
-```go
-import (
-    "context"
-    "github.com/kbirk/scg/pkg/rpc"
-    "github.com/kbirk/scg/pkg/rpc/nats"
-    "github.com/yourname/repo/pingpong"
-)
-
-client := rpc.NewClient(rpc.ClientConfig{
-    Transport: nats.NewClientTransport(
-        nats.ClientTransportConfig{
-            URL: "nats://localhost:4222",
-        }),
-    ErrHandler: func(err error) {
-        log.Printf("Client error: %v", err)
-    },
-})
-
-c := pingpong.NewPingPongClient(client)
-
-resp, err := c.Ping(context.Background(), &pingpong.PingRequest{
-    Ping: pingpong.Ping{
-        Count: 0,
-    },
-})
-if err != nil {
-    panic(err)
-}
-fmt.Println(resp.Pong.Count)
-```
-
 **Note:** A single `rpc.Client` can be used with multiple services. Service routing is handled automatically by the generated client code:
 
 ```go
 // Single client for multiple services
 client := rpc.NewClient(rpc.ClientConfig{
-    Transport: nats.NewClientTransport(
-        nats.ClientTransportConfig{
-            URL: "nats://localhost:4222",
+    Transport: websocket.NewClientTransport(
+        websocket.ClientTransportConfig{
+            Host: "localhost",
+            Port: 8080,
         }),
 })
 
@@ -370,7 +404,7 @@ client.Middleware(func(ctx context.Context, next rpc.Handler) rpc.Handler {
 
 ### C++ Client
 
-Only client code is generated for C++:
+C++ client example using WebSocket transport:
 
 ```cpp
 #include <scg/ws/transport_no_tls.h>

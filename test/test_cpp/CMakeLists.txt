@@ -47,9 +47,6 @@ add_executable(macro_test "macro_test.cpp")
 # TCP tests (includes TCP and TCP-TLS)
 add_executable(tcp_tests "tcp_tests.cpp")
 
-# Unix socket tests
-add_executable(unix_tests "unix_tests.cpp")
-
 # WebSocket tests (includes WebSocket and WebSocket-TLS)
 add_executable(ws_tests "ws_tests.cpp")
 
@@ -69,9 +66,6 @@ add_executable(server_tcp_test "server_tcp_test.cpp")
 # Server TCP TLS (for Go/other client testing)
 add_executable(server_tcp_tls_test "server_tcp_tls_test.cpp")
 
-# Server Unix (for Go/other client testing)
-add_executable(server_unix_test "server_unix_test.cpp")
-
 # =============================================================================
 # Client Executables (for cross-language testing: C++ Client + Go Server)
 # =============================================================================
@@ -81,9 +75,6 @@ add_executable(client_tcp_tests "client_tcp_tests.cpp")
 
 # Client TCP TLS (connects to Go TCP TLS server)
 add_executable(client_tcp_tls_tests "client_tcp_tls_tests.cpp")
-
-# Client Unix (connects to Go Unix server)
-add_executable(client_unix_tests "client_unix_tests.cpp")
 
 # Client WebSocket (connects to Go WebSocket server)
 add_executable(client_ws_tests "client_ws_tests.cpp")
@@ -97,7 +88,6 @@ add_executable(client_ws_tls_tests "client_ws_tls_tests.cpp")
 
 # Unified test suites
 target_link_libraries(tcp_tests OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(unix_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(ws_tests OpenSSL::SSL OpenSSL::Crypto)
 
 # Server executables (cross-language testing)
@@ -105,11 +95,9 @@ target_link_libraries(server_ws_test OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_ws_tls_test OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_tcp_test OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(server_tcp_tls_test OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(server_unix_test OpenSSL::SSL OpenSSL::Crypto)
 
 # Client executables (cross-language testing)
 target_link_libraries(client_tcp_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_tcp_tls_tests OpenSSL::SSL OpenSSL::Crypto)
-target_link_libraries(client_unix_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_ws_tests OpenSSL::SSL OpenSSL::Crypto)
 target_link_libraries(client_ws_tls_tests OpenSSL::SSL OpenSSL::Crypto)

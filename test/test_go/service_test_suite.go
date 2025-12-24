@@ -10,9 +10,7 @@ import (
 	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
-	"github.com/kbirk/scg/pkg/rpc/nats"
 	"github.com/kbirk/scg/pkg/rpc/tcp"
-	"github.com/kbirk/scg/pkg/rpc/unix"
 	"github.com/kbirk/scg/pkg/rpc/websocket"
 	"github.com/kbirk/scg/test/files/output/basic"
 	"github.com/kbirk/scg/test/files/output/pingpong"
@@ -1302,9 +1300,6 @@ func (f *LimitedTransportFactory) CreateServerTransport(id int) rpc.ServerTransp
 	// Use reflection or type assertion to set MaxMessageSize if possible
 	// Since we modified the structs, we can try type assertion
 	switch v := t.(type) {
-	case *unix.ServerTransport:
-		v.MaxSendMessageSize = f.maxSendMessageSize
-		v.MaxRecvMessageSize = f.maxRecvMessageSize
 	case *tcp.ServerTransport:
 		v.MaxSendMessageSize = f.maxSendMessageSize
 		v.MaxRecvMessageSize = f.maxRecvMessageSize
@@ -1314,9 +1309,6 @@ func (f *LimitedTransportFactory) CreateServerTransport(id int) rpc.ServerTransp
 	case *websocket.ServerTransport:
 		v.MaxSendMessageSize = f.maxSendMessageSize
 		v.MaxRecvMessageSize = f.maxRecvMessageSize
-	case *nats.ServerTransport:
-		v.MaxSendMessageSize = f.maxSendMessageSize
-		v.MaxRecvMessageSize = f.maxRecvMessageSize
 	}
 	return t
 }
@@ -1324,9 +1316,6 @@ func (f *LimitedTransportFactory) CreateServerTransport(id int) rpc.ServerTransp
 func (f *LimitedTransportFactory) CreateClientTransport(id int) rpc.ClientTransport {
 	t := f.delegate.CreateClientTransport(id)
 	switch v := t.(type) {
-	case *unix.ClientTransport:
-		v.MaxSendMessageSize = f.maxSendMessageSize
-		v.MaxRecvMessageSize = f.maxRecvMessageSize
 	case *tcp.ClientTransport:
 		v.MaxSendMessageSize = f.maxSendMessageSize
 		v.MaxRecvMessageSize = f.maxRecvMessageSize
@@ -1334,9 +1323,6 @@ func (f *LimitedTransportFactory) CreateClientTransport(id int) rpc.ClientTransp
 		v.MaxSendMessageSize = f.maxSendMessageSize
 		v.MaxRecvMessageSize = f.maxRecvMessageSize
 	case *websocket.ClientTransport:
-		v.MaxSendMessageSize = f.maxSendMessageSize
-		v.MaxRecvMessageSize = f.maxRecvMessageSize
-	case *nats.ClientTransport:
 		v.MaxSendMessageSize = f.maxSendMessageSize
 		v.MaxRecvMessageSize = f.maxRecvMessageSize
 	}

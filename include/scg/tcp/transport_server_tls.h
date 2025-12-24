@@ -82,7 +82,7 @@ public:
 			try {
 				ssl_stream.handshake(asio::ssl::stream_base::server);
 			} catch (const std::exception& e) {
-				 return {nullptr, error::Error(std::string("Handshake failed: ") + e.what())};
+				return {nullptr, error::Error(std::string("Handshake failed: ") + e.what())};
 			}
 
 			return {std::make_shared<ConnectionTLS>(std::move(ssl_stream), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
