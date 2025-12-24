@@ -55,12 +55,16 @@ fi
 # ========================================
 # Build C++ Tests
 # ========================================
-echo -e "\n${YELLOW}Building C++ tests...${NC}"
-mkdir -p .build && cd .build && cmake ../test/test_cpp && make
+echo -e "\n${YELLOW}Building C++ Unix tests...${NC}"
+mkdir -p .build
+cd .build
+cmake ../test/test_cpp
+# Build only Unix-related targets
+make unix_tests server_unix_test client_unix_tests
 if [ $? -eq 0 ]; then
-	echo -e "${GREEN}C++ tests built successfully${NC}"
+	echo -e "${GREEN}C++ Unix tests built successfully${NC}"
 else
-	echo -e "${RED}Failed to build C++ tests${NC}"
+	echo -e "${RED}Failed to build C++ Unix tests${NC}"
 	exit 1
 fi
 

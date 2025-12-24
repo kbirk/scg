@@ -18,172 +18,191 @@ namespace scg {
 namespace unix_socket {
 
 struct ClientTransportConfig {
-    std::string socketPath;
-    uint32_t maxSendMessageSize = 0; // 0 for no limit
-    uint32_t maxRecvMessageSize = 0; // 0 for no limit
+	std::string socketPath;
+	uint32_t maxSendMessageSize = 0; // 0 for no limit
+	uint32_t maxRecvMessageSize = 0; // 0 for no limit
 };
 
 class ConnectionUnix : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionUnix> {
 public:
-    ConnectionUnix(asio::local::stream_protocol::socket socket, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0)
-        : socket_(std::move(socket)), closed_(false), maxSendMessageSize_(maxSendMessageSize), maxRecvMessageSize_(maxRecvMessageSize) {}
+	ConnectionUnix(asio::local::stream_protocol::socket socket, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0)
+		: socket_(std::move(socket))
+		, closed_(false)
+		, maxSendMessageSize_(maxSendMessageSize)
+		, maxRecvMessageSize_(maxRecvMessageSize)
+	{
 
-    error::Error send(const std::vector<uint8_t>& data) override {
-        if (closed_) return error::Error("Connection closed");
+	}
 
-        uint32_t len = static_cast<uint32_t>(data.size());
+	error::Error send(const std::vector<uint8_t>& data) override
+	{
+		if (closed_) return error::Error("Connection closed");
 
-        if (maxSendMessageSize_ > 0 && len > maxSendMessageSize_) {
-            return error::Error("Message size exceeds send limit");
-        }
+		uint32_t len = static_cast<uint32_t>(data.size());
 
-        std::vector<uint8_t> buffer;
-        buffer.reserve(4 + len);
-        // Big endian length prefix
-        buffer.push_back((len >> 24) & 0xFF);
-        buffer.push_back((len >> 16) & 0xFF);
-        buffer.push_back((len >> 8) & 0xFF);
-        buffer.push_back(len & 0xFF);
-        buffer.insert(buffer.end(), data.begin(), data.end());
+		if (maxSendMessageSize_ > 0 && len > maxSendMessageSize_) {
+			return error::Error("Message size exceeds send limit");
+		}
 
-        auto self = shared_from_this();
-        asio::post(socket_.get_executor(), [this, self, buffer = std::move(buffer)]() {
-            bool write_in_progress = !write_queue_.empty();
-            write_queue_.push_back(std::move(buffer));
-            if (!write_in_progress) {
-                do_write();
-            }
-        });
+		std::vector<uint8_t> buffer;
+		buffer.reserve(4 + len);
+		// Big endian length prefix
+		buffer.push_back((len >> 24) & 0xFF);
+		buffer.push_back((len >> 16) & 0xFF);
+		buffer.push_back((len >> 8) & 0xFF);
+		buffer.push_back(len & 0xFF);
+		buffer.insert(buffer.end(), data.begin(), data.end());
 
-        return nullptr;
-    }
+		auto self = shared_from_this();
+		asio::post(socket_.get_executor(), [this, self, buffer = std::move(buffer)]() {
+			bool write_in_progress = !write_queue_.empty();
+			write_queue_.push_back(std::move(buffer));
+			if (!write_in_progress) {
+				do_write();
+			}
+		});
 
-    void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override {
-        messageHandler_ = handler;
-        read_header();
-    }
+		return nullptr;
+	}
 
-    void setFailHandler(std::function<void(const error::Error&)> handler) override {
-        failHandler_ = handler;
-    }
+	void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override
+	{
+		messageHandler_ = handler;
+		read_header();
+	}
 
-    void setCloseHandler(std::function<void()> handler) override {
-        closeHandler_ = handler;
-    }
+	void setFailHandler(std::function<void(const error::Error&)> handler) override
+	{
+		failHandler_ = handler;
+	}
 
-    error::Error close() override {
-        if (!closed_) {
-            closed_ = true;
-            auto self = shared_from_this();
-            asio::post(socket_.get_executor(), [this, self]() {
-                if (socket_.is_open()) {
-                    socket_.close();
-                }
-                if (closeHandler_) closeHandler_();
-            });
-        }
-        return nullptr;
-    }
+	void setCloseHandler(std::function<void()> handler) override
+	{
+		closeHandler_ = handler;
+	}
+
+	error::Error close() override
+	{
+		if (!closed_) {
+			closed_ = true;
+			auto self = shared_from_this();
+			asio::post(socket_.get_executor(), [this, self]() {
+				if (socket_.is_open()) {
+					socket_.close();
+				}
+				if (closeHandler_) closeHandler_();
+			});
+		}
+		return nullptr;
+	}
 
 private:
-    void do_write() {
-        auto self = shared_from_this();
-        asio::async_write(socket_, asio::buffer(write_queue_.front()),
-            [this, self](std::error_code ec, std::size_t /*length*/) {
-                if (!ec) {
-                    write_queue_.pop_front();
-                    if (!write_queue_.empty()) {
-                        do_write();
-                    }
-                } else {
-                    if (failHandler_) failHandler_(error::Error(ec.message()));
-                    close();
-                }
-            });
-    }
+	void do_write()
+	{
+		auto self = shared_from_this();
+		asio::async_write(socket_, asio::buffer(write_queue_.front()),
+			[this, self](std::error_code ec, std::size_t /*length*/) {
+				if (!ec) {
+					write_queue_.pop_front();
+					if (!write_queue_.empty()) {
+						do_write();
+					}
+				} else {
+					if (failHandler_) failHandler_(error::Error(ec.message()));
+					close();
+				}
+			});
+	}
 
-    void read_header() {
-        auto self = shared_from_this();
-        asio::async_read(socket_, asio::buffer(read_buffer_, 4),
-            [this, self](std::error_code ec, std::size_t /*length*/) {
-                if (!ec) {
-                    uint32_t len = (read_buffer_[0] << 24) | (read_buffer_[1] << 16) | (read_buffer_[2] << 8) | read_buffer_[3];
-                    if (maxRecvMessageSize_ > 0 && len > maxRecvMessageSize_) {
-                        if (failHandler_) failHandler_(error::Error("Message size exceeds receive limit"));
-                        close();
-                        return;
-                    }
-                    read_body(len);
-                } else {
-                    if (ec != asio::error::eof && failHandler_) failHandler_(error::Error(ec.message()));
-                    close();
-                }
-            });
-    }
+	void read_header()
+	{
+		auto self = shared_from_this();
+		asio::async_read(socket_, asio::buffer(read_buffer_, 4),
+			[this, self](std::error_code ec, std::size_t /*length*/) {
+				if (!ec) {
+					uint32_t len = (read_buffer_[0] << 24) | (read_buffer_[1] << 16) | (read_buffer_[2] << 8) | read_buffer_[3];
+					if (maxRecvMessageSize_ > 0 && len > maxRecvMessageSize_) {
+						if (failHandler_) failHandler_(error::Error("Message size exceeds receive limit"));
+						close();
+						return;
+					}
+					read_body(len);
+				} else {
+					if (ec != asio::error::eof && failHandler_) failHandler_(error::Error(ec.message()));
+					close();
+				}
+			});
+	}
 
-    void read_body(uint32_t length) {
-        auto self = shared_from_this();
-        body_buffer_.resize(length);
-        asio::async_read(socket_, asio::buffer(body_buffer_),
-            [this, self](std::error_code ec, std::size_t /*length*/) {
-                if (!ec) {
-                    if (messageHandler_) messageHandler_(body_buffer_);
-                    read_header();
-                } else {
-                    if (failHandler_) failHandler_(error::Error(ec.message()));
-                    close();
-                }
-            });
-    }
+	void read_body(uint32_t length)
+	{
+		auto self = shared_from_this();
+		body_buffer_.resize(length);
+		asio::async_read(socket_, asio::buffer(body_buffer_),
+			[this, self](std::error_code ec, std::size_t /*length*/) {
+				if (!ec) {
+					if (messageHandler_) messageHandler_(body_buffer_);
+					read_header();
+				} else {
+					if (failHandler_) failHandler_(error::Error(ec.message()));
+					close();
+				}
+			});
+	}
 
-    asio::local::stream_protocol::socket socket_;
-    std::function<void(const std::vector<uint8_t>&)> messageHandler_;
-    std::function<void(const error::Error&)> failHandler_;
-    std::function<void()> closeHandler_;
-    std::atomic<bool> closed_;
-    std::deque<std::vector<uint8_t>> write_queue_;
-    uint8_t read_buffer_[4];
-    std::vector<uint8_t> body_buffer_;
-    uint32_t maxSendMessageSize_;
-    uint32_t maxRecvMessageSize_;
+	asio::local::stream_protocol::socket socket_;
+	std::function<void(const std::vector<uint8_t>&)> messageHandler_;
+	std::function<void(const error::Error&)> failHandler_;
+	std::function<void()> closeHandler_;
+	std::atomic<bool> closed_;
+	std::deque<std::vector<uint8_t>> write_queue_;
+	uint8_t read_buffer_[4];
+	std::vector<uint8_t> body_buffer_;
+	uint32_t maxSendMessageSize_;
+	uint32_t maxRecvMessageSize_;
 };
 
-class ClientTransportUnix : public scg::rpc::ClientTransport {
+class ClientTransportUnix : public scg::rpc::ClientTransport
+{
 public:
-    ClientTransportUnix(const ClientTransportConfig& config)
-        : config_(config), work_guard_(asio::make_work_guard(io_context_)) {
-        thread_ = std::thread([this]() {
-            io_context_.run();
-        });
-    }
+	ClientTransportUnix(const ClientTransportConfig& config)
+		: config_(config)
+		, work_guard_(asio::make_work_guard(io_context_))
+	{
+		thread_ = std::thread([this]() {
+			io_context_.run();
+		});
+	}
 
-    ~ClientTransportUnix() {
-        shutdown();
-    }
+	~ClientTransportUnix() {
+		shutdown();
+	}
 
-    std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override {
-        try {
-            asio::local::stream_protocol::socket socket(io_context_);
-            asio::local::stream_protocol::endpoint endpoint(config_.socketPath);
-            socket.connect(endpoint);
-            return {std::make_shared<ConnectionUnix>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
-        } catch (const std::exception& e) {
-            return {nullptr, error::Error(e.what())};
-        }
-    }
+	std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override
+	{
+		try {
+			asio::local::stream_protocol::socket socket(io_context_);
+			asio::local::stream_protocol::endpoint endpoint(config_.socketPath);
+			socket.connect(endpoint);
+			return {std::make_shared<ConnectionUnix>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
+		} catch (const std::exception& e) {
+			return {nullptr, error::Error(e.what())};
+		}
+	}
 
-    void shutdown() override {
-        io_context_.stop();
-        if (thread_.joinable()) {
-            thread_.join();
-        }
-    }
+	void shutdown() override
+	{
+		io_context_.stop();
+		if (thread_.joinable()) {
+			thread_.join();
+		}
+	}
 
 private:
-    ClientTransportConfig config_;
-    asio::io_context io_context_;
-    asio::executor_work_guard<asio::io_context::executor_type> work_guard_;
-    std::thread thread_;
+	ClientTransportConfig config_;
+	asio::io_context io_context_;
+	asio::executor_work_guard<asio::io_context::executor_type> work_guard_;
+	std::thread thread_;
 };
 
 } // namespace unix_socket

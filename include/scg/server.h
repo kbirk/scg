@@ -42,11 +42,20 @@ class ServerGroup;
 class ServerConnection {
 public:
 	ServerConnection(std::shared_ptr<Connection> conn, uint64_t id)
-		: conn_(conn), id_(id), closed_(false) {}
+		: conn_(conn)
+		, id_(id)
+		, closed_(false)
+	{
 
-	uint64_t id() const { return id_; }
+	}
 
-	error::Error send(const std::vector<uint8_t>& data) {
+	uint64_t id() const
+	{
+		return id_;
+	}
+
+	error::Error send(const std::vector<uint8_t>& data)
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 		if (closed_) {
 			return error::Error("Connection is closed");
@@ -54,7 +63,8 @@ public:
 		return conn_->send(data);
 	}
 
-	void close() {
+	void close()
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 		if (!closed_) {
 			conn_->close();
@@ -62,12 +72,16 @@ public:
 		}
 	}
 
-	bool isClosed() const {
+	bool isClosed() const
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 		return closed_;
 	}
 
-	std::shared_ptr<Connection> connection() { return conn_; }
+	std::shared_ptr<Connection> connection()
+	{
+		return conn_;
+	}
 
 private:
 	std::shared_ptr<Connection> conn_;
@@ -101,15 +115,18 @@ class ServerGroup {
 public:
 	ServerGroup() = default;
 
-	void registerService(uint64_t serviceID, ServiceHandler handler) {
+	void registerService(uint64_t serviceID, ServiceHandler handler)
+	{
 		services_[serviceID] = handler;
 	}
 
-	void addMiddleware(middleware::Middleware m) {
+	void addMiddleware(middleware::Middleware m)
+	{
 		middleware_.push_back(m);
 	}
 
-	ServiceHandler getService(uint64_t serviceID) const {
+	ServiceHandler getService(uint64_t serviceID) const
+	{
 		auto it = services_.find(serviceID);
 		if (it != services_.end()) {
 			return it->second;
@@ -117,19 +134,23 @@ public:
 		return nullptr;
 	}
 
-	const std::vector<middleware::Middleware>& middleware() const {
+	const std::vector<middleware::Middleware>& middleware() const
+	{
 		return middleware_;
 	}
 
-	void setParent(std::shared_ptr<ServerGroup> parent) {
+	void setParent(std::shared_ptr<ServerGroup> parent)
+	{
 		parent_ = parent;
 	}
 
-	std::shared_ptr<ServerGroup> parent() const {
+	std::shared_ptr<ServerGroup> parent() const
+	{
 		return parent_.lock();
 	}
 
-	void addChild(std::shared_ptr<ServerGroup> child) {
+	void addChild(std::shared_ptr<ServerGroup> child)
+	{
 		children_.push_back(child);
 	}
 
@@ -153,12 +174,14 @@ public:
 		activeGroup_ = rootGroup_;
 	}
 
-	~Server() {
+	~Server()
+	{
 		stop();
 	}
 
 	// Start the server (non-blocking)
-	error::Error start() {
+	error::Error start()
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 
 		if (running_) {
@@ -181,7 +204,8 @@ public:
 
 	// Process pending messages and connections (non-blocking, poll-based)
 	// Returns true if work was done, false if idle
-	bool process() {
+	bool process()
+	{
 		bool didWork = false;
 
 		// Poll the transport for I/O events (reads, writes, accepts)
@@ -217,7 +241,8 @@ public:
 	}
 
 	// Stop the server
-	error::Error stop() {
+	error::Error stop()
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 
 		if (!running_) {
@@ -247,13 +272,15 @@ public:
 	}
 
 	// Check if server is running
-	bool isRunning() const {
+	bool isRunning() const
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 		return running_;
 	}
 
 	// Register a service with the server
-	void registerService(uint64_t serviceID, const std::string& /*serviceName*/, ServiceHandler handler) {
+	void registerService(uint64_t serviceID, const std::string& serviceName, ServiceHandler handler)
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 
 		if (groupByServiceID_.find(serviceID) != groupByServiceID_.end()) {
@@ -267,7 +294,8 @@ public:
 	}
 
 	// Add middleware to the current group
-	void addMiddleware(middleware::Middleware m) {
+	void addMiddleware(middleware::Middleware m)
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 		if (activeGroup_) {
 			activeGroup_->addMiddleware(m);
@@ -275,7 +303,8 @@ public:
 	}
 
 	// Create a new service group
-	void group(std::function<void(Server*)> fn) {
+	void group(std::function<void(Server*)> fn)
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 
 		auto newGroup = std::make_shared<ServerGroup>();
@@ -297,7 +326,8 @@ public:
 
 private:
 	// Accept new connections (non-blocking)
-	bool acceptNewConnections() {
+	bool acceptNewConnections()
+	{
 		std::shared_ptr<ServerTransport> transport;
 		{
 			std::lock_guard<std::mutex> lock(mu_);
@@ -323,8 +353,16 @@ private:
 
 			auto serverConn = std::make_shared<ServerConnection>(conn, connID);
 
-			conn->setMessageHandler([this, serverConn](const std::vector<uint8_t>& data) {
-				onMessage(serverConn, data);
+			// Use weak_ptr in message handler to avoid circular reference
+			// (ServerConnection owns conn, conn owns the lambda, lambda would own ServerConnection)
+			std::weak_ptr<ServerConnection> weakConn = serverConn;
+
+			conn->setMessageHandler([this, weakConn](const std::vector<uint8_t>& data) {
+				// Try to lock the weak_ptr to get a shared_ptr
+				if (auto serverConn = weakConn.lock()) {
+					onMessage(serverConn, data);
+				}
+				// If lock() fails, connection is being destroyed, message is dropped
 			});
 
 			conn->setCloseHandler([this, connID]() {
@@ -352,7 +390,8 @@ private:
 	}
 
 	// Process messages from the queue
-	bool processMessages() {
+	bool processMessages()
+	{
 		std::unique_lock<std::mutex> lock(mu_);
 
 		if (messageQueue_.empty()) {
@@ -372,7 +411,8 @@ private:
 	}
 
 	// Clean up closed connections
-	bool cleanupConnections() {
+	bool cleanupConnections()
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 
 		bool cleaned = false;
@@ -391,7 +431,8 @@ private:
 	}
 
 	// Called when a message is received
-	void onMessage(std::shared_ptr<ServerConnection> conn, const std::vector<uint8_t>& data) {
+	void onMessage(std::shared_ptr<ServerConnection> conn, const std::vector<uint8_t>& data)
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 
 		if (!running_) {
@@ -403,7 +444,8 @@ private:
 	}
 
 	// Called when a connection closes
-	void onConnectionClose(uint64_t connID) {
+	void onConnectionClose(uint64_t connID)
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 
 		auto it = connections_.find(connID);
@@ -414,7 +456,8 @@ private:
 	}
 
 	// Called when a connection fails
-	void onConnectionFail(uint64_t connID, const error::Error& err) {
+	void onConnectionFail(uint64_t connID, const error::Error& err)
+	{
 		std::lock_guard<std::mutex> lock(mu_);
 
 		handleError(err);
@@ -426,7 +469,8 @@ private:
 	}
 
 	// Handle a single message
-	void handleMessage(std::shared_ptr<ServerConnection> conn, const std::vector<uint8_t>& data) {
+	void handleMessage(std::shared_ptr<ServerConnection> conn, const std::vector<uint8_t>& data)
+	{
 		serialize::Reader reader(data);
 
 		try {
@@ -478,7 +522,8 @@ private:
 	}
 
 	// Get service handler by ID
-	ServiceHandler getService(uint64_t serviceID) const {
+	ServiceHandler getService(uint64_t serviceID) const
+	{
 		auto it = groupByServiceID_.find(serviceID);
 		if (it != groupByServiceID_.end()) {
 			return it->second->getService(serviceID);
@@ -487,7 +532,8 @@ private:
 	}
 
 	// Get middleware stack for a service
-	std::vector<middleware::Middleware> getMiddlewareStack(uint64_t serviceID) const {
+	std::vector<middleware::Middleware> getMiddlewareStack(uint64_t serviceID) const
+	{
 		auto it = groupByServiceID_.find(serviceID);
 		if (it == groupByServiceID_.end()) {
 			return {};
@@ -512,7 +558,8 @@ private:
 	}
 
 	// Create an error response
-	std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Error& err) {
+	std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Error& err)
+	{
 		using scg::serialize::bit_size; // ADL trickery
 
 		std::string errMsg = err ? err.message : "Unknown error";
@@ -532,7 +579,8 @@ private:
 	}
 
 	// Error handling
-	void handleError(const error::Error& err) {
+	void handleError(const error::Error& err)
+	{
 		if (err.message == "connection closed") {
 			// Normal connection close, don't log as error
 			return;
@@ -546,25 +594,29 @@ private:
 	}
 
 	// Logging helpers
-	void logDebug(const std::string& msg) {
+	void logDebug(const std::string& msg)
+	{
 		if (config_.logger) {
 			config_.logger->debug(msg);
 		}
 	}
 
-	void logInfo(const std::string& msg) {
+	void logInfo(const std::string& msg)
+	{
 		if (config_.logger) {
 			config_.logger->info(msg);
 		}
 	}
 
-	void logWarn(const std::string& msg) {
+	void logWarn(const std::string& msg)
+	{
 		if (config_.logger) {
 			config_.logger->warn(msg);
 		}
 	}
 
-	void logError(const std::string& msg) {
+	void logError(const std::string& msg)
+	{
 		if (config_.logger) {
 			config_.logger->error(msg);
 		}
@@ -588,7 +640,8 @@ private:
 };
 
 // Helper function to create an error response
-inline std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Error& err) {
+inline std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Error& err)
+{
 	using scg::serialize::bit_size; // ADL trickery
 
 	std::string errMsg = err ? err.message : "Unknown error";
@@ -609,7 +662,8 @@ inline std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Er
 
 // Helper function to create a message response
 template<typename T>
-std::vector<uint8_t> respondWithMessage(uint64_t requestID, const T& msg) {
+std::vector<uint8_t> respondWithMessage(uint64_t requestID, const T& msg)
+{
 	using scg::serialize::bit_size; // ADL trickery
 
 	size_t bitSize = bit_size(RESPONSE_PREFIX) +

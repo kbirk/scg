@@ -23,12 +23,16 @@ fi
 # ========================================
 # Build C++ Tests
 # ========================================
-echo -e "\n${YELLOW}Building C++ tests...${NC}"
-mkdir -p .build && cd .build && cmake ../test/test_cpp && make
+echo -e "\n${YELLOW}Building C++ serialization tests...${NC}"
+mkdir -p .build
+cd .build
+cmake ../test/test_cpp
+# Build only serialization-related targets
+make serialize_tests uuid_tests macro_test
 if [ $? -eq 0 ]; then
-	echo -e "${GREEN}C++ tests built successfully${NC}"
+	echo -e "${GREEN}C++ serialization tests built successfully${NC}"
 else
-	echo -e "${RED}Failed to build C++ tests${NC}"
+	echo -e "${RED}Failed to build C++ serialization tests${NC}"
 	exit 1
 fi
 

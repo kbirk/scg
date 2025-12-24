@@ -37,7 +37,10 @@ struct ClientConfig {
 class Client {
 public:
 
-	Client(const ClientConfig& config) : config_(config), status_(ConnectionStatus::NOT_CONNECTED) {
+	Client(const ClientConfig& config)
+		: config_(config)
+		, status_(ConnectionStatus::NOT_CONNECTED)
+	{
 		// randomize the starting request id
 		std::random_device rd;
 		std::mt19937_64 gen(rd());
@@ -45,7 +48,8 @@ public:
 		requestID_ = dis(gen);
 	}
 
-	virtual ~Client() {
+	virtual ~Client()
+	{
 		disconnect();
 		if (config_.transport) {
 			config_.transport->shutdown();
@@ -101,14 +105,16 @@ public:
 
 protected:
 
-	void failPendingRequestsUnsafe(std::string error) {
+	void failPendingRequestsUnsafe(std::string error)
+	{
 		for (auto& pair : requests_) {
 			pair.second->set_value(createErrorReader(error));
 		}
 		requests_.clear();
 	}
 
-	error::Error connectUnsafe() {
+	error::Error connectUnsafe()
+	{
 		if (status_ != ConnectionStatus::FAILED && status_ != ConnectionStatus::NOT_CONNECTED) {
 			return nullptr;
 		}
@@ -148,7 +154,8 @@ protected:
 		return nullptr;
 	}
 
-	error::Error disconnectUnsafe() {
+	error::Error disconnectUnsafe()
+	{
 		if (connection_) {
 			auto err = connection_->close();
 			connection_.reset();
@@ -157,7 +164,8 @@ protected:
 		return nullptr;
 	}
 
-	error::Error sendBytesUnsafe(const std::vector<uint8_t>& msg) {
+	error::Error sendBytesUnsafe(const std::vector<uint8_t>& msg)
+	{
 		auto err = connectUnsafe();
 		if (err) {
 			return err;
@@ -170,7 +178,8 @@ protected:
 		return error::Error("Connection not available");
 	}
 
-	serialize::Reader createErrorReader(std::string err) {
+	serialize::Reader createErrorReader(std::string err)
+	{
 		using scg::serialize::bit_size; // adl trickery
 
 		serialize::FixedSizeWriter writer(
@@ -181,7 +190,8 @@ protected:
 		return serialize::Reader(writer.bytes());
 	}
 
-	void onMessage(const std::vector<uint8_t>& data) {
+	void onMessage(const std::vector<uint8_t>& data)
+	{
 		serialize::Reader reader(data);
 
 		using scg::serialize::deserialize;

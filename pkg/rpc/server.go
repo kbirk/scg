@@ -160,10 +160,6 @@ func (s *Server) Middleware(m Middleware) {
 	s.activeGroup.middleware = append(s.activeGroup.middleware, m)
 }
 
-func (g *ServerGroup) registerMiddleware(m Middleware) {
-	g.middleware = append(g.middleware, m)
-}
-
 func (s *Server) getMiddlewareStackForServiceID(serviceID uint64) ([]Middleware, error) {
 	group, ok := s.groupByServiceID[serviceID]
 	if !ok {
