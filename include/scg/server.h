@@ -8,6 +8,8 @@
 #include <vector>
 #include <queue>
 #include <array>
+#include <thread>
+#include <atomic>
 
 #include "scg/error.h"
 #include "scg/serialize.h"
@@ -176,80 +178,74 @@ public:
 
 	~Server()
 	{
-		stop();
+		shutdown();
 	}
 
-	// Start the server (non-blocking)
-	error::Error start()
+	// Start the server in a background thread (non-blocking)
+	error::Error run()
 	{
-		std::lock_guard<std::mutex> lock(mu_);
-
-		if (running_) {
-			return error::Error("Server is already running");
-		}
-
-		if (!transport_) {
-			return error::Error("No transport configured");
-		}
-
-		auto err = transport_->listen();
+		auto err = start();
 		if (err) {
 			return err;
 		}
 
-		running_ = true;
-		logInfo("Server started");
+		// Start server thread
+		serverThread_ = std::thread([this]() {
+			logInfo("Server started in background thread");
+
+			while (running_) {
+				// Poll the transport for I/O events
+				if (transport_) {
+					transport_->poll();
+				}
+
+				// Accept new connections
+				acceptNewConnections();
+
+				// Process pending messages
+				processMessages();
+
+				// Clean up closed connections
+				cleanupConnections();
+
+				// Small sleep to avoid busy-waiting
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+
+			logInfo("Server thread stopped");
+		});
+
 		return nullptr;
 	}
 
-	// Process pending messages and connections (non-blocking, poll-based)
-	// Returns true if work was done, false if idle
-	bool process()
+	// Stop the server and wait for thread to finish
+	error::Error shutdown()
 	{
-		bool didWork = false;
-
-		// Poll the transport for I/O events (reads, writes, accepts)
-		// This must be called to process async I/O on connections
-		// NOTE: Do NOT hold mu_ while polling - handlers will try to acquire it
-		std::shared_ptr<ServerTransport> transport;
-		{
-			std::lock_guard<std::mutex> lock(mu_);
-			if (running_ && transport_) {
-				transport = transport_;
-			}
-		}
-		if (transport) {
-			transport->poll();
-		}
-
-		// Accept new connections
-		if (acceptNewConnections()) {
-			didWork = true;
-		}
-
-		// Process pending messages
-		if (processMessages()) {
-			didWork = true;
-		}
-
-		// Clean up closed connections
-		if (cleanupConnections()) {
-			didWork = true;
-		}
-
-		return didWork;
-	}
-
-	// Stop the server
-	error::Error stop()
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-
+		// Check if already stopped
 		if (!running_) {
+			// Join thread if it's still running
+			if (serverThread_.joinable()) {
+				serverThread_.join();
+			}
 			return nullptr;
 		}
 
+		// Signal shutdown - this will cause the server loop to exit
 		running_ = false;
+
+		// Close the transport listener to unblock any pending accepts
+		// This ensures the accept loop exits quickly
+		if (transport_) {
+			transport_->close();
+		}
+
+		// Wait for server thread to finish
+		if (serverThread_.joinable()) {
+			serverThread_.join();
+		}
+
+		// Now clean up (thread is stopped, no more concurrent access)
+		std::lock_guard<std::mutex> lock(mu_);
 
 		// Close all active connections
 		for (auto& pair : connections_) {
@@ -257,24 +253,18 @@ public:
 		}
 		connections_.clear();
 
-		// Close the transport
-		if (transport_) {
-			transport_->close();
-		}
-
 		// Clear message queue
 		while (!messageQueue_.empty()) {
 			messageQueue_.pop();
 		}
 
-		logInfo("Server stopped");
+		logInfo("Server shutdown complete");
 		return nullptr;
 	}
 
 	// Check if server is running
 	bool isRunning() const
 	{
-		std::lock_guard<std::mutex> lock(mu_);
 		return running_;
 	}
 
@@ -325,22 +315,37 @@ public:
 	}
 
 private:
-	// Accept new connections (non-blocking)
-	bool acceptNewConnections()
+	// Start the server (internal helper)
+	error::Error start()
 	{
-		std::shared_ptr<ServerTransport> transport;
-		{
-			std::lock_guard<std::mutex> lock(mu_);
-			if (!running_ || !transport_) {
-				return false;
-			}
-			transport = transport_;
+		std::lock_guard<std::mutex> lock(mu_);
+
+		if (running_) {
+			return error::Error("Server is already running");
 		}
 
-		bool accepted = false;
+		if (!transport_) {
+			return error::Error("No transport configured");
+		}
+
+		auto err = transport_->listen();
+		if (err) {
+			return err;
+		}
+
+		running_ = true;
+		return nullptr;
+	}
+
+	// Accept new connections (non-blocking)
+	void acceptNewConnections()
+	{
+		if (!running_ || !transport_) {
+			return;
+		}
 
 		while (true) {
-			auto [conn, err] = transport->accept();
+			auto [conn, err] = transport_->accept();
 			if (err || !conn) {
 				break;
 			}
@@ -373,61 +378,50 @@ private:
 				onConnectionFail(connID, err);
 			});
 
+			// Store the connection
 			{
 				std::lock_guard<std::mutex> lock(mu_);
-				if (!running_) {
-					serverConn->close();
-					break;
-				}
 				connections_[connID] = serverConn;
 			}
 
-			accepted = true;
 			logInfo("New client connected (id: " + std::to_string(connID) + ")");
 		}
-
-		return accepted;
 	}
 
 	// Process messages from the queue
-	bool processMessages()
+	void processMessages()
 	{
-		std::unique_lock<std::mutex> lock(mu_);
+		while (true) {
+			std::unique_lock<std::mutex> lock(mu_);
 
-		if (messageQueue_.empty()) {
-			return false;
+			if (messageQueue_.empty()) {
+				return;
+			}
+
+			// Get next message
+			PendingMessage msg = messageQueue_.front();
+			messageQueue_.pop();
+
+			// Unlock while processing (long operation)
+			lock.unlock();
+
+			handleMessage(msg.connection, msg.data);
 		}
-
-		// Get next message
-		PendingMessage msg = messageQueue_.front();
-		messageQueue_.pop();
-
-		// Unlock while processing (long operation)
-		lock.unlock();
-
-		handleMessage(msg.connection, msg.data);
-
-		return true;
 	}
 
 	// Clean up closed connections
-	bool cleanupConnections()
+	void cleanupConnections()
 	{
 		std::lock_guard<std::mutex> lock(mu_);
-
-		bool cleaned = false;
 
 		auto it = connections_.begin();
 		while (it != connections_.end()) {
 			if (it->second->isClosed()) {
 				it = connections_.erase(it);
-				cleaned = true;
 			} else {
 				++it;
 			}
 		}
-
-		return cleaned;
 	}
 
 	// Called when a message is received
@@ -630,12 +624,13 @@ private:
 	std::map<uint64_t, std::shared_ptr<ServerGroup>> groupByServiceID_;
 	std::vector<std::shared_ptr<ServerGroup>> ownedGroups_;
 
-	bool running_;
+	std::atomic<bool> running_;
 	std::map<uint64_t, std::shared_ptr<ServerConnection>> connections_;
 	uint64_t nextConnectionID_;
 
 	std::queue<PendingMessage> messageQueue_;
 
+	std::thread serverThread_;
 	mutable std::mutex mu_;
 };
 

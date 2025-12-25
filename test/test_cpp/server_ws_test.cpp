@@ -67,23 +67,19 @@ int main() {
     auto impl = std::make_shared<PingPongServerImpl>();
     pingpong::registerPingPongServer(server.get(), impl);
 
-    // Start server (non-blocking)
-    auto err = server->start();
+    // Start server in background thread
+    auto err = server->run();
     if (err) {
         return 1;
     }
 
-    // Main loop - poll for messages
+    // Wait for shutdown signal
     while (running) {
-        // Process any pending messages/connections
-        server->process();
-
-        // Small sleep to avoid busy-waiting
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     // Stop server
-    server->stop();
+    server->shutdown();
 
     return 0;
 }

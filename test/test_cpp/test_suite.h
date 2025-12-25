@@ -246,14 +246,12 @@ public:
 		impl_ = std::make_shared<PingPongServerImpl>();
 		pingpong::registerPingPongServer(server_.get(), impl_);
 
-		auto err = server_->start();
+		auto err = server_->run();
 		TEST_CHECK(!err);
 		if (err) {
 			printf("Failed to start server: %s\n", err.message.c_str());
 			return;
 		}
-
-		startServerThread();
 	}
 
 	// Start server with custom setup callback
@@ -267,14 +265,12 @@ public:
 		server_ = std::make_shared<scg::rpc::Server>(serverConfig);
 		setup(server_.get());
 
-		auto err = server_->start();
+		auto err = server_->run();
 		TEST_CHECK(!err);
 		if (err) {
 			printf("Failed to start server: %s\n", err.message.c_str());
 			return;
 		}
-
-		startServerThread();
 	}
 
 	// Create and connect a client
@@ -307,12 +303,8 @@ public:
 	void stopServer() {
 		if (useExternalServer_) return;
 
-		running_ = false;
-		if (serverThread_.joinable()) {
-			serverThread_.join();
-		}
 		if (server_) {
-			server_->stop();
+			server_->shutdown();
 		}
 	}
 
@@ -323,15 +315,6 @@ public:
 	int id() const { return id_; }
 
 private:
-	void startServerThread() {
-		running_ = true;
-		serverThread_ = std::thread([this]() {
-			while (running_) {
-				server_->process();
-			}
-		});
-	}
-
 	const TransportFactory& factory_;
 	int id_;
 	int maxRetries_;
@@ -339,8 +322,6 @@ private:
 
 	std::shared_ptr<scg::rpc::Server> server_;
 	std::shared_ptr<PingPongServerImpl> impl_;
-	std::atomic<bool> running_{false};
-	std::thread serverThread_;
 };
 
 // ============================================================================
