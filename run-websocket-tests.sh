@@ -57,7 +57,7 @@ mkdir -p .build
 cd .build
 cmake ../test/test_cpp
 # Build only WebSocket-related targets
-run_with_timeout "C++ WebSocket build" make ws_tests server_ws_test server_ws_tls_test client_ws_tests client_ws_tls_tests
+make ws_tests server_ws_test server_ws_tls_test client_ws_tests client_ws_tls_tests
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}C++ WebSocket tests built successfully${NC}"
 else
