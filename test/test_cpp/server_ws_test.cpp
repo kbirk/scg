@@ -5,7 +5,7 @@
 #include <csignal>
 
 #include "scg/server.h"
-#include "scg/ws/transport_server_no_tls.h"
+#include "scg/ws/transport_server.h"
 #include "pingpong/pingpong.h"
 
 std::atomic<bool> running(true);
@@ -55,7 +55,7 @@ int main() {
 
     // Configure server
     scg::rpc::ServerConfig config;
-    config.transport = std::make_shared<scg::ws::ServerTransportNoTLS>(transportConfig);
+    config.transport = std::make_shared<scg::ws::ServerTransportWS>(transportConfig);
     config.errorHandler = [](const scg::error::Error& err) {
         printf("Server error: %s\n", err.message.c_str());
     };
@@ -68,7 +68,7 @@ int main() {
     pingpong::registerPingPongServer(server.get(), impl);
 
     // Start server in background thread
-    auto err = server->run();
+    auto err = server->start();
     if (err) {
         return 1;
     }

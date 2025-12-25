@@ -46,17 +46,17 @@ class ServerTransport {
 public:
 	virtual ~ServerTransport() = default;
 
-	// Start listening for incoming connections (non-blocking)
-	virtual error::Error listen() = 0;
+	// Start listening for incoming connections
+	virtual error::Error startListening() = 0;
 
-	// Accept a new connection (non-blocking, returns nullptr if no connection available)
-	virtual std::pair<std::shared_ptr<Connection>, error::Error> accept() = 0;
+	// Set handler for new connections
+	virtual void setOnConnection(std::function<void(std::shared_ptr<Connection>)> handler) = 0;
 
-	// Poll for I/O events (non-blocking) - must be called regularly to process async I/O
-	virtual void poll() = 0;
+	// Run the transport loop (blocking)
+	virtual void runEventLoop() = 0;
 
-	// Close the transport and stop listening
-	virtual error::Error close() = 0;
+	// Stop the transport and unblock run()
+	virtual void stop() = 0;
 };
 
 } // namespace rpc

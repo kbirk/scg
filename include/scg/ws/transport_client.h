@@ -1,7 +1,7 @@
 #pragma once
 
 #define ASIO_STANDALONE
-#include <websocketpp/config/asio_client.hpp>
+#include <websocketpp/config/asio_no_tls_client.hpp>
 #include <websocketpp/client.hpp>
 
 #include "scg/transport.h"
@@ -18,21 +18,19 @@
 namespace scg {
 namespace ws {
 
-struct ClientTransportTLSConfig {
+struct ClientTransportConfig {
 	std::string host;
 	int port;
 	std::string path = "/";
-	bool verifyPeer = true;
-	std::string caFile;
 	uint32_t maxSendMessageSize = 0;
 	uint32_t maxRecvMessageSize = 0;
 };
 
-typedef websocketpp::client<websocketpp::config::asio_tls_client> client_tls;
+typedef websocketpp::client<websocketpp::config::asio_client> client;
 
-class ConnectionWSTLS : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionWSTLS> {
+class ConnectionWS : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionWS> {
 public:
-	ConnectionWSTLS(client_tls* c, websocketpp::connection_hdl hdl, uint32_t maxSendMessageSize = 0)
+	ConnectionWS(client* c, websocketpp::connection_hdl hdl, uint32_t maxSendMessageSize = 0)
 		: client_(c)
 		, hdl_(hdl)
 		, closed_(false)
@@ -61,10 +59,10 @@ public:
 		messageHandler_ = handler;
 
 		websocketpp::lib::error_code ec;
-		client_tls::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
+		client::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
 		if (ec) return;
 
-		con->set_message_handler([this](websocketpp::connection_hdl, client_tls::message_ptr msg) {
+		con->set_message_handler([this](websocketpp::connection_hdl, client::message_ptr msg) {
 			if (messageHandler_) {
 				auto& payload = msg->get_payload();
 				std::vector<uint8_t> data(payload.begin(), payload.end());
@@ -77,7 +75,7 @@ public:
 	{
 		failHandler_ = handler;
 		websocketpp::lib::error_code ec;
-		client_tls::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
+		client::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
 		if (ec) return;
 
 		con->set_fail_handler([this, con](websocketpp::connection_hdl) {
@@ -89,7 +87,7 @@ public:
 	{
 		closeHandler_ = handler;
 		websocketpp::lib::error_code ec;
-		client_tls::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
+		client::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
 		if (ec) return;
 
 		con->set_close_handler([this](websocketpp::connection_hdl) {
@@ -110,7 +108,7 @@ public:
 	}
 
 private:
-	client_tls* client_;
+	client* client_;
 	websocketpp::connection_hdl hdl_;
 	std::function<void(const std::vector<uint8_t>&)> messageHandler_;
 	std::function<void(const error::Error&)> failHandler_;
@@ -119,10 +117,10 @@ private:
 	uint32_t maxSendMessageSize_;
 };
 
-class ClientTransportWSTLS : public scg::rpc::ClientTransport
+class ClientTransportWS : public scg::rpc::ClientTransport
 {
 public:
-	ClientTransportWSTLS(const ClientTransportTLSConfig& config)
+	ClientTransportWS(const ClientTransportConfig& config)
 		: config_(config)
 	{
 		client_.clear_access_channels(websocketpp::log::alevel::all);
@@ -134,47 +132,46 @@ public:
 			client_.set_max_message_size(config_.maxRecvMessageSize);
 		}
 
-		client_.set_tls_init_handler([this](websocketpp::connection_hdl) {
-			return on_tls_init();
-		});
-
 		thread_ = std::thread([this]() {
 			client_.run();
 		});
 	}
 
-	~ClientTransportWSTLS()
+	~ClientTransportWS()
 	{
 		shutdown();
 	}
 
 	std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override
 	{
+		std::cout << "Client connecting..." << std::endl;
 		websocketpp::lib::error_code ec;
-		std::string uri = "wss://" + config_.host + ":" + std::to_string(config_.port) + config_.path;
-		client_tls::connection_ptr con = client_.get_connection(uri, ec);
+		std::string uri = "ws://" + config_.host + ":" + std::to_string(config_.port) + config_.path;
+		client::connection_ptr con = client_.get_connection(uri, ec);
 		if (ec) {
 			return {nullptr, error::Error(ec.message())};
 		}
 
-		auto connection = std::make_shared<ConnectionWSTLS>(&client_, con->get_handle(), config_.maxSendMessageSize);
+		auto connection = std::make_shared<ConnectionWS>(&client_, con->get_handle(), config_.maxSendMessageSize);
 
 		auto promise = std::make_shared<std::promise<error::Error>>();
 		auto future = promise->get_future();
 
 		con->set_open_handler([promise](websocketpp::connection_hdl) {
+			std::cout << "Client connected" << std::endl;
 			promise->set_value(nullptr);
 		});
 
 		con->set_fail_handler([promise, con](websocketpp::connection_hdl) {
+			std::cout << "Client connection failed: " << con->get_ec().message() << std::endl;
 			promise->set_value(error::Error(con->get_ec().message()));
 		});
 
 		client_.connect(con);
 
+		// std::cout << "Client waiting for connection..." << std::endl;
 		if (future.wait_for(std::chrono::seconds(10)) == std::future_status::timeout) {
-			websocketpp::lib::error_code close_ec;
-			client_.close(con->get_handle(), websocketpp::close::status::normal, "Timeout", close_ec);
+			// std::cout << "Client connection timeout" << std::endl;
 			return {nullptr, error::Error("Connection timed out")};
 		}
 
@@ -198,33 +195,8 @@ public:
 	}
 
 private:
-	websocketpp::lib::shared_ptr<asio::ssl::context> on_tls_init() {
-		auto ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
-
-		try {
-			ctx->set_options(asio::ssl::context::default_workarounds |
-							 asio::ssl::context::no_sslv2 |
-							 asio::ssl::context::no_sslv3 |
-							 asio::ssl::context::single_dh_use);
-
-			if (config_.verifyPeer) {
-				ctx->set_verify_mode(asio::ssl::verify_peer);
-				if (!config_.caFile.empty()) {
-					ctx->load_verify_file(config_.caFile);
-				} else {
-					ctx->set_default_verify_paths();
-				}
-			} else {
-				ctx->set_verify_mode(asio::ssl::verify_none);
-			}
-		} catch (std::exception& e) {
-			std::cout << "TLS Init Error: " << e.what() << std::endl;
-		}
-		return ctx;
-	}
-
-	ClientTransportTLSConfig config_;
-	client_tls client_;
+	ClientTransportConfig config_;
+	client client_;
 	std::thread thread_;
 };
 

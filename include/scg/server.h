@@ -9,7 +9,7 @@
 #include <queue>
 #include <array>
 #include <thread>
-#include <atomic>
+#include <condition_variable>
 
 #include "scg/error.h"
 #include "scg/serialize.h"
@@ -40,61 +40,9 @@ namespace rpc {
 class Server;
 class ServerGroup;
 
-// Server connection - wraps a transport connection for tracking purposes
-class ServerConnection {
-public:
-	ServerConnection(std::shared_ptr<Connection> conn, uint64_t id)
-		: conn_(conn)
-		, id_(id)
-		, closed_(false)
-	{
-
-	}
-
-	uint64_t id() const
-	{
-		return id_;
-	}
-
-	error::Error send(const std::vector<uint8_t>& data)
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-		if (closed_) {
-			return error::Error("Connection is closed");
-		}
-		return conn_->send(data);
-	}
-
-	void close()
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-		if (!closed_) {
-			conn_->close();
-			closed_ = true;
-		}
-	}
-
-	bool isClosed() const
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-		return closed_;
-	}
-
-	std::shared_ptr<Connection> connection()
-	{
-		return conn_;
-	}
-
-private:
-	std::shared_ptr<Connection> conn_;
-	uint64_t id_;
-	bool closed_;
-	mutable std::mutex mu_;
-};
-
 // Message to be processed by the server
 struct PendingMessage {
-	std::shared_ptr<ServerConnection> connection;
+	std::shared_ptr<Connection> connection;
 	std::vector<uint8_t> data;
 };
 
@@ -182,35 +130,25 @@ public:
 	}
 
 	// Start the server in a background thread (non-blocking)
-	error::Error run()
+	error::Error start()
 	{
-		auto err = start();
+		auto err = initialize();
 		if (err) {
 			return err;
 		}
 
-		// Start server thread
+		// Start transport thread
+		transportThread_ = std::thread([this]() {
+			logInfo("Transport thread started");
+			transport_->runEventLoop();
+			logInfo("Transport thread stopped");
+		});
+
+		// Start message processing thread
 		serverThread_ = std::thread([this]() {
-			logInfo("Server started in background thread");
+			logInfo("Server thread started");
 
-			while (running_) {
-				// Poll the transport for I/O events
-				if (transport_) {
-					transport_->poll();
-				}
-
-				// Accept new connections
-				acceptNewConnections();
-
-				// Process pending messages
-				processMessages();
-
-				// Clean up closed connections
-				cleanupConnections();
-
-				// Small sleep to avoid busy-waiting
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
-			}
+			processMessages();
 
 			logInfo("Server thread stopped");
 		});
@@ -223,23 +161,29 @@ public:
 	{
 		// Check if already stopped
 		if (!running_) {
-			// Join thread if it's still running
+			// Join threads if they're still running
 			if (serverThread_.joinable()) {
 				serverThread_.join();
+			}
+			if (transportThread_.joinable()) {
+				transportThread_.join();
 			}
 			return nullptr;
 		}
 
 		// Signal shutdown - this will cause the server loop to exit
 		running_ = false;
+		cv_.notify_all();
 
-		// Close the transport listener to unblock any pending accepts
-		// This ensures the accept loop exits quickly
+		// Stop the transport
 		if (transport_) {
-			transport_->close();
+			transport_->stop();
 		}
 
-		// Wait for server thread to finish
+		// Wait for threads to finish
+		if (transportThread_.joinable()) {
+			transportThread_.join();
+		}
 		if (serverThread_.joinable()) {
 			serverThread_.join();
 		}
@@ -316,7 +260,7 @@ public:
 
 private:
 	// Start the server (internal helper)
-	error::Error start()
+	error::Error initialize()
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 
@@ -328,7 +272,11 @@ private:
 			return error::Error("No transport configured");
 		}
 
-		auto err = transport_->listen();
+		transport_->setOnConnection([this](std::shared_ptr<Connection> conn) {
+			handleNewConnection(conn);
+		});
+
+		auto err = transport_->startListening();
 		if (err) {
 			return err;
 		}
@@ -337,64 +285,47 @@ private:
 		return nullptr;
 	}
 
-	// Accept new connections (non-blocking)
-	void acceptNewConnections()
+	// Handle new connection
+	void handleNewConnection(std::shared_ptr<Connection> conn)
 	{
-		if (!running_ || !transport_) {
+		if (!running_) {
 			return;
 		}
 
-		while (true) {
-			auto [conn, err] = transport_->accept();
-			if (err || !conn) {
-				break;
-			}
+		uint64_t connID = nextConnectionID_++;
 
-			uint64_t connID = 0;
-			{
-				std::lock_guard<std::mutex> lock(mu_);
-				connID = nextConnectionID_++;
-			}
+		conn->setMessageHandler([this, connID](const std::vector<uint8_t>& data) {
+			onMessage(connID, data);
+		});
 
-			auto serverConn = std::make_shared<ServerConnection>(conn, connID);
+		conn->setCloseHandler([this, connID]() {
+			onConnectionClose(connID);
+		});
 
-			// Use weak_ptr in message handler to avoid circular reference
-			// (ServerConnection owns conn, conn owns the lambda, lambda would own ServerConnection)
-			std::weak_ptr<ServerConnection> weakConn = serverConn;
+		conn->setFailHandler([this, connID](const error::Error& err) {
+			onConnectionFail(connID, err);
+		});
 
-			conn->setMessageHandler([this, weakConn](const std::vector<uint8_t>& data) {
-				// Try to lock the weak_ptr to get a shared_ptr
-				if (auto serverConn = weakConn.lock()) {
-					onMessage(serverConn, data);
-				}
-				// If lock() fails, connection is being destroyed, message is dropped
-			});
-
-			conn->setCloseHandler([this, connID]() {
-				onConnectionClose(connID);
-			});
-
-			conn->setFailHandler([this, connID](const error::Error& err) {
-				onConnectionFail(connID, err);
-			});
-
-			// Store the connection
-			{
-				std::lock_guard<std::mutex> lock(mu_);
-				connections_[connID] = serverConn;
-			}
-
-			logInfo("New client connected (id: " + std::to_string(connID) + ")");
+		// Store the connection
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			connections_[connID] = conn;
 		}
+
+		logInfo("New client connected (id: " + std::to_string(connID) + ")");
 	}
 
 	// Process messages from the queue
 	void processMessages()
 	{
-		while (true) {
+		while (running_) {
 			std::unique_lock<std::mutex> lock(mu_);
 
-			if (messageQueue_.empty()) {
+			cv_.wait(lock, [this] {
+				return !messageQueue_.empty() || !running_;
+			});
+
+			if (!running_) {
 				return;
 			}
 
@@ -409,23 +340,8 @@ private:
 		}
 	}
 
-	// Clean up closed connections
-	void cleanupConnections()
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-
-		auto it = connections_.begin();
-		while (it != connections_.end()) {
-			if (it->second->isClosed()) {
-				it = connections_.erase(it);
-			} else {
-				++it;
-			}
-		}
-	}
-
 	// Called when a message is received
-	void onMessage(std::shared_ptr<ServerConnection> conn, const std::vector<uint8_t>& data)
+	void onMessage(uint64_t connID, const std::vector<uint8_t>& data)
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 
@@ -433,8 +349,14 @@ private:
 			return;
 		}
 
+		auto it = connections_.find(connID);
+		if (it == connections_.end()) {
+			return;  // Connection no longer exists
+		}
+
 		// Queue the message for processing
-		messageQueue_.push(PendingMessage{conn, data});
+		messageQueue_.push(PendingMessage{it->second, data});
+		cv_.notify_one();
 	}
 
 	// Called when a connection closes
@@ -444,7 +366,7 @@ private:
 
 		auto it = connections_.find(connID);
 		if (it != connections_.end()) {
-			it->second->close();
+			connections_.erase(it);
 			logInfo("Client disconnected (id: " + std::to_string(connID) + ")");
 		}
 	}
@@ -458,12 +380,12 @@ private:
 
 		auto it = connections_.find(connID);
 		if (it != connections_.end()) {
-			it->second->close();
+			connections_.erase(it);
 		}
 	}
 
 	// Handle a single message
-	void handleMessage(std::shared_ptr<ServerConnection> conn, const std::vector<uint8_t>& data)
+	void handleMessage(std::shared_ptr<Connection> conn, const std::vector<uint8_t>& data)
 	{
 		serialize::Reader reader(data);
 
@@ -625,13 +547,15 @@ private:
 	std::vector<std::shared_ptr<ServerGroup>> ownedGroups_;
 
 	std::atomic<bool> running_;
-	std::map<uint64_t, std::shared_ptr<ServerConnection>> connections_;
-	uint64_t nextConnectionID_;
+	std::map<uint64_t, std::shared_ptr<Connection>> connections_;
+	std::atomic<uint64_t> nextConnectionID_;
 
 	std::queue<PendingMessage> messageQueue_;
 
 	std::thread serverThread_;
+	std::thread transportThread_;
 	mutable std::mutex mu_;
+	std::condition_variable cv_;
 };
 
 // Helper function to create an error response

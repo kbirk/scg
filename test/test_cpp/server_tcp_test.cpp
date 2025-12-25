@@ -60,7 +60,7 @@ int main() {
     pingpong::registerPingPongServer(server.get(), impl);
 
     // Start server in background thread
-    auto err = server->run();
+    auto err = server->start();
     if (err) {
         printf("Failed to start server: %s\n", err.message.c_str());
         return 1;

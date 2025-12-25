@@ -1,7 +1,7 @@
 #include "test_suite.h"
-#include "scg/ws/transport_server_no_tls.h"
+#include "scg/ws/transport_server.h"
 #include "scg/ws/transport_server_tls.h"
-#include "scg/ws/transport_client_no_tls.h"
+#include "scg/ws/transport_client.h"
 #include "scg/ws/transport_client_tls.h"
 
 // ============================================================================
@@ -15,14 +15,14 @@ TransportFactory createWebSocketTransportFactory() {
     factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
         scg::ws::ServerTransportConfig transportConfig;
         transportConfig.port = 18000 + id;
-        return std::make_shared<scg::ws::ServerTransportNoTLS>(transportConfig);
+        return std::make_shared<scg::ws::ServerTransportWS>(transportConfig);
     };
 
     factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
         scg::ws::ClientTransportConfig transportConfig;
         transportConfig.host = "localhost";
         transportConfig.port = 18000 + id;
-        return std::make_shared<scg::ws::ClientTransportNoTLS>(transportConfig);
+        return std::make_shared<scg::ws::ClientTransportWS>(transportConfig);
     };
 
     factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
@@ -31,7 +31,7 @@ TransportFactory createWebSocketTransportFactory() {
         transportConfig.port = 18000 + id;
         transportConfig.maxSendMessageSize = 1024;
         transportConfig.maxRecvMessageSize = 1024;
-        return std::make_shared<scg::ws::ClientTransportNoTLS>(transportConfig);
+        return std::make_shared<scg::ws::ClientTransportWS>(transportConfig);
     };
 
     return factory;
@@ -50,14 +50,15 @@ TransportFactory createWebSocketTLSTransportFactory() {
         transportConfig.port = 18100 + id;
         transportConfig.certFile = "../test/server.crt";
         transportConfig.keyFile = "../test/server.key";
-        return std::make_shared<scg::ws::ServerTransportTLS>(transportConfig);
+        return std::make_shared<scg::ws::ServerTransportWSTLS>(transportConfig);
     };
 
     factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
         scg::ws::ClientTransportTLSConfig transportConfig;
         transportConfig.host = "localhost";
         transportConfig.port = 18100 + id;
-        return std::make_shared<scg::ws::ClientTransportTLS>(transportConfig);
+        transportConfig.verifyPeer = false;
+        return std::make_shared<scg::ws::ClientTransportWSTLS>(transportConfig);
     };
 
     factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
@@ -66,7 +67,8 @@ TransportFactory createWebSocketTLSTransportFactory() {
         transportConfig.port = 18100 + id;
         transportConfig.maxSendMessageSize = 1024;
         transportConfig.maxRecvMessageSize = 1024;
-        return std::make_shared<scg::ws::ClientTransportTLS>(transportConfig);
+        transportConfig.verifyPeer = false;
+        return std::make_shared<scg::ws::ClientTransportWSTLS>(transportConfig);
     };
 
     return factory;

@@ -1,7 +1,7 @@
 #pragma once
 
 #define ASIO_STANDALONE
-#include <websocketpp/config/asio.hpp>
+#include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
 
 #include "scg/transport.h"
@@ -17,20 +17,18 @@
 namespace scg {
 namespace ws {
 
-struct ServerTransportTLSConfig {
+struct ServerTransportConfig {
 	int port;
-	std::string certFile;
-	std::string keyFile;
 	uint32_t maxSendMessageSize = 0;
 	uint32_t maxRecvMessageSize = 0;
 	scg::log::LoggingConfig logging;
 };
 
-typedef websocketpp::server<websocketpp::config::asio_tls> server_tls;
+typedef websocketpp::server<websocketpp::config::asio> server;
 
-class ConnectionWSServerTLS : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionWSServerTLS> {
+class ConnectionWSServer : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionWSServer> {
 public:
-	ConnectionWSServerTLS(server_tls* s, websocketpp::connection_hdl hdl, uint32_t maxSendMessageSize = 0)
+	ConnectionWSServer(server* s, websocketpp::connection_hdl hdl, uint32_t maxSendMessageSize = 0)
 		: server_(s)
 		, hdl_(hdl)
 		, closed_(false)
@@ -59,10 +57,10 @@ public:
 		messageHandler_ = handler;
 
 		websocketpp::lib::error_code ec;
-		server_tls::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
+		server::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
 		if (ec) return;
 
-		con->set_message_handler([this](websocketpp::connection_hdl, server_tls::message_ptr msg) {
+		con->set_message_handler([this](websocketpp::connection_hdl, server::message_ptr msg) {
 			if (messageHandler_) {
 				auto& payload = msg->get_payload();
 				std::vector<uint8_t> data(payload.begin(), payload.end());
@@ -75,7 +73,7 @@ public:
 	{
 		failHandler_ = handler;
 		websocketpp::lib::error_code ec;
-		server_tls::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
+		server::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
 		if (ec) return;
 
 		con->set_fail_handler([this, con](websocketpp::connection_hdl) {
@@ -87,7 +85,7 @@ public:
 	{
 		closeHandler_ = handler;
 		websocketpp::lib::error_code ec;
-		server_tls::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
+		server::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
 		if (ec) return;
 
 		con->set_close_handler([this](websocketpp::connection_hdl) {
@@ -108,7 +106,7 @@ public:
 	}
 
 private:
-	server_tls* server_;
+	server* server_;
 	websocketpp::connection_hdl hdl_;
 	std::function<void(const std::vector<uint8_t>&)> messageHandler_;
 	std::function<void(const error::Error&)> failHandler_;
@@ -117,10 +115,10 @@ private:
 	uint32_t maxSendMessageSize_;
 };
 
-class ServerTransportWSTLS : public scg::rpc::ServerTransport
+class ServerTransportWS : public scg::rpc::ServerTransport
 {
 public:
-	ServerTransportWSTLS(const ServerTransportTLSConfig& config)
+	ServerTransportWS(const ServerTransportConfig& config)
 		: config_(config)
 	{
 		server_.clear_access_channels(websocketpp::log::alevel::all);
@@ -131,19 +129,15 @@ public:
 			server_.set_max_message_size(config_.maxRecvMessageSize);
 		}
 
-		server_.set_tls_init_handler([this](websocketpp::connection_hdl) {
-			return on_tls_init();
-		});
-
 		server_.set_open_handler([this](websocketpp::connection_hdl hdl) {
-			auto conn = std::make_shared<ConnectionWSServerTLS>(&server_, hdl, config_.maxSendMessageSize);
+			auto conn = std::make_shared<ConnectionWSServer>(&server_, hdl, config_.maxSendMessageSize);
 			if (onConnectionHandler_) {
 				onConnectionHandler_(conn);
 			}
 		});
 	}
 
-	~ServerTransportWSTLS()
+	~ServerTransportWS()
 	{
 		stop();
 	}
@@ -179,26 +173,8 @@ public:
 	}
 
 private:
-	websocketpp::lib::shared_ptr<asio::ssl::context> on_tls_init() {
-		auto ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
-
-		try {
-			ctx->set_options(asio::ssl::context::default_workarounds |
-							 asio::ssl::context::no_sslv2 |
-							 asio::ssl::context::no_sslv3 |
-							 asio::ssl::context::single_dh_use);
-
-			ctx->use_certificate_chain_file(config_.certFile);
-			ctx->use_private_key_file(config_.keyFile, asio::ssl::context::pem);
-
-		} catch (std::exception& e) {
-			std::cout << "TLS Init Error: " << e.what() << std::endl;
-		}
-		return ctx;
-	}
-
-	ServerTransportTLSConfig config_;
-	server_tls server_;
+	ServerTransportConfig config_;
+	server server_;
 	std::function<void(std::shared_ptr<scg::rpc::Connection>)> onConnectionHandler_;
 };
 

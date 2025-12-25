@@ -215,12 +215,14 @@ server.ListenAndServe()
 
 ### C++ Server
 
-C++ server code is available for WebSocket and TCP transports. The server uses a poll-based architecture:
+C++ server code is available for WebSocket and TCP transports:
 
 ```cpp
 #include "scg/server.h"
-#include "scg/ws/transport_server_no_tls.h"
+#include "scg/tcp/transport_server.h"
 #include "pingpong/pingpong.h"
+#include <thread>
+#include <chrono>
 
 // Implement the service interface
 class PingPongServerImpl : public pingpong::PingPongServer {
@@ -238,24 +240,13 @@ public:
 };
 
 int main() {
-    // Configure logging
-    scg::log::LoggingConfig logging;
-    logging.level = scg::log::LogLevel::INFO;
-    logging.infoLogger = [](std::string msg) {
-        printf("INFO: %s\n", msg.c_str());
-    };
-    logging.errorLogger = [](std::string msg) {
-        printf("ERROR: %s\n", msg.c_str());
-    };
-
-    // Configure WebSocket transport
-    scg::ws::ServerTransportConfig transportConfig;
+    // Configure TCP transport
+    scg::tcp::ServerTransportConfig transportConfig;
     transportConfig.port = 8080;
-    transportConfig.logging = logging;
 
     // Configure server
     scg::rpc::ServerConfig config;
-    config.transport = std::make_shared<scg::ws::ServerTransportNoTLS>(transportConfig);
+    config.transport = std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
     config.errorHandler = [](const scg::error::Error& err) {
         printf("Server error: %s\n", err.message.c_str());
     };
@@ -267,37 +258,35 @@ int main() {
     auto impl = std::make_shared<PingPongServerImpl>();
     pingpong::registerPingPongServer(server.get(), impl);
 
-    // Start server (non-blocking)
+    // Start server (starts background threads)
     server->start();
 
-    // Main loop - poll for messages
+    // Keep main thread alive
     while (true) {
-        server->process();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     return 0;
 }
 ```
 
-For TLS connections, use `scg::ws::ServerTransportTLS`:
+For TLS connections, use `scg::tcp::ServerTransportTCPTLS`:
 
 ```cpp
-#include "scg/ws/transport_server_tls.h"
+#include "scg/tcp/transport_server_tls.h"
 
-scg::ws::ServerTransportConfig transportConfig;
-transportConfig.port = 8443;
+scg::tcp::ServerTransportTLSConfig transportConfig;
+transportConfig.port = 443;
 transportConfig.certFile = "server.crt";
 transportConfig.keyFile = "server.key";
-transportConfig.logging = logging;
 
-config.transport = std::make_shared<scg::ws::ServerTransportTLS>(transportConfig);
+config.transport = std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
 ```
 
-For TCP connections, use `scg::tcp::ServerTransportNoTLS` or `scg::tcp::ServerTransportTLS`:
+For WebSocket connections, use `scg::ws::ServerTransportWS` or `scg::ws::ServerTransportWSTLS`:
 
 ```cpp
-#include "scg/tcp/transport_server_no_tls.h"
+#include "scg/ws/transport_server.h"
 
 scg::tcp::ServerTransportConfig transportConfig;
 transportConfig.port = 8080;
@@ -407,7 +396,7 @@ client.Middleware(func(ctx context.Context, next rpc.Handler) rpc.Handler {
 C++ client example using WebSocket transport:
 
 ```cpp
-#include <scg/ws/transport_no_tls.h>
+#include <scg/ws/transport_client.h>
 
 #include "pingpong.h"
 
@@ -439,7 +428,7 @@ For TLS connections:
 
 scg::ws::ClientTransportConfigTLS config;
 config.host = "localhost";
-config.port = 8443;
+config.port = 443;
 
 auto client = std::make_shared<scg::ws::ClientTransportTLS>(config);
 

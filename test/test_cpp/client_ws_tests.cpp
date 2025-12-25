@@ -2,9 +2,9 @@
 // Used for cross-language testing: C++ Client + Go Server
 
 #include "test_suite.h"
-#include "scg/ws/transport_server_no_tls.h"
+#include "scg/ws/transport_server.h"
 #include "scg/ws/transport_server_tls.h"
-#include "scg/ws/transport_client_no_tls.h"
+#include "scg/ws/transport_client.h"
 #include "scg/ws/transport_client_tls.h"
 
 // ============================================================================
@@ -24,7 +24,8 @@ TransportFactory createWebSocketClientTransportFactory() {
         scg::ws::ClientTransportConfig transportConfig;
         transportConfig.host = "localhost";
         transportConfig.port = 8000;  // Must match Go server port (pingpong_server_ws)
-        return std::make_shared<scg::ws::ClientTransportNoTLS>(transportConfig);
+        transportConfig.path = "/rpc";
+        return std::make_shared<scg::ws::ClientTransportWS>(transportConfig);
     };
 
     factory.createLimitedClientTransport = nullptr;

@@ -28,10 +28,15 @@ public:
 
 	~ServerTransportTCP()
 	{
-		close();
+		stop();
 	}
 
-	error::Error listen() override
+	void setOnConnection(std::function<void(std::shared_ptr<scg::rpc::Connection>)> handler) override
+	{
+		onConnectionHandler_ = handler;
+	}
+
+	error::Error startListening() override
 	{
 		try {
 			asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v4(), config_.port);
@@ -39,54 +44,49 @@ public:
 			acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true));
 			acceptor_.bind(endpoint);
 			acceptor_.listen();
+
+			start_accept();
+
 			return nullptr;
 		} catch (const std::exception& e) {
 			return error::Error(e.what());
 		}
 	}
 
-	std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> accept() override
-	{
-		try {
-			asio::ip::tcp::socket socket(io_context_);
-			asio::error_code ec;
-			acceptor_.non_blocking(true);
-			acceptor_.accept(socket, ec);
-
-			if (ec) {
-				if (ec == asio::error::would_block || ec == asio::error::try_again) {
-					return {nullptr, nullptr};
-				}
-				return {nullptr, error::Error(ec.message())};
-			}
-
-			// Connection accepted
-			return {std::make_shared<ConnectionTCP>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
-		} catch (const std::exception& e) {
-			return {nullptr, error::Error(e.what())};
-		}
-	}
-
-	void poll() override
+	void runEventLoop() override
 	{
 		if (io_context_.stopped()) {
 			io_context_.restart();
 		}
-		io_context_.poll();
+		io_context_.run();
 	}
 
-	error::Error close() override
+	void stop() override
 	{
 		if (acceptor_.is_open()) {
 			acceptor_.close();
 		}
-		return nullptr;
+		io_context_.stop();
 	}
 
 private:
+	void start_accept()
+	{
+		auto socket = std::make_shared<asio::ip::tcp::socket>(io_context_);
+		acceptor_.async_accept(*socket, [this, socket](const asio::error_code& error) {
+			if (!error) {
+				if (onConnectionHandler_) {
+					onConnectionHandler_(std::make_shared<ConnectionTCP>(std::move(*socket), config_.maxSendMessageSize, config_.maxRecvMessageSize));
+				}
+				start_accept();
+			}
+		});
+	}
+
 	ServerTransportConfig config_;
 	asio::io_context io_context_;
 	asio::ip::tcp::acceptor acceptor_;
+	std::function<void(std::shared_ptr<scg::rpc::Connection>)> onConnectionHandler_;
 };
 
 } // namespace tcp

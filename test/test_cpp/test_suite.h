@@ -246,7 +246,7 @@ public:
 		impl_ = std::make_shared<PingPongServerImpl>();
 		pingpong::registerPingPongServer(server_.get(), impl_);
 
-		auto err = server_->run();
+		auto err = server_->start();
 		TEST_CHECK(!err);
 		if (err) {
 			printf("Failed to start server: %s\n", err.message.c_str());
@@ -265,7 +265,7 @@ public:
 		server_ = std::make_shared<scg::rpc::Server>(serverConfig);
 		setup(server_.get());
 
-		auto err = server_->run();
+		auto err = server_->start();
 		TEST_CHECK(!err);
 		if (err) {
 			printf("Failed to start server: %s\n", err.message.c_str());

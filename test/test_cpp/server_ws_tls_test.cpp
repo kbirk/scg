@@ -57,7 +57,7 @@ int main() {
 
     // Configure server
     scg::rpc::ServerConfig config;
-    config.transport = std::make_shared<scg::ws::ServerTransportTLS>(transportConfig);
+    config.transport = std::make_shared<scg::ws::ServerTransportWSTLS>(transportConfig);
     config.errorHandler = [](const scg::error::Error& err) {
         printf("Server error: %s\n", err.message.c_str());
     };
@@ -70,7 +70,7 @@ int main() {
     pingpong::registerPingPongServer(server.get(), impl);
 
     // Start server in background thread
-    auto err = server->run();
+    auto err = server->start();
     if (err) {
         printf("Failed to start server: %s\n", err.message.c_str());
         return 1;
