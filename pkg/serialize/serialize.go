@@ -1,6 +1,7 @@
 package serialize
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,22 +75,28 @@ func SerializeString(writer *FixedSizeWriter, data string) {
 
 func DeserializeString(data *string, reader *Reader) error {
 	var length uint32
-	err := DeserializeUInt32(&length, reader)
-	if err != nil {
+	if err := DeserializeUInt32(&length, reader); err != nil {
 		return err
 	}
 
-	// two allocations...
-	bs := make([]byte, length)
+	if length == 0 {
+		*data = ""
+		return nil
+	}
+
+	// Single allocation using strings.Builder
+	var b strings.Builder
+	b.Grow(int(length))
+
 	for i := uint32(0); i < length; i++ {
-		var b byte
-		err := reader.ReadBits(&b, 8)
-		if err != nil {
+		var x byte
+		if err := reader.ReadBits(&x, 8); err != nil {
 			return err
 		}
-		bs[i] = b
+		b.WriteByte(x)
 	}
-	*data = string(bs)
+
+	*data = b.String()
 	return nil
 }
 
