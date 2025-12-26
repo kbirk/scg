@@ -16,33 +16,39 @@ func NewFixedSizeWriter(size int) *FixedSizeWriter {
 }
 
 func (w *FixedSizeWriter) WriteBits(val uint8, numBitsToWrite uint32) {
-	totalBitsToWrite := numBitsToWrite
-
-	for numBitsToWrite > 0 {
-		dstByteIndex := getByteOffset(w.numBitsWritten)
-		dstBitIndex := getBitOffset(w.numBitsWritten)
-		srcBitIndex := getBitOffset(totalBitsToWrite - numBitsToWrite)
-
-		if srcBitIndex > 7 {
-			panic("Invalid source bit index")
-		}
-		if dstBitIndex > 7 {
-			panic("Invalid destination bit index")
-		}
-		if dstByteIndex >= uint32(len(w.bytes)) {
-			panic(fmt.Sprintf("Invalid destination byte index: %d >= %d", dstByteIndex, len(w.bytes)))
-		}
-
-		srcMask := uint8(1) << srcBitIndex
-		dstMask := uint8(1) << dstBitIndex
-
-		if val&srcMask != 0 {
-			w.bytes[dstByteIndex] |= dstMask
-		}
-
-		w.numBitsWritten++
-		numBitsToWrite--
+	if numBitsToWrite == 0 {
+		return
 	}
+
+	// Mask val to ensure we only write numBitsToWrite bits
+	val &= (1 << numBitsToWrite) - 1
+
+	dstByteIndex := w.numBitsWritten >> 3
+	dstBitOffset := w.numBitsWritten & 7
+
+	if int(dstByteIndex) >= len(w.bytes) {
+		panic(fmt.Sprintf("Invalid destination byte index: %d >= %d", dstByteIndex, len(w.bytes)))
+	}
+
+	// Calculate how many bits fit in the current byte
+	bitsInFirstByte := 8 - dstBitOffset
+
+	if numBitsToWrite <= bitsInFirstByte {
+		// Fits in one byte
+		w.bytes[dstByteIndex] |= val << dstBitOffset
+	} else {
+		// Spans two bytes
+		// Write first part
+		w.bytes[dstByteIndex] |= val << dstBitOffset
+
+		// Write second part
+		if int(dstByteIndex)+1 >= len(w.bytes) {
+			panic(fmt.Sprintf("Invalid destination byte index: %d >= %d", dstByteIndex+1, len(w.bytes)))
+		}
+		w.bytes[dstByteIndex+1] |= val >> bitsInFirstByte
+	}
+
+	w.numBitsWritten += numBitsToWrite
 }
 
 func (w *FixedSizeWriter) Bytes() []byte {
@@ -64,35 +70,38 @@ func NewWriter(bs []byte) *Writer {
 }
 
 func (w *Writer) WriteBits(val uint8, numBitsToWrite uint32) {
-	totalBitsToWrite := numBitsToWrite
-
-	for numBitsToWrite > 0 {
-		dstByteIndex := getByteOffset(w.numBitsWritten)
-		dstBitIndex := getBitOffset(w.numBitsWritten)
-		srcBitIndex := getBitOffset(totalBitsToWrite - numBitsToWrite)
-
-		if srcBitIndex > 7 {
-			panic("Invalid source bit index")
-		}
-		if dstBitIndex > 7 {
-			panic("Invalid destination bit index")
-		}
-		if dstByteIndex >= uint32(len(w.bytes)) {
-			w.bytes = append(w.bytes, 0)
-		}
-
-		srcMask := uint8(1) << srcBitIndex
-		dstMask := uint8(1) << dstBitIndex
-
-		if val&srcMask != 0 {
-			w.bytes[dstByteIndex] |= dstMask
-		} else {
-			w.bytes[dstByteIndex] |= 0x00
-		}
-
-		w.numBitsWritten++
-		numBitsToWrite--
+	if numBitsToWrite == 0 {
+		return
 	}
+
+	// Ensure capacity
+	neededBytes := (w.numBitsWritten + numBitsToWrite + 7) / 8
+	for uint32(len(w.bytes)) < neededBytes {
+		w.bytes = append(w.bytes, 0)
+	}
+
+	// Mask val to ensure we only write numBitsToWrite bits
+	val &= (1 << numBitsToWrite) - 1
+
+	dstByteIndex := w.numBitsWritten >> 3
+	dstBitOffset := w.numBitsWritten & 7
+
+	// Calculate how many bits fit in the current byte
+	bitsInFirstByte := 8 - dstBitOffset
+
+	if numBitsToWrite <= bitsInFirstByte {
+		// Fits in one byte
+		w.bytes[dstByteIndex] |= val << dstBitOffset
+	} else {
+		// Spans two bytes
+		// Write first part
+		w.bytes[dstByteIndex] |= val << dstBitOffset
+
+		// Write second part
+		w.bytes[dstByteIndex+1] |= val >> bitsInFirstByte
+	}
+
+	w.numBitsWritten += numBitsToWrite
 }
 
 func (w *Writer) Bytes() []byte {

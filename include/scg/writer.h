@@ -27,35 +27,43 @@ public:
 		serialize(*this, data);
 	}
 
-	inline void writeBits(uint8_t val, uint32_t num_bits_to_write)
+	void writeBits(uint8_t val, uint32_t num_bits_to_write)
 	{
-		uint32_t total_bits_to_write = num_bits_to_write;
-
-		while (num_bits_to_write > 0) {
-			uint32_t dst_byte_index = get_byte_offset(numBitsWritten_);
-			uint8_t dst_bit_index =  get_bit_offset(numBitsWritten_);
-			uint8_t src_bit_index = get_bit_offset(total_bits_to_write - num_bits_to_write);
-
-			assert((src_bit_index <= 7) && "Invalid bit index");
-			assert((dst_bit_index <= 7) && "Invalid bit index");
-
-			uint8_t src_mask = 1 << src_bit_index;
-			uint8_t dst_mask = 1 << dst_bit_index;
-
-			if (val & src_mask) {
-				writeBit(dst_byte_index, dst_mask);
-			} else {
-				writeBit(dst_byte_index, 0x00); // in case it needs to grow
-			}
-
-			numBitsWritten_++;
-			num_bits_to_write--;
+		if (num_bits_to_write == 0) {
+			return;
 		}
+
+		// Mask val to ensure we only write numBitsToWrite bits
+		val &= (1 << num_bits_to_write) - 1;
+
+		uint32_t dstByteIndex = numBitsWritten_ >> 3;
+		uint8_t dstBitOffset = numBitsWritten_ & 7;
+
+		// Ensure capacity
+		ensureCapacity((numBitsWritten_ + num_bits_to_write + 7) / 8);
+
+		// Calculate how many bits fit in the current byte
+		uint8_t bitsInFirstByte = 8 - dstBitOffset;
+
+		if (num_bits_to_write <= bitsInFirstByte) {
+			// Fits in one byte
+			orByte(dstByteIndex, val << dstBitOffset);
+		} else {
+			// Spans two bytes
+			// Write first part
+			orByte(dstByteIndex, val << dstBitOffset);
+
+			// Write second part
+			orByte(dstByteIndex + 1, val >> bitsInFirstByte);
+		}
+
+		numBitsWritten_ += num_bits_to_write;
 	}
 
 protected:
 
-	virtual void writeBit(uint32_t destByteIndex, uint8_t bitMask) = 0;
+	virtual void orByte(uint32_t index, uint8_t mask) = 0;
+	virtual void ensureCapacity(uint32_t size) = 0;
 
 	uint32_t numBitsWritten_ = 0;
 };
@@ -83,12 +91,16 @@ public:
 
 protected:
 
-	inline void writeBit(uint32_t byteIndex, uint8_t mask)
+	void orByte(uint32_t index, uint8_t mask) override
 	{
-		if (byteIndex >= bytes_.size()) {
-			bytes_.push_back(0);
+		bytes_[index] |= mask;
+	}
+
+	void ensureCapacity(uint32_t size) override
+	{
+		if (bytes_.size() < size) {
+			bytes_.resize(size, 0);
 		}
-		bytes_[byteIndex] |= mask;
 	}
 
 private:
@@ -114,12 +126,16 @@ public:
 
 protected:
 
-	inline void writeBit(uint32_t byteIndex, uint8_t mask)
+	void orByte(uint32_t index, uint8_t mask) override
 	{
-		if (byteIndex >= bytes_.size()) {
-			bytes_.push_back(0);
+		bytes_[index] |= mask;
+	}
+
+	void ensureCapacity(uint32_t size) override
+	{
+		if (bytes_.size() < size) {
+			bytes_.resize(size, 0);
 		}
-		bytes_[byteIndex] |= mask;
 	}
 
 private:
@@ -144,18 +160,23 @@ public:
 
 protected:
 
-	inline void writeBit(uint32_t byteIndex, uint8_t mask)
+	void orByte(uint32_t index, uint8_t mask) override
 	{
-		if (byteIndex > currentByteIndex_) {
-			assert((byteIndex == currentByteIndex_ + 1) && "StreamWriter::writeBit() called with a byte index that is not the next byte in the stream");
+		if (index > currentByteIndex_) {
+			assert((index == currentByteIndex_ + 1) && "StreamWriter::orByte() called with a byte index that is not the next byte in the stream");
 			currentByte_ = 0;
-			currentByteIndex_ = byteIndex;
+			currentByteIndex_ = index;
 		}
 
 		currentByte_ |= mask;
 
 		stream_.seekp(currentByteIndex_);
 		stream_.write(reinterpret_cast<const char*>(&currentByte_), 1);
+	}
+
+	void ensureCapacity(uint32_t size) override
+	{
+		// No-op for stream writer
 	}
 
 private:
@@ -192,13 +213,16 @@ public:
 
 protected:
 
-	inline void writeBit(uint32_t byteIndex, uint8_t mask)
+	void orByte(uint32_t index, uint8_t mask) override
 	{
-		assert(byteIndex < bytes_.size() && "FixedSizeWriter::getDestinationByte() called with an index greater than the capacity");
-
-		bytes_[byteIndex] |= mask;
+		assert(index < bytes_.size() && "FixedSizeWriter::orByte() called with an index greater than the capacity");
+		bytes_[index] |= mask;
 	}
 
+	void ensureCapacity(uint32_t size) override
+	{
+		assert(size <= bytes_.size() && "FixedSizeWriter overflow");
+	}
 
 private:
 

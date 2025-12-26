@@ -17,6 +17,7 @@ type Server struct {
 	activeGroup      *ServerGroup
 	running          bool
 	mu               *sync.Mutex
+	middlewareCache  map[uint64][]Middleware
 }
 
 type ServerGroup struct {
@@ -82,6 +83,7 @@ func NewServer(conf ServerConfig) *Server {
 		rootGroup:        rootGroup,
 		activeGroup:      rootGroup,
 		groupByServiceID: make(map[uint64]*ServerGroup),
+		middlewareCache:  make(map[uint64][]Middleware),
 		mu:               &sync.Mutex{},
 	}
 
@@ -134,6 +136,9 @@ func (s *Server) logError(msg string) {
 }
 
 func (s *Server) RegisterServer(id uint64, serviceName string, service serverStub) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	_, ok := s.groupByServiceID[id]
 	if ok {
 		panic(fmt.Sprintf("service with id %d already registered", id))
@@ -161,6 +166,13 @@ func (s *Server) Middleware(m Middleware) {
 }
 
 func (s *Server) getMiddlewareStackForServiceID(serviceID uint64) ([]Middleware, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if stack, ok := s.middlewareCache[serviceID]; ok {
+		return stack, nil
+	}
+
 	group, ok := s.groupByServiceID[serviceID]
 	if !ok {
 		return nil, fmt.Errorf("service with id %d not found", serviceID)
@@ -179,10 +191,14 @@ func (s *Server) getMiddlewareStackForServiceID(serviceID uint64) ([]Middleware,
 		middleware = append(middleware, groups[i].middleware...)
 	}
 
+	s.middlewareCache[serviceID] = middleware
 	return middleware, nil
 }
 
 func (s *Server) getServiceByID(id uint64) (serverStub, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	group, ok := s.groupByServiceID[id]
 	if !ok {
 		return nil, fmt.Errorf("service with id %d not found", id)

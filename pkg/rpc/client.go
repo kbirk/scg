@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"sync"
 
 	"github.com/kbirk/scg/pkg/log"
@@ -28,16 +27,11 @@ type ClientConfig struct {
 	Logger     log.Logger
 }
 
-func seedRequestID() uint64 {
-	return uint64(rand.Uint32())<<32 + uint64(rand.Uint32())
-}
-
 func NewClient(conf ClientConfig) *Client {
 	return &Client{
 		conf:      conf,
 		transport: conf.Transport,
 		mu:        &sync.Mutex{},
-		requestID: seedRequestID(),
 		requests:  make(map[uint64]chan *serialize.Reader),
 	}
 }

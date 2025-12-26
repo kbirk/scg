@@ -16,28 +16,40 @@ func NewReader(data []byte) *Reader {
 }
 
 func (r *Reader) ReadBits(data *byte, numBitsToRead uint32) error {
-	totalBitsToRead := numBitsToRead
-
-	*data = 0
-
-	for numBitsToRead > 0 {
-		srcByteIndex := getByteOffset(r.numBitsRead)
-		srcBitIndex := getBitOffset(r.numBitsRead)
-		dstBitIndex := getBitOffset(totalBitsToRead - numBitsToRead)
-		srcMask := uint32(1) << srcBitIndex
-		dstMask := uint32(1) << dstBitIndex
-
-		if srcByteIndex >= uint32(len(r.bytes)) {
-			return fmt.Errorf("Reader does not contain enough data to fill the argument, num bytes available: %d, num bytes needed: %d", len(r.bytes), srcByteIndex+1)
-		}
-		valByte := r.bytes[srcByteIndex]
-
-		if valByte&byte(srcMask) != 0 {
-			*data |= byte(dstMask)
-		}
-		r.numBitsRead++
-		numBitsToRead--
+	if numBitsToRead == 0 {
+		*data = 0
+		return nil
 	}
 
+	srcByteIndex := r.numBitsRead >> 3
+	srcBitOffset := r.numBitsRead & 7
+
+	if int(srcByteIndex) >= len(r.bytes) {
+		return fmt.Errorf("Reader does not contain enough data to fill the argument, num bytes available: %d, num bytes needed: %d", len(r.bytes), srcByteIndex+1)
+	}
+
+	bitsInFirstByte := 8 - srcBitOffset
+
+	if numBitsToRead <= bitsInFirstByte {
+		// Fits in one byte
+		val := r.bytes[srcByteIndex] >> srcBitOffset
+		mask := byte((1 << numBitsToRead) - 1)
+		*data = val & mask
+	} else {
+		// Spans two bytes
+		if int(srcByteIndex)+1 >= len(r.bytes) {
+			return fmt.Errorf("Reader does not contain enough data to fill the argument, num bytes available: %d, num bytes needed: %d", len(r.bytes), srcByteIndex+2)
+		}
+
+		// Read first part
+		val1 := r.bytes[srcByteIndex] >> srcBitOffset
+		// Read second part
+		val2 := r.bytes[srcByteIndex+1]
+
+		mask2 := byte((1 << (numBitsToRead - bitsInFirstByte)) - 1)
+		*data = val1 | ((val2 & mask2) << bitsInFirstByte)
+	}
+
+	r.numBitsRead += numBitsToRead
 	return nil
 }

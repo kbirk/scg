@@ -228,11 +228,11 @@ inline void serialize(WriterType& writer, float32_t value)
 template <typename ReaderType>
 inline error::Error deserialize(float32_t& value, ReaderType& reader)
 {
-	std::array<uint8_t, 4> bytes;
-	reader.readBits(bytes[0], 8);
-	reader.readBits(bytes[1], 8);
-	reader.readBits(bytes[2], 8);
-	reader.readBits(bytes[3], 8);
+	std::array<uint8_t, 4> bytes{};
+	if (auto err = reader.readBits(bytes[0], 8)) return err;
+	if (auto err = reader.readBits(bytes[1], 8)) return err;
+	if (auto err = reader.readBits(bytes[2], 8)) return err;
+	if (auto err = reader.readBits(bytes[3], 8)) return err;
 
 	uint32_t packed =
 		(static_cast<uint32_t>(bytes[0]) << 24) |
@@ -266,15 +266,15 @@ inline void serialize(WriterType& writer, float64_t value)
 template <typename ReaderType>
 inline error::Error deserialize(float64_t& value, ReaderType& reader)
 {
-	std::array<uint8_t, 8> bytes;
-	reader.readBits(bytes[0], 8);
-	reader.readBits(bytes[1], 8);
-	reader.readBits(bytes[2], 8);
-	reader.readBits(bytes[3], 8);
-	reader.readBits(bytes[4], 8);
-	reader.readBits(bytes[5], 8);
-	reader.readBits(bytes[6], 8);
-	reader.readBits(bytes[7], 8);
+	std::array<uint8_t, 8> bytes{};
+	if (auto err = reader.readBits(bytes[0], 8)) return err;
+	if (auto err = reader.readBits(bytes[1], 8)) return err;
+	if (auto err = reader.readBits(bytes[2], 8)) return err;
+	if (auto err = reader.readBits(bytes[3], 8)) return err;
+	if (auto err = reader.readBits(bytes[4], 8)) return err;
+	if (auto err = reader.readBits(bytes[5], 8)) return err;
+	if (auto err = reader.readBits(bytes[6], 8)) return err;
+	if (auto err = reader.readBits(bytes[7], 8)) return err;
 
 	uint64_t packed =
 		(static_cast<uint64_t>(bytes[0]) << 56) |
@@ -554,7 +554,7 @@ inline error::Error deserialize(std::set<T>& value, ReaderType& reader)
 		return err;
 	}
 	for (auto i = uint32_t(0); i < size; i++) {
-		T t;
+		T t{};
 		err = deserialize(t, reader);
 		if (err) {
 			return err;
@@ -593,7 +593,7 @@ inline error::Error deserialize(std::unordered_set<T>& value, ReaderType& reader
 	}
 	value.reserve(size);
 	for (auto i = uint32_t(0); i < size; i++) {
-		T t;
+		T t{};
 		err = deserialize(t, reader);
 		if (err) {
 			return err;
@@ -626,7 +626,7 @@ template <typename ReaderType, typename T, size_t N>
 inline error::Error deserialize(std::array<T, N>& value, ReaderType& reader)
 {
 	for (auto i = uint32_t(0); i < N; i++) {
-		T t;
+		T t{};
 		auto err = deserialize(t, reader);
 		if (err) {
 			return err;
