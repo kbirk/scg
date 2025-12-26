@@ -92,6 +92,12 @@ public:
 					socket_.close();
 				}
 				if (closeHandler_) closeHandler_();
+
+				// Break potential reference cycles
+				messageHandler_ = nullptr;
+				failHandler_ = nullptr;
+				closeHandler_ = nullptr;
+				write_queue_.clear();
 			});
 		}
 		return nullptr;

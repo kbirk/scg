@@ -95,6 +95,12 @@ public:
 					socket_.lowest_layer().close();
 				}
 				if (closeHandler_) closeHandler_();
+
+				// Break potential reference cycles
+				messageHandler_ = nullptr;
+				failHandler_ = nullptr;
+				closeHandler_ = nullptr;
+				write_queue_.clear();
 			});
 		}
 		return nullptr;
@@ -112,7 +118,9 @@ private:
 						do_write();
 					}
 				} else {
-					if (failHandler_) failHandler_(error::Error(ec.message()));
+					if (failHandler_) {
+						failHandler_(error::Error(ec.message()));
+					}
 					close();
 				}
 			});

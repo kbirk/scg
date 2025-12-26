@@ -30,7 +30,7 @@ struct ClientTransportTLSConfig {
 
 typedef websocketpp::client<websocketpp::config::asio_tls_client> client_tls;
 
-class ConnectionWSTLS : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionWSTLS> {
+class ConnectionWSTLS : public scg::rpc::Connection {
 public:
 	ConnectionWSTLS(client_tls* c, websocketpp::connection_hdl hdl, uint32_t maxSendMessageSize = 0)
 		: client_(c)
@@ -38,6 +38,11 @@ public:
 		, closed_(false)
 		, maxSendMessageSize_(maxSendMessageSize)
 	{
+	}
+
+	~ConnectionWSTLS()
+	{
+		close();
 	}
 
 	error::Error send(const std::vector<uint8_t>& data) override
@@ -102,7 +107,21 @@ public:
 	{
 		if (!closed_) {
 			closed_ = true;
+
+			// Ensure handlers are cleared so they don't run after destruction
+			// and to break potential reference cycles
 			websocketpp::lib::error_code ec;
+			client_tls::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
+			if (!ec) {
+				con->set_message_handler(nullptr);
+				con->set_fail_handler(nullptr);
+				con->set_close_handler(nullptr);
+			}
+
+			messageHandler_ = nullptr;
+			failHandler_ = nullptr;
+			closeHandler_ = nullptr;
+
 			client_->close(hdl_, websocketpp::close::status::normal, "", ec);
 			if (ec) return error::Error(ec.message());
 		}
