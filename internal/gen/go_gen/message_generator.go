@@ -48,7 +48,7 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromJSON(data []b
 {{- if gt (len .MessageFields) 0 }}
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ToBytes() []byte {
 	size := {{.MessageNameFirstLetter}}.BitSize()
-	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	writer := serialize.NewWriter(serialize.BitsToBytes(size))
 	{{.MessageNameFirstLetter}}.Serialize(writer)
 	return writer.Bytes()
 }
@@ -97,7 +97,7 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) BitSize() int {
 }`
 
 const messageSerializeMethodTemplateStr = `
-func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) Serialize(writer *serialize.FixedSizeWriter) {
+func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) Serialize(writer *serialize.Writer) {
 	{{- range .FieldSerializeMethodCalls}}
 	{{.}}{{end}}
 }`
@@ -145,7 +145,7 @@ func {{.FullMethodName}}(arg {{.ArgType}}) int {
 }`
 
 const mapSerializeMethodTemplateStr = `
-func {{.FullMethodName}}(writer *serialize.FixedSizeWriter, arg {{.ArgType}}) error {
+func {{.FullMethodName}}(writer *serialize.Writer, arg {{.ArgType}}) error {
 	serialize.SerializeUInt32(writer, uint32(len(arg)))
 	for k, v := range arg {
 		{{.KeyTypeSerializeMethodCall}}
@@ -190,7 +190,7 @@ func {{.FullMethodName}}(arg {{.ArgType}}) int {
 }`
 
 const listSerializeMethodTemplateStr = `
-func {{.FullMethodName}}(writer *serialize.FixedSizeWriter, arg {{.ArgType}}) error {
+func {{.FullMethodName}}(writer *serialize.Writer, arg {{.ArgType}}) error {
 	serialize.SerializeUInt32(writer, uint32(len(arg)))
 	for _, v := range arg {
 		{{.ValueTypeSerializeMethodCall}}

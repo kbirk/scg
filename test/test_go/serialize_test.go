@@ -30,7 +30,7 @@ func TestSerializeContext(t *testing.T) {
 	input := rpc.NewContextWithMetadata(context.Background(), metadata)
 
 	size := rpc.BitSizeContext(input)
-	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	writer := serialize.NewWriter(serialize.BitsToBytes(size))
 	rpc.SerializeContext(writer, input)
 
 	bs := writer.Bytes()
@@ -47,7 +47,7 @@ func TestSerializeContext(t *testing.T) {
 func TestSerializeEnum(t *testing.T) {
 	input := basic.SomeEnum_ValueA
 	size := input.BitSize()
-	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	writer := serialize.NewWriter(serialize.BitsToBytes(size))
 	input.Serialize(writer)
 
 	bs := writer.Bytes()
@@ -60,7 +60,7 @@ func TestSerializeEnum(t *testing.T) {
 
 	input = basic.SomeEnum_ValueB
 	size = input.BitSize()
-	writer = serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	writer = serialize.NewWriter(serialize.BitsToBytes(size))
 	input.Serialize(writer)
 
 	bs = writer.Bytes()
@@ -102,7 +102,7 @@ func TestSerializeBasic(t *testing.T) {
 		ValByteArray: []byte{1, 2, 3},
 	}
 	size := input.BitSize()
-	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	writer := serialize.NewWriter(serialize.BitsToBytes(size))
 	input.Serialize(writer)
 
 	bs := writer.Bytes()
@@ -186,7 +186,7 @@ func TestSerializeComplicated(t *testing.T) {
 		},
 	}
 	size := input.BitSize()
-	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	writer := serialize.NewWriter(serialize.BitsToBytes(size))
 	input.Serialize(writer)
 
 	bs := writer.Bytes()

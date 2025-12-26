@@ -38,33 +38,47 @@ type serverStub interface {
 }
 
 func RespondWithError(requestID uint64, err error) []byte {
-	writer := serialize.NewFixedSizeWriter(
-		serialize.BitsToBytes(
-			BitSizePrefix() +
-				serialize.BitSizeUInt64(requestID) +
-				serialize.BitSizeUInt8(ErrorResponse) +
-				serialize.BitSizeString(err.Error())))
+	size := serialize.BitsToBytes(
+		BitSizePrefix() +
+			serialize.BitSizeUInt64(requestID) +
+			serialize.BitSizeUInt8(ErrorResponse) +
+			serialize.BitSizeString(err.Error()))
+
+	writer := getWriter(size)
+	defer putWriter(writer)
 
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
 	serialize.SerializeUInt8(writer, ErrorResponse)
 	serialize.SerializeString(writer, err.Error())
-	return writer.Bytes()
+
+	// Copy bytes since we're returning the writer to the pool
+	bs := writer.Bytes()
+	result := make([]byte, len(bs))
+	copy(result, bs)
+	return result
 }
 
 func RespondWithMessage(requestID uint64, msg Message) []byte {
-	writer := serialize.NewFixedSizeWriter(
-		serialize.BitsToBytes(
-			BitSizePrefix() +
-				serialize.BitSizeUInt64(requestID) +
-				serialize.BitSizeUInt8(MessageResponse) +
-				msg.BitSize()))
+	size := serialize.BitsToBytes(
+		BitSizePrefix() +
+			serialize.BitSizeUInt64(requestID) +
+			serialize.BitSizeUInt8(MessageResponse) +
+			msg.BitSize())
+
+	writer := getWriter(size)
+	defer putWriter(writer)
 
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
 	serialize.SerializeUInt8(writer, MessageResponse)
 	msg.Serialize(writer)
-	return writer.Bytes()
+
+	// Copy bytes since we're returning the writer to the pool
+	bs := writer.Bytes()
+	result := make([]byte, len(bs))
+	copy(result, bs)
+	return result
 }
 
 func newServerGroup() *ServerGroup {

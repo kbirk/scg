@@ -28,7 +28,7 @@ mkdir -p .build
 cd .build
 cmake ../test/test_cpp
 # Build only serialization-related targets
-make serialize_tests uuid_tests macro_test
+cmake --build . --target serialize_tests --target uuid_tests --target macro_test
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}C++ serialization tests built successfully${NC}"
 else

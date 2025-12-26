@@ -30,7 +30,7 @@ func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) BitSize() int {
 	return serialize.BitSize{{.EnumUnderlyingTypePascalCase}}(*(*{{.EnumUnderlyingType}})({{.EnumNameNameFirstLetter}}))
 }
 
-func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Serialize(writer *serialize.FixedSizeWriter) {
+func ({{.EnumNameNameFirstLetter}} *{{.EnumNamePascalCase}}) Serialize(writer *serialize.Writer) {
 	serialize.Serialize{{.EnumUnderlyingTypePascalCase}}(writer, *(*{{.EnumUnderlyingType}})({{.EnumNameNameFirstLetter}}))
 }
 

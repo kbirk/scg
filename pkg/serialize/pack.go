@@ -32,7 +32,7 @@ func varUintBitSize(val uint64, numBytes uint32) uint32 {
 	return size
 }
 
-func varEncodeUint(writer *FixedSizeWriter, val uint64, numBytes uint32) {
+func varEncodeUint(writer *Writer, val uint64, numBytes uint32) {
 	for i := uint32(0); i < numBytes; i++ {
 		if val != 0 {
 			writer.WriteBits(1, 1)
@@ -84,7 +84,7 @@ func varIntBitSize(val int64, numBytes uint32) uint32 {
 	return 1 + varUintBitSize(unsignedVal, numBytes)
 }
 
-func varEncodeInt(writer *FixedSizeWriter, val int64, numBytes uint32) {
+func varEncodeInt(writer *Writer, val int64, numBytes uint32) {
 	unsignedVal := uint64(val)
 	if val < 0 {
 		writer.WriteBits(1, 1)

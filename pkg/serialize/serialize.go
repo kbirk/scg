@@ -11,7 +11,7 @@ func BitSizeUUID(data uuid.UUID) int {
 	return BytesToBits(16)
 }
 
-func SerializeUUID(writer *FixedSizeWriter, data uuid.UUID) {
+func SerializeUUID(writer *Writer, data uuid.UUID) {
 	for _, b := range data {
 		writer.WriteBits(b, 8)
 	}
@@ -36,7 +36,7 @@ func BitSizeTime(data time.Time) int {
 	return BitSizeUInt64(uint64(seconds)) + BitSizeUInt64(uint64(nanoseconds))
 }
 
-func SerializeTime(writer *FixedSizeWriter, data time.Time) {
+func SerializeTime(writer *Writer, data time.Time) {
 	timeUTC := data.UTC()
 	seconds := timeUTC.Unix()                                      // number of seconds since Unix epoch
 	nanoseconds := timeUTC.UnixNano() - seconds*int64(time.Second) // remaining nanoseconds
@@ -66,7 +66,7 @@ func BitSizeString(data string) int {
 	return BitSizeUInt32(uint32(ln)) + BytesToBits(ln)
 }
 
-func SerializeString(writer *FixedSizeWriter, data string) {
+func SerializeString(writer *Writer, data string) {
 	SerializeUInt32(writer, uint32(len(data)))
 	for i := 0; i < len(data); i++ {
 		writer.WriteBits(data[i], 8)
@@ -104,7 +104,7 @@ func BitSizeBool(bool) int {
 	return 1
 }
 
-func SerializeBool(writer *FixedSizeWriter, data bool) {
+func SerializeBool(writer *Writer, data bool) {
 	ui := uint8(0)
 	if data {
 		ui = 1
@@ -130,7 +130,7 @@ func BitSizeUInt8(data uint8) int {
 	return 8
 }
 
-func SerializeUInt8(writer *FixedSizeWriter, data uint8) {
+func SerializeUInt8(writer *Writer, data uint8) {
 	writer.WriteBits(data, 8)
 }
 
@@ -142,7 +142,7 @@ func BitSizeUInt16(data uint16) int {
 	return int(varUintBitSize(uint64(data), 2))
 }
 
-func SerializeUInt16(writer *FixedSizeWriter, data uint16) {
+func SerializeUInt16(writer *Writer, data uint16) {
 	varEncodeUint(writer, uint64(data), 2)
 }
 
@@ -160,7 +160,7 @@ func BitSizeUInt32(data uint32) int {
 	return int(varUintBitSize(uint64(data), 4))
 }
 
-func SerializeUInt32(writer *FixedSizeWriter, data uint32) {
+func SerializeUInt32(writer *Writer, data uint32) {
 	varEncodeUint(writer, uint64(data), 4)
 }
 
@@ -178,7 +178,7 @@ func BitSizeUInt64(data uint64) int {
 	return int(varUintBitSize(data, 8))
 }
 
-func SerializeUInt64(writer *FixedSizeWriter, data uint64) {
+func SerializeUInt64(writer *Writer, data uint64) {
 	varEncodeUint(writer, uint64(data), 8)
 }
 
@@ -190,7 +190,7 @@ func BitSizeInt8(data int8) int {
 	return BitSizeUInt8(uint8(data))
 }
 
-func SerializeInt8(writer *FixedSizeWriter, data int8) {
+func SerializeInt8(writer *Writer, data int8) {
 	SerializeUInt8(writer, uint8(data))
 }
 
@@ -208,7 +208,7 @@ func BitSizeInt16(data int16) int {
 	return int(varIntBitSize(int64(data), 2))
 }
 
-func SerializeInt16(writer *FixedSizeWriter, data int16) {
+func SerializeInt16(writer *Writer, data int16) {
 	varEncodeInt(writer, int64(data), 2)
 }
 
@@ -226,7 +226,7 @@ func BitSizeInt32(data int32) int {
 	return int(varIntBitSize(int64(data), 4))
 }
 
-func SerializeInt32(writer *FixedSizeWriter, data int32) {
+func SerializeInt32(writer *Writer, data int32) {
 	varEncodeInt(writer, int64(data), 4)
 }
 
@@ -244,7 +244,7 @@ func BitSizeInt64(data int64) int {
 	return int(varIntBitSize(data, 8))
 }
 
-func SerializeInt64(writer *FixedSizeWriter, data int64) {
+func SerializeInt64(writer *Writer, data int64) {
 	varEncodeInt(writer, data, 8)
 }
 
@@ -256,7 +256,7 @@ func BitSizeFloat32(data float32) int {
 	return BytesToBits(4)
 }
 
-func SerializeFloat32(writer *FixedSizeWriter, data float32) {
+func SerializeFloat32(writer *Writer, data float32) {
 	packed := Pack754_32(data)
 	writer.WriteBits(uint8(packed>>24), 8)
 	writer.WriteBits(uint8(packed>>16), 8)
@@ -285,7 +285,7 @@ func BitSizeFloat64(data float64) int {
 	return BytesToBits(8)
 }
 
-func SerializeFloat64(writer *FixedSizeWriter, data float64) {
+func SerializeFloat64(writer *Writer, data float64) {
 	packed := Pack754_64(data)
 	writer.WriteBits(uint8(packed>>56), 8)
 	writer.WriteBits(uint8(packed>>48), 8)

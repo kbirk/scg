@@ -26,7 +26,7 @@ type Message interface {
 	FromJSON([]byte) error
 	ToBytes() []byte
 	FromBytes([]byte) error
-	Serialize(*serialize.FixedSizeWriter)
+	Serialize(*serialize.Writer)
 	Deserialize(*serialize.Reader) error
 }
 
@@ -34,7 +34,7 @@ func BitSizePrefix() int {
 	return 16 * 8
 }
 
-func SerializePrefix(writer *serialize.FixedSizeWriter, data [16]byte) {
+func SerializePrefix(writer *serialize.Writer, data [16]byte) {
 	for _, b := range data {
 		writer.WriteBits(b, 8)
 	}

@@ -37,7 +37,7 @@ func (c *TCPConnection) Send(data []byte, serviceID uint64) error {
 		return fmt.Errorf("message size %d exceeds send limit %d", length, c.maxSendMessageSize)
 	}
 
-	header := make([]byte, 4)
+	header := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(header, length)
 
 	if _, err := c.conn.Write(header); err != nil {
@@ -50,7 +50,7 @@ func (c *TCPConnection) Send(data []byte, serviceID uint64) error {
 }
 
 func (c *TCPConnection) Receive() ([]byte, error) {
-	header := make([]byte, 4)
+	header := []byte{0, 0, 0, 0}
 	if _, err := io.ReadFull(c.conn, header); err != nil {
 		if err == io.EOF {
 			return nil, fmt.Errorf("connection closed")

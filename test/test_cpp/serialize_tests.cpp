@@ -566,6 +566,116 @@ void test_serialize_macros()
 	TEST_CHECK(inputDerivedPrivate.c() == outputDerivedPrivate.c());
 }
 
+void test_serialize_multiple_types_in_sequence()
+{
+	// Create test data of different types
+	std::string strValue = "Hello, World! 世界";
+	scg::type::uuid uuidValue = scg::type::uuid::random();
+	scg::type::timestamp timeValue;
+	bool boolValue = true;
+	uint8_t uint8Value = 42;
+	uint32_t uint32Value = 12345678;
+	int64_t int64Value = -9876543210;
+	float64_t float64Value = 3.14159;
+
+	// Calculate total size
+	int totalSize = bit_size(strValue) +
+		bit_size(uuidValue) +
+		bit_size(timeValue) +
+		bit_size(boolValue) +
+		bit_size(uint8Value) +
+		bit_size(uint32Value) +
+		bit_size(int64Value) +
+		bit_size(float64Value);
+
+	// Serialize all types into a single buffer
+	scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(totalSize));
+	serialize(writer, strValue);
+	serialize(writer, uuidValue);
+	serialize(writer, timeValue);
+	serialize(writer, boolValue);
+	serialize(writer, uint8Value);
+	serialize(writer, uint32Value);
+	serialize(writer, int64Value);
+	serialize(writer, float64Value);
+
+	// Deserialize all types from the buffer in the same order
+	scg::serialize::Reader reader(writer.bytes());
+
+	std::string strOut;
+	auto err = deserialize(strOut, reader);
+	TEST_CHECK(!err);
+	TEST_CHECK(strValue == strOut);
+
+	scg::type::uuid uuidOut;
+	err = deserialize(uuidOut, reader);
+	TEST_CHECK(!err);
+	TEST_CHECK(uuidValue == uuidOut);
+
+	scg::type::timestamp timeOut;
+	err = deserialize(timeOut, reader);
+	TEST_CHECK(!err);
+	TEST_CHECK(timeValue == timeOut);
+
+	bool boolOut;
+	err = deserialize(boolOut, reader);
+	TEST_CHECK(!err);
+	TEST_CHECK(boolValue == boolOut);
+
+	uint8_t uint8Out;
+	err = deserialize(uint8Out, reader);
+	TEST_CHECK(!err);
+	TEST_CHECK(uint8Value == uint8Out);
+
+	uint32_t uint32Out;
+	err = deserialize(uint32Out, reader);
+	TEST_CHECK(!err);
+	TEST_CHECK(uint32Value == uint32Out);
+
+	int64_t int64Out;
+	err = deserialize(int64Out, reader);
+	TEST_CHECK(!err);
+	TEST_CHECK(int64Value == int64Out);
+
+	float64_t float64Out;
+	err = deserialize(float64Out, reader);
+	TEST_CHECK(!err);
+	TEST_CHECK(float64Value == float64Out);
+}
+
+void test_serialize_multiple_strings_in_sequence()
+{
+	// Test multiple strings back-to-back to ensure boundaries are preserved
+	std::vector<std::string> strings = {
+		"",                                                    // empty string
+		"short",                                               // short string
+		"Hello, World! This is a longer string with unicode 世界", // long string with unicode
+		"another one",                                         // another string
+		"final string with special chars \n\t@#$%"             // special chars
+	};
+
+	// Calculate total size
+	int totalSize = 0;
+	for (const auto& s : strings) {
+		totalSize += bit_size(s);
+	}
+
+	// Serialize all strings
+	scg::serialize::FixedSizeWriter writer(scg::serialize::bits_to_bytes(totalSize));
+	for (const auto& s : strings) {
+		serialize(writer, s);
+	}
+
+	// Deserialize all strings
+	scg::serialize::Reader reader(writer.bytes());
+	for (size_t i = 0; i < strings.size(); i++) {
+		std::string actual;
+		auto err = deserialize(actual, reader);
+		TEST_CHECK(!err);
+		TEST_CHECK(strings[i] == actual);
+	}
+}
+
 // helper method to reduce redundant test typing
 #define TEST(x) {#x, x}
 
@@ -589,6 +699,8 @@ TEST_LIST = {
 	TEST(test_serialize_context),
 	TEST(test_stream_writer_reader),
 	TEST(test_serialize_macros),
+	TEST(test_serialize_multiple_types_in_sequence),
+	TEST(test_serialize_multiple_strings_in_sequence),
 
 	{ NULL, NULL }
 };
