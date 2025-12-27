@@ -9,6 +9,9 @@
 
 #include "pingpong/pingpong.h"
 
+using scg::serialize::float32_t;
+using scg::serialize::float64_t;
+
 // adl trickery
 using scg::serialize::bit_size;
 using scg::serialize::serialize;

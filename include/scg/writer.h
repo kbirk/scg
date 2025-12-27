@@ -7,13 +7,15 @@
 #include <cassert>
 #include <type_traits>
 
-#include "scg/serialize.h"
 #include "scg/pack.h"
 #include "scg/error.h"
 #include "scg/serialize.h"
 
 namespace scg {
 namespace serialize {
+
+// Default initial capacity for Writer buffer
+constexpr uint32_t DEFAULT_WRITER_CAPACITY = 1024;
 
 class IWriter {
 public:
@@ -76,7 +78,7 @@ public:
 
 	inline Writer()
 	{
-		bytes_.reserve(1024);
+		bytes_.reserve(DEFAULT_WRITER_CAPACITY);
 	}
 
 	inline explicit Writer(uint32_t size)

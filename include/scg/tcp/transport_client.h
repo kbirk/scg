@@ -5,6 +5,7 @@
 
 #include "scg/transport.h"
 #include "scg/error.h"
+#include "scg/logger.h"
 #include <memory>
 #include <string>
 #include <thread>
@@ -22,17 +23,20 @@ struct ClientTransportConfig {
 	int port;
 	uint32_t maxSendMessageSize = 0; // 0 for no limit
 	uint32_t maxRecvMessageSize = 0; // 0 for no limit
+	log::LoggingConfig logging;
 };
 
 class ConnectionTCP : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionTCP> {
 public:
-	ConnectionTCP(asio::ip::tcp::socket socket, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0)
+	ConnectionTCP(asio::ip::tcp::socket socket, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0, log::LoggingConfig logging = {})
 		: socket_(std::move(socket))
 		, closed_(false)
 		, maxSendMessageSize_(maxSendMessageSize)
 		, maxRecvMessageSize_(maxRecvMessageSize)
+		, logging_(logging)
 	{
 		socket_.set_option(asio::ip::tcp::no_delay(true));
+		log(log::LogLevel::INFO, "Connection established");
 	}
 
 	error::Error send(const std::vector<uint8_t>& data) override
@@ -85,6 +89,7 @@ public:
 	error::Error close() override
 	{
 		if (!closed_) {
+			log(log::LogLevel::INFO, "Closing connection");
 			closed_ = true;
 			auto self = shared_from_this();
 			asio::post(socket_.get_executor(), [this, self]() {
@@ -115,6 +120,7 @@ private:
 						do_write();
 					}
 				} else {
+					log(log::LogLevel::ERROR, "Write error: " + ec.message());
 					if (failHandler_) failHandler_(error::Error(ec.message()));
 					close();
 				}
@@ -129,13 +135,17 @@ private:
 				if (!ec) {
 					uint32_t len = (read_buffer_[0] << 24) | (read_buffer_[1] << 16) | (read_buffer_[2] << 8) | read_buffer_[3];
 					if (maxRecvMessageSize_ > 0 && len > maxRecvMessageSize_) {
+						log(log::LogLevel::ERROR, "Message size exceeds receive limit");
 						if (failHandler_) failHandler_(error::Error("Message size exceeds receive limit"));
 						close();
 						return;
 					}
 					read_body(len);
 				} else {
-					if (ec != asio::error::eof && failHandler_) failHandler_(error::Error(ec.message()));
+					if (ec != asio::error::eof) {
+						log(log::LogLevel::ERROR, "Read header error: " + ec.message());
+						if (failHandler_) failHandler_(error::Error(ec.message()));
+					}
 					close();
 				}
 			});
@@ -151,6 +161,7 @@ private:
 					if (messageHandler_) messageHandler_(body_buffer_);
 					read_header();
 				} else {
+					log(log::LogLevel::ERROR, "Read body error: " + ec.message());
 					if (failHandler_) failHandler_(error::Error(ec.message()));
 					close();
 				}
@@ -167,6 +178,18 @@ private:
 	std::vector<uint8_t> body_buffer_;
 	uint32_t maxSendMessageSize_;
 	uint32_t maxRecvMessageSize_;
+	log::LoggingConfig logging_;
+
+	void log(log::LogLevel level, const std::string& msg) {
+		if (level < logging_.level) return;
+		switch (level) {
+			case log::LogLevel::DEBUG: if (logging_.debugLogger) logging_.debugLogger(msg); break;
+			case log::LogLevel::INFO: if (logging_.infoLogger) logging_.infoLogger(msg); break;
+			case log::LogLevel::WARN: if (logging_.warnLogger) logging_.warnLogger(msg); break;
+			case log::LogLevel::ERROR: if (logging_.errorLogger) logging_.errorLogger(msg); break;
+			default: break;
+		}
+	}
 };
 
 class ClientTransportTCP : public scg::rpc::ClientTransport
@@ -193,8 +216,9 @@ public:
 			auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
 			asio::ip::tcp::socket socket(io_context_);
 			asio::connect(socket, endpoints);
-			return {std::make_shared<ConnectionTCP>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
+			return {std::make_shared<ConnectionTCP>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize, config_.logging), nullptr};
 		} catch (const std::exception& e) {
+			if (config_.logging.errorLogger) config_.logging.errorLogger("Connect failed: " + std::string(e.what()));
 			return {nullptr, error::Error(e.what())};
 		}
 	}

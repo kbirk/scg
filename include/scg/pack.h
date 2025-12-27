@@ -5,14 +5,15 @@
 
 #include "scg/error.h"
 
-typedef float float32_t;
-typedef double float64_t;
-
 namespace scg {
 namespace serialize {
 
+// Type aliases for float types used in serialization
+using float32_t = float;
+using float64_t = double;
+
 inline constexpr uint32_t bits_to_bytes(uint32_t x) {
-	return static_cast<uint32_t>(std::ceil(x / 8.0f));
+	return (x + 7) / 8;
 }
 
 inline constexpr uint32_t bytes_to_bits(uint32_t x) {

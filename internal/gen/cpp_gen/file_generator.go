@@ -24,6 +24,11 @@ const fileTemplateStr = `
 {{.Header}}
 {{.Imports}}{{ range .Namespaces }}
 namespace {{.}} { {{end}}
+
+// Import float type aliases from scg::serialize namespace
+using scg::serialize::float32_t;
+using scg::serialize::float64_t;
+
 {{.Enums}}
 {{.Typedefs}}
 {{.Consts}}

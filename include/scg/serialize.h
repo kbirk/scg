@@ -219,28 +219,21 @@ template <typename WriterType>
 inline void serialize(WriterType& writer, float32_t value)
 {
 	uint32_t packed = pack754_32(value);
-	writer.writeBits(packed >> 24, 8);
-	writer.writeBits(packed >> 16, 8);
-	writer.writeBits(packed >> 8, 8);
-	writer.writeBits(packed, 8);
+	for (int i = 3; i >= 0; --i) {
+		writer.writeBits((packed >> (i * 8)) & 0xFF, 8);
+	}
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(float32_t& value, ReaderType& reader)
 {
-	std::array<uint8_t, 4> bytes{};
-	if (auto err = reader.readBits(bytes[0], 8)) return err;
-	if (auto err = reader.readBits(bytes[1], 8)) return err;
-	if (auto err = reader.readBits(bytes[2], 8)) return err;
-	if (auto err = reader.readBits(bytes[3], 8)) return err;
-
-	uint32_t packed =
-		(static_cast<uint32_t>(bytes[0]) << 24) |
-		(static_cast<uint32_t>(bytes[1]) << 16) |
-		(static_cast<uint32_t>(bytes[2]) << 8) |
-		bytes[3];
+	uint32_t packed = 0;
+	for (int i = 0; i < 4; ++i) {
+		uint8_t byte = 0;
+		if (auto err = reader.readBits(byte, 8)) return err;
+		packed = (packed << 8) | byte;
+	}
 	value = unpack754_32(packed);
-
 	return nullptr;
 }
 
@@ -253,50 +246,27 @@ template <typename WriterType>
 inline void serialize(WriterType& writer, float64_t value)
 {
 	uint64_t packed = pack754_64(value);
-	writer.writeBits(packed >> 56, 8);
-	writer.writeBits(packed >> 48, 8);
-	writer.writeBits(packed >> 40, 8);
-	writer.writeBits(packed >> 32, 8);
-	writer.writeBits(packed >> 24, 8);
-	writer.writeBits(packed >> 16, 8);
-	writer.writeBits(packed >> 8, 8);
-	writer.writeBits(packed, 8);
+	for (int i = 7; i >= 0; --i) {
+		writer.writeBits((packed >> (i * 8)) & 0xFF, 8);
+	}
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(float64_t& value, ReaderType& reader)
 {
-	std::array<uint8_t, 8> bytes{};
-	if (auto err = reader.readBits(bytes[0], 8)) return err;
-	if (auto err = reader.readBits(bytes[1], 8)) return err;
-	if (auto err = reader.readBits(bytes[2], 8)) return err;
-	if (auto err = reader.readBits(bytes[3], 8)) return err;
-	if (auto err = reader.readBits(bytes[4], 8)) return err;
-	if (auto err = reader.readBits(bytes[5], 8)) return err;
-	if (auto err = reader.readBits(bytes[6], 8)) return err;
-	if (auto err = reader.readBits(bytes[7], 8)) return err;
-
-	uint64_t packed =
-		(static_cast<uint64_t>(bytes[0]) << 56) |
-		(static_cast<uint64_t>(bytes[1]) << 48) |
-		(static_cast<uint64_t>(bytes[2]) << 40) |
-		(static_cast<uint64_t>(bytes[3]) << 32) |
-		(static_cast<uint64_t>(bytes[4]) << 24) |
-		(static_cast<uint64_t>(bytes[5]) << 16) |
-		(static_cast<uint64_t>(bytes[6]) << 8) |
-		bytes[7];
+	uint64_t packed = 0;
+	for (int i = 0; i < 8; ++i) {
+		uint8_t byte = 0;
+		if (auto err = reader.readBits(byte, 8)) return err;
+		packed = (packed << 8) | byte;
+	}
 	value = unpack754_64(packed);
-
 	return nullptr;
 }
 
 inline uint32_t bit_size(const std::string& value)
 {
-	auto size = bit_size(uint32_t(value.size()));
-	for (const auto& c : value) {
-		size += bit_size(uint8_t(c));
-	}
-	return size;
+	return bit_size(uint32_t(value.size())) + (value.size() * 8);
 }
 
 
@@ -449,9 +419,9 @@ template <typename K, typename V, typename WriterType>
 inline void serialize(WriterType& writer, const std::map<K,V>& value)
 {
 	serialize(writer, uint32_t(value.size()));
-	for (const auto& [key, value] : value) {
+	for (const auto& [key, val] : value) {
 		serialize(writer, key);
-		serialize(writer, value);
+		serialize(writer, val);
 	}
 }
 
@@ -494,9 +464,9 @@ template <typename K, typename V, typename WriterType>
 inline void serialize(WriterType& writer, const std::unordered_map<K,V>& value)
 {
 	serialize(writer, uint32_t(value.size()));
-	for (const auto& [key, value] : value) {
+	for (const auto& [key, val] : value) {
 		serialize(writer, key);
-		serialize(writer, value);
+		serialize(writer, val);
 	}
 }
 

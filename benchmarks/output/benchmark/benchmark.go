@@ -13,9 +13,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"time"
-
 	"github.com/google/uuid"
+	"time"
 
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/serialize"

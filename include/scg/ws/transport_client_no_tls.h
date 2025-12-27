@@ -11,6 +11,7 @@
 
 #include "scg/transport.h"
 #include "scg/logger.h"
+#include "scg/ws/logger_override.h"
 
 namespace scg {
 namespace ws {
@@ -25,12 +26,12 @@ struct ClientTransportConfig {
 
 struct WSClientNoTLSConfig : public websocketpp::config::asio_client {
 	// override logger
-	typedef log::LoggerOverride elog_type;
-	typedef log::LoggerOverride alog_type;
+	typedef LoggerOverride elog_type;
+	typedef LoggerOverride alog_type;
 
 	struct transport_config : public websocketpp::config::asio_client::transport_config {
-		typedef log::LoggerOverride elog_type;
-		typedef log::LoggerOverride alog_type;
+		typedef LoggerOverride elog_type;
+		typedef LoggerOverride alog_type;
 	};
 
 	typedef websocketpp::transport::asio::endpoint<transport_config> transport_type;

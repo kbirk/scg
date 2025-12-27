@@ -105,7 +105,7 @@ public:
 
 protected:
 
-	void failPendingRequestsUnsafe(std::string error)
+	void failPendingRequestsUnsafe(const std::string& error)
 	{
 		for (auto& pair : requests_) {
 			pair.second->set_value(createErrorReader(error));

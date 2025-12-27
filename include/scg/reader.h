@@ -86,7 +86,7 @@ public:
 	}
 
 	inline explicit ReaderView(const std::vector<uint8_t>& data)
-		: bytes_(&data[0])
+		: bytes_(data.data())
 		, size_(data.size())
 	{
 	}

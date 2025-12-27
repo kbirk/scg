@@ -17,23 +17,11 @@
 #include "scg/writer.h"
 #include "scg/const.h"
 #include "scg/context.h"
+#include "scg/logger.h"
 #include "scg/middleware.h"
 #include "scg/transport.h"
 
 namespace scg {
-
-// Simple logger interface for server (doesn't depend on websocketpp)
-namespace log {
-	class Logger {
-	public:
-		virtual ~Logger() = default;
-		virtual void debug(const std::string& msg) = 0;
-		virtual void info(const std::string& msg) = 0;
-		virtual void warn(const std::string& msg) = 0;
-		virtual void error(const std::string& msg) = 0;
-	};
-}
-
 namespace rpc {
 
 // Forward declarations
