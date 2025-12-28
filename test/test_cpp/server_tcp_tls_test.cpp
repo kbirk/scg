@@ -11,8 +11,8 @@
 std::atomic<bool> running(true);
 
 void signalHandler(int signum) {
-    printf("Interrupt signal (%d) received.\n", signum);
-    running = false;
+	printf("Interrupt signal (%d) received.\n", signum);
+	running = false;
 }
 
 class PingPongServerImpl : public pingpong::PingPongServer {
@@ -35,46 +35,46 @@ public:
 		return std::make_pair(response, nullptr);
 	}
 };int main() {
-    // Set up signal handler for graceful shutdown
-    signal(SIGINT, signalHandler);
-    signal(SIGTERM, signalHandler);
+	// Set up signal handler for graceful shutdown
+	signal(SIGINT, signalHandler);
+	signal(SIGTERM, signalHandler);
 
-    // Configure transport
-    scg::tcp::ServerTransportTLSConfig transportConfig;
-    transportConfig.port = 9002;
-    transportConfig.certFile = "../test/server.crt";
-    transportConfig.keyFile = "../test/server.key";
+	// Configure transport
+	scg::tcp::ServerTransportTLSConfig transportConfig;
+	transportConfig.port = 9002;
+	transportConfig.certFile = "../test/server.crt";
+	transportConfig.keyFile = "../test/server.key";
 
-    // Configure server
-    scg::rpc::ServerConfig config;
-    config.transport = std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
-    config.errorHandler = [](const scg::error::Error& err) {
-        printf("Server error: %s\n", err.message.c_str());
-    };
+	// Configure server
+	scg::rpc::ServerConfig config;
+	config.transport = std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
+	config.errorHandler = [](const scg::error::Error& err) {
+	printf("Server error: %s\n", err.message.c_str());
+	};
 
-    // Create server
-    auto server = std::make_shared<scg::rpc::Server>(config);
+	// Create server
+	auto server = std::make_shared<scg::rpc::Server>(config);
 
-    // Create and register service implementation
-    auto impl = std::make_shared<PingPongServerImpl>();
-    pingpong::registerPingPongServer(server.get(), impl);
+	// Create and register service implementation
+	auto impl = std::make_shared<PingPongServerImpl>();
+	pingpong::registerPingPongServer(server.get(), impl);
 
-    // Start server in background thread
-    auto err = server->start();
-    if (err) {
-        printf("Failed to start server: %s\n", err.message.c_str());
-        return 1;
-    }
+	// Start server in background thread
+	auto err = server->start();
+	if (err) {
+	printf("Failed to start server: %s\n", err.message.c_str());
+	return 1;
+	}
 
-    printf("TLS TCP Server started on port 9002\n");
+	printf("TLS TCP Server started on port 9002\n");
 
-    // Wait for shutdown signal
-    while (running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+	// Wait for shutdown signal
+	while (running) {
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
 
-    // Stop server
-    server->shutdown();
+	// Stop server
+	server->shutdown();
 
-    return 0;
+	return 0;
 }

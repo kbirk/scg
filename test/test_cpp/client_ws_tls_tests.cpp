@@ -10,27 +10,27 @@
 // ============================================================================
 
 TransportFactory createWebSocketTLSClientTransportFactory() {
-    TransportFactory factory;
-    factory.name = "WebSocket-TLS-Client";
+	TransportFactory factory;
+	factory.name = "WebSocket-TLS-Client";
 
-    // Server transport is not used in external server mode
-    factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-        return nullptr;
-    };
+	// Server transport is not used in external server mode
+	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
+	return nullptr;
+	};
 
-    factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-        scg::ws::ClientTransportTLSConfig transportConfig;
-        transportConfig.host = "localhost";
-        transportConfig.port = 8001;  // Must match Go server port (pingpong_server_ws_tls)
-        // Self-signed cert, skip verification (verifyPeer defaults to false for TLS client)
-        transportConfig.verifyPeer = false;
-        transportConfig.path = "/rpc";
-        return std::make_shared<scg::ws::ClientTransportWSTLS>(transportConfig);
-    };
+	factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
+	scg::ws::ClientTransportTLSConfig transportConfig;
+	transportConfig.host = "localhost";
+	transportConfig.port = 8001;  // Must match Go server port (pingpong_server_ws_tls)
+	// Self-signed cert, skip verification (verifyPeer defaults to false for TLS client)
+	transportConfig.verifyPeer = false;
+	transportConfig.path = "/rpc";
+	return std::make_shared<scg::ws::ClientTransportWSTLS>(transportConfig);
+	};
 
-    factory.createLimitedClientTransport = nullptr;
+	factory.createLimitedClientTransport = nullptr;
 
-    return factory;
+	return factory;
 }
 
 // ============================================================================
@@ -38,20 +38,20 @@ TransportFactory createWebSocketTLSClientTransportFactory() {
 // ============================================================================
 
 void test_websocket_tls_client_suite() {
-    TestSuiteConfig config;
-    config.factory = createWebSocketTLSClientTransportFactory();
-    config.startingId = 0;
-    config.maxRetries = 30;  // WebSocket needs more retries
-    config.useExternalServer = true;  // Connect to external Go server
-    config.skipGroupTests = true;     // Server groups require server control
-    config.skipEdgeTests = true;      // Edge tests require server control
-    runTestSuite(config);
+	TestSuiteConfig config;
+	config.factory = createWebSocketTLSClientTransportFactory();
+	config.startingId = 0;
+	config.maxRetries = 30;  // WebSocket needs more retries
+	config.useExternalServer = true;  // Connect to external Go server
+	config.skipGroupTests = true;     // Server groups require server control
+	config.skipEdgeTests = true;      // Edge tests require server control
+	runTestSuite(config);
 }
 
 // helper method to reduce redundant test typing
 #define TEST(x) {#x, x}
 
 TEST_LIST = {
-    TEST(test_websocket_tls_client_suite),
-    { NULL, NULL }
+	TEST(test_websocket_tls_client_suite),
+	{ NULL, NULL }
 };

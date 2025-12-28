@@ -40,7 +40,7 @@ struct {{.MessageNamePascalCase}} : scg::type::Message { {{- range .MessageField
 };{{if gt (len .MessageFields) 0}}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE({{.MessageNamePascalCase}}, {{.MessageFieldsCommaSeparated}}){{else}}
 inline void to_json(nlohmann::json& j, const {{.MessageNamePascalCase}}& m) {
-    j = nlohmann::json::object();
+	j = nlohmann::json::object();
 }
 
 inline void from_json(const nlohmann::json& j, {{.MessageNamePascalCase}}& m) {

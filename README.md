@@ -163,21 +163,21 @@ The transport layer is defined by three main interfaces:
 ```go
 // Connection represents a bidirectional communication channel
 type Connection interface {
-    Send(data []byte) error
-    Receive() ([]byte, error)
-    Close() error
+	Send(data []byte) error
+	Receive() ([]byte, error)
+	Close() error
 }
 
 // ServerTransport handles incoming connections for the server
 type ServerTransport interface {
-    Listen() error
-    Accept() (Connection, error)
-    Close() error
+	Listen() error
+	Accept() (Connection, error)
+	Close() error
 }
 
 // ClientTransport handles outgoing connections for the client
 type ClientTransport interface {
-    Connect() (Connection, error)
+	Connect() (Connection, error)
 }
 ```
 
@@ -187,23 +187,23 @@ Both client and server code is generated for golang. The server uses a transport
 
 ```go
 import (
-    "github.com/kbirk/scg/pkg/rpc"
-    "github.com/kbirk/scg/pkg/rpc/websocket"
-    "github.com/yourname/repo/pingpong"
+	"github.com/kbirk/scg/pkg/rpc"
+	"github.com/kbirk/scg/pkg/rpc/websocket"
+	"github.com/yourname/repo/pingpong"
 )
 
 // Create server with WebSocket transport
 server := rpc.NewServer(rpc.ServerConfig{
-    Transport: websocket.NewServerTransport(
-        websocket.ServerTransportConfig{
-            Port: 8080,
-            // Optional: for TLS
-            // CertFile: "server.crt",
-            // KeyFile: "server.key",
-        }),
-    ErrHandler: func(err error) {
-        log.Printf("Server error: %v", err)
-    },
+	Transport: websocket.NewServerTransport(
+	websocket.ServerTransportConfig{
+	Port: 8080,
+	// Optional: for TLS
+	// CertFile: "server.crt",
+	// KeyFile: "server.key",
+	}),
+	ErrHandler: func(err error) {
+	log.Printf("Server error: %v", err)
+	},
 })
 
 // Register your service implementation
@@ -227,46 +227,46 @@ C++ server code is available for WebSocket and TCP transports:
 // Implement the service interface
 class PingPongServerImpl : public pingpong::PingPongServer {
 public:
-    std::pair<pingpong::PongResponse, scg::error::Error> ping(
-        const scg::context::Context& ctx,
-        const pingpong::PingRequest& req) override {
+	std::pair<pingpong::PongResponse, scg::error::Error> ping(
+	const scg::context::Context& ctx,
+	const pingpong::PingRequest& req) override {
 
-        pingpong::PongResponse response;
-        response.pong.count = req.ping.count + 1;
-        response.pong.payload = req.ping.payload;
+	pingpong::PongResponse response;
+	response.pong.count = req.ping.count + 1;
+	response.pong.payload = req.ping.payload;
 
-        return std::make_pair(response, nullptr);
-    }
+	return std::make_pair(response, nullptr);
+	}
 };
 
 int main() {
-    // Configure TCP transport
-    scg::tcp::ServerTransportConfig transportConfig;
-    transportConfig.port = 8080;
+	// Configure TCP transport
+	scg::tcp::ServerTransportConfig transportConfig;
+	transportConfig.port = 8080;
 
-    // Configure server
-    scg::rpc::ServerConfig config;
-    config.transport = std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
-    config.errorHandler = [](const scg::error::Error& err) {
-        printf("Server error: %s\n", err.message.c_str());
-    };
+	// Configure server
+	scg::rpc::ServerConfig config;
+	config.transport = std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
+	config.errorHandler = [](const scg::error::Error& err) {
+	printf("Server error: %s\n", err.message.c_str());
+	};
 
-    // Create server
-    auto server = std::make_shared<scg::rpc::Server>(config);
+	// Create server
+	auto server = std::make_shared<scg::rpc::Server>(config);
 
-    // Register service implementation
-    auto impl = std::make_shared<PingPongServerImpl>();
-    pingpong::registerPingPongServer(server.get(), impl);
+	// Register service implementation
+	auto impl = std::make_shared<PingPongServerImpl>();
+	pingpong::registerPingPongServer(server.get(), impl);
 
-    // Start server (starts background threads)
-    server->start();
+	// Start server (starts background threads)
+	server->start();
 
-    // Keep main thread alive
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+	// Keep main thread alive
+	while (true) {
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+	}
 
-    return 0;
+	return 0;
 }
 ```
 
@@ -301,35 +301,35 @@ The client also uses transport-based configuration:
 
 ```go
 import (
-    "context"
-    "github.com/kbirk/scg/pkg/rpc"
-    "github.com/kbirk/scg/pkg/rpc/websocket"
-    "github.com/yourname/repo/pingpong"
+	"context"
+	"github.com/kbirk/scg/pkg/rpc"
+	"github.com/kbirk/scg/pkg/rpc/websocket"
+	"github.com/yourname/repo/pingpong"
 )
 
 // Create client with WebSocket transport
 client := rpc.NewClient(rpc.ClientConfig{
-    Transport: websocket.NewClientTransport(
-        websocket.ClientTransportConfig{
-            Host: "localhost",
-            Port: 8080,
-            // Optional: for TLS
-            // TLSConfig: &tls.Config{...},
-        }),
-    ErrHandler: func(err error) {
-        log.Printf("Client error: %v", err)
-    },
+	Transport: websocket.NewClientTransport(
+	websocket.ClientTransportConfig{
+	Host: "localhost",
+	Port: 8080,
+	// Optional: for TLS
+	// TLSConfig: &tls.Config{...},
+	}),
+	ErrHandler: func(err error) {
+	log.Printf("Client error: %v", err)
+	},
 })
 
 c := pingpong.NewPingPongClient(client)
 
 resp, err := c.Ping(context.Background(), &pingpong.PingRequest{
-    Ping: pingpong.Ping{
-        Count: 0,
-    },
+	Ping: pingpong.Ping{
+	Count: 0,
+	},
 })
 if err != nil {
-    panic(err)
+	panic(err)
 }
 fmt.Println(resp.Pong.Count)
 ```
@@ -339,11 +339,11 @@ fmt.Println(resp.Pong.Count)
 ```go
 // Single client for multiple services
 client := rpc.NewClient(rpc.ClientConfig{
-    Transport: websocket.NewClientTransport(
-        websocket.ClientTransportConfig{
-            Host: "localhost",
-            Port: 8080,
-        }),
+	Transport: websocket.NewClientTransport(
+	websocket.ClientTransportConfig{
+	Host: "localhost",
+	Port: 8080,
+	}),
 })
 
 // Create clients for different services using the same transport
@@ -362,32 +362,32 @@ Both client and server support middleware for cross-cutting concerns:
 ```go
 // Server middleware
 server.Middleware(func(ctx context.Context, next rpc.Handler) rpc.Handler {
-    return func(ctx context.Context, req interface{}) (interface{}, error) {
-        // Pre-processing
-        log.Printf("Handling request...")
+	return func(ctx context.Context, req interface{}) (interface{}, error) {
+	// Pre-processing
+	log.Printf("Handling request...")
 
-        resp, err := next(ctx, req)
+	resp, err := next(ctx, req)
 
-        // Post-processing
-        log.Printf("Request complete")
+	// Post-processing
+	log.Printf("Request complete")
 
-        return resp, err
-    }
+	return resp, err
+	}
 })
 
 // Client middleware
 client.Middleware(func(ctx context.Context, next rpc.Handler) rpc.Handler {
-    return func(ctx context.Context, req interface{}) (interface{}, error) {
-        // Pre-processing
-        log.Printf("Sending request...")
+	return func(ctx context.Context, req interface{}) (interface{}, error) {
+	// Pre-processing
+	log.Printf("Sending request...")
 
-        resp, err := next(ctx, req)
+	resp, err := next(ctx, req)
 
-        // Post-processing
-        log.Printf("Received response")
+	// Post-processing
+	log.Printf("Received response")
 
-        return resp, err
-    }
+	return resp, err
+	}
 })
 ```
 
@@ -413,9 +413,9 @@ req.ping.count = 0;
 
 auto [res, err] = pingPongClient.ping(scg::context::background(), req);
 if (err) {
-    std::cerr << "Request failed: " << err.message() << std::endl;
+	std::cerr << "Request failed: " << err.message() << std::endl;
 } else {
-    std::cout << res.pong.count << std::endl;
+	std::cout << res.pong.count << std::endl;
 }
 ```
 
@@ -439,9 +439,9 @@ req.ping.count = 0;
 
 auto [res, err] = pingPongClient.ping(scg::context::background(), req);
 if (err) {
-    std::cerr << "Request failed: " << err.message() << std::endl;
+	std::cerr << "Request failed: " << err.message() << std::endl;
 } else {
-    std::cout << res.pong.count << std::endl;
+	std::cout << res.pong.count << std::endl;
 }
 ```
 

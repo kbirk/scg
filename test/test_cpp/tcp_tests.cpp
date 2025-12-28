@@ -9,32 +9,32 @@
 // ============================================================================
 
 TransportFactory createTCPTransportFactory() {
-    TransportFactory factory;
-    factory.name = "TCP";
+	TransportFactory factory;
+	factory.name = "TCP";
 
-    factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-        scg::tcp::ServerTransportConfig transportConfig;
-        transportConfig.port = 19000 + id;
-        return std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
-    };
+	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
+	scg::tcp::ServerTransportConfig transportConfig;
+	transportConfig.port = 19000 + id;
+	return std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
+	};
 
-    factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-        scg::tcp::ClientTransportConfig transportConfig;
-        transportConfig.host = "127.0.0.1";
-        transportConfig.port = 19000 + id;
-        return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
-    };
+	factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
+	scg::tcp::ClientTransportConfig transportConfig;
+	transportConfig.host = "127.0.0.1";
+	transportConfig.port = 19000 + id;
+	return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
+	};
 
-    factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-        scg::tcp::ClientTransportConfig transportConfig;
-        transportConfig.host = "127.0.0.1";
-        transportConfig.port = 19000 + id;
-        transportConfig.maxSendMessageSize = 1024;
-        transportConfig.maxRecvMessageSize = 1024;
-        return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
-    };
+	factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
+	scg::tcp::ClientTransportConfig transportConfig;
+	transportConfig.host = "127.0.0.1";
+	transportConfig.port = 19000 + id;
+	transportConfig.maxSendMessageSize = 1024;
+	transportConfig.maxRecvMessageSize = 1024;
+	return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
+	};
 
-    return factory;
+	return factory;
 }
 
 // ============================================================================
@@ -42,36 +42,36 @@ TransportFactory createTCPTransportFactory() {
 // ============================================================================
 
 TransportFactory createTCPTLSTransportFactory() {
-    TransportFactory factory;
-    factory.name = "TCP-TLS";
+	TransportFactory factory;
+	factory.name = "TCP-TLS";
 
-    factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-        scg::tcp::ServerTransportTLSConfig transportConfig;
-        transportConfig.port = 19100 + id;
-        transportConfig.certFile = "../test/server.crt";
-        transportConfig.keyFile = "../test/server.key";
-        return std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
-    };
+	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
+	scg::tcp::ServerTransportTLSConfig transportConfig;
+	transportConfig.port = 19100 + id;
+	transportConfig.certFile = "../test/server.crt";
+	transportConfig.keyFile = "../test/server.key";
+	return std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
+	};
 
-    factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-        scg::tcp::ClientTransportTLSConfig transportConfig;
-        transportConfig.host = "127.0.0.1";
-        transportConfig.port = 19100 + id;
-        transportConfig.verifyPeer = false;  // Self-signed cert
-        return std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
-    };
+	factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
+	scg::tcp::ClientTransportTLSConfig transportConfig;
+	transportConfig.host = "127.0.0.1";
+	transportConfig.port = 19100 + id;
+	transportConfig.verifyPeer = false;  // Self-signed cert
+	return std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
+	};
 
-    factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-        scg::tcp::ClientTransportTLSConfig transportConfig;
-        transportConfig.host = "127.0.0.1";
-        transportConfig.port = 19100 + id;
-        transportConfig.verifyPeer = false;  // Self-signed cert
-        transportConfig.maxSendMessageSize = 1024;
-        transportConfig.maxRecvMessageSize = 1024;
-        return std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
-    };
+	factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
+	scg::tcp::ClientTransportTLSConfig transportConfig;
+	transportConfig.host = "127.0.0.1";
+	transportConfig.port = 19100 + id;
+	transportConfig.verifyPeer = false;  // Self-signed cert
+	transportConfig.maxSendMessageSize = 1024;
+	transportConfig.maxRecvMessageSize = 1024;
+	return std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
+	};
 
-    return factory;
+	return factory;
 }
 
 // ============================================================================
@@ -79,26 +79,26 @@ TransportFactory createTCPTLSTransportFactory() {
 // ============================================================================
 
 void test_tcp_suite() {
-    TestSuiteConfig config;
-    config.factory = createTCPTransportFactory();
-    config.startingId = 0;
-    config.maxRetries = 10;
-    runTestSuite(config);
+	TestSuiteConfig config;
+	config.factory = createTCPTransportFactory();
+	config.startingId = 0;
+	config.maxRetries = 10;
+	runTestSuite(config);
 }
 
 void test_tcp_tls_suite() {
-    TestSuiteConfig config;
-    config.factory = createTCPTLSTransportFactory();
-    config.startingId = 0;
-    config.maxRetries = 10;
-    runTestSuite(config);
+	TestSuiteConfig config;
+	config.factory = createTCPTLSTransportFactory();
+	config.startingId = 0;
+	config.maxRetries = 10;
+	runTestSuite(config);
 }
 
 // helper method to reduce redundant test typing
 #define TEST(x) {#x, x}
 
 TEST_LIST = {
-    TEST(test_tcp_suite),
-    TEST(test_tcp_tls_suite),
-    { NULL, NULL }
+	TEST(test_tcp_suite),
+	TEST(test_tcp_tls_suite),
+	{ NULL, NULL }
 };
