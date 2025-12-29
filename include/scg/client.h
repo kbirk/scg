@@ -182,7 +182,7 @@ protected:
 	{
 		using scg::serialize::bit_size; // adl trickery
 
-		serialize::FixedSizeWriter writer(
+		serialize::Writer writer(
 			scg::serialize::bits_to_bytes(
 				bit_size(ERROR_RESPONSE) +
 				bit_size(err)));
@@ -240,7 +240,7 @@ protected:
 
 		using scg::serialize::bit_size; // adl trickery
 
-		serialize::FixedSizeWriter writer(
+		serialize::Writer writer(
 			scg::serialize::bits_to_bytes(
 				bit_size(REQUEST_PREFIX) +
 				bit_size(ctx) +

@@ -26,7 +26,8 @@ public:
 			bs[8], bs[9], bs[10], bs[11],
 			bs[12], bs[13], bs[14], bs[15]
 		}
-	{}
+	{
+	}
 
 	constexpr inline uuid()
 		: bytes_{

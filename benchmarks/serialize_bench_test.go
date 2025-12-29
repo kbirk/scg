@@ -20,6 +20,19 @@ func BenchmarkSerializeUInt8(b *testing.B) {
 	}
 }
 
+// BenchmarkSerializeUInt8Reuse benchmarks uint8 serialization with reuse
+func BenchmarkSerializeUInt8Reuse(b *testing.B) {
+	var val uint8 = 123
+	writer := serialize.NewWriter(1)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		writer.Reset()
+		serialize.SerializeUInt8(writer, val)
+	}
+}
+
 // BenchmarkDeserializeUInt8 benchmarks uint8 deserialization
 func BenchmarkDeserializeUInt8(b *testing.B) {
 	writer := serialize.NewWriter(1)
@@ -32,6 +45,46 @@ func BenchmarkDeserializeUInt8(b *testing.B) {
 		reader := serialize.NewReader(bs)
 		var val uint8
 		serialize.DeserializeUInt8(&val, reader)
+	}
+}
+
+// BenchmarkSerializeFloat32 benchmarks float32 serialization
+func BenchmarkSerializeFloat32(b *testing.B) {
+	var val float32 = 123.456
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		writer := serialize.NewWriter(4)
+		serialize.SerializeFloat32(writer, val)
+	}
+}
+
+// BenchmarkSerializeFloat32Reuse benchmarks float32 serialization with reuse
+func BenchmarkSerializeFloat32Reuse(b *testing.B) {
+	var val float32 = 123.456
+	writer := serialize.NewWriter(4)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		writer.Reset()
+		serialize.SerializeFloat32(writer, val)
+	}
+}
+
+// BenchmarkDeserializeFloat32 benchmarks float32 deserialization
+func BenchmarkDeserializeFloat32(b *testing.B) {
+	writer := serialize.NewWriter(4)
+	serialize.SerializeFloat32(writer, 123.456)
+	bs := writer.Bytes()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		reader := serialize.NewReader(bs)
+		var val float32
+		serialize.DeserializeFloat32(&val, reader)
 	}
 }
 
@@ -54,6 +107,17 @@ func BenchmarkSerializeUInt32(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				writer := serialize.NewWriter(serialize.BitsToBytes(size))
+				serialize.SerializeUInt32(writer, tc.val)
+			}
+		})
+		b.Run(tc.name+"Reuse", func(b *testing.B) {
+			size := serialize.BitSizeUInt32(tc.val)
+			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				writer.Reset()
 				serialize.SerializeUInt32(writer, tc.val)
 			}
 		})

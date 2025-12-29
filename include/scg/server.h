@@ -468,12 +468,13 @@ private:
 
 		std::string errMsg = err ? err.message : "Unknown error";
 
-		size_t bitSize = bit_size(RESPONSE_PREFIX) +
-						 bit_size(requestID) +
-						 bit_size(ERROR_RESPONSE) +
-						 bit_size(errMsg);
+		size_t bitSize =
+			bit_size(RESPONSE_PREFIX) +
+			bit_size(requestID) +
+			bit_size(ERROR_RESPONSE) +
+			bit_size(errMsg);
 
-		serialize::FixedSizeWriter writer(serialize::bits_to_bytes(bitSize));
+		serialize::Writer writer(serialize::bits_to_bytes(bitSize));
 		writer.write(RESPONSE_PREFIX);
 		writer.write(requestID);
 		writer.write(ERROR_RESPONSE);
@@ -553,12 +554,13 @@ inline std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Er
 
 	std::string errMsg = err ? err.message : "Unknown error";
 
-	size_t bitSize = bit_size(RESPONSE_PREFIX) +
-					 bit_size(requestID) +
-					 bit_size(ERROR_RESPONSE) +
-					 bit_size(errMsg);
+	size_t bitSize =
+		bit_size(RESPONSE_PREFIX) +
+		bit_size(requestID) +
+		bit_size(ERROR_RESPONSE) +
+		bit_size(errMsg);
 
-	serialize::FixedSizeWriter writer(serialize::bits_to_bytes(bitSize));
+	serialize::Writer writer(serialize::bits_to_bytes(bitSize));
 	writer.write(RESPONSE_PREFIX);
 	writer.write(requestID);
 	writer.write(ERROR_RESPONSE);
@@ -573,12 +575,13 @@ std::vector<uint8_t> respondWithMessage(uint64_t requestID, const T& msg)
 {
 	using scg::serialize::bit_size; // ADL trickery
 
-	size_t bitSize = bit_size(RESPONSE_PREFIX) +
-					 bit_size(requestID) +
-					 bit_size(MESSAGE_RESPONSE) +
-					 bit_size(msg);
+	size_t bitSize =
+		bit_size(RESPONSE_PREFIX) +
+		bit_size(requestID) +
+		bit_size(MESSAGE_RESPONSE) +
+		bit_size(msg);
 
-	serialize::FixedSizeWriter writer(serialize::bits_to_bytes(bitSize));
+	serialize::Writer writer(serialize::bits_to_bytes(bitSize));
 	writer.write(RESPONSE_PREFIX);
 	writer.write(requestID);
 	writer.write(MESSAGE_RESPONSE);

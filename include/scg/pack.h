@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <cmath>
+#include <cstring>
+#include <limits>
 
 #include "scg/error.h"
 
@@ -28,19 +30,28 @@ inline constexpr uint8_t get_bit_offset(uint32_t x) {
 	return x & 0x7; // same as (x % 8)
 }
 
+inline constexpr int clz64(uint64_t x) {
+	if (x == 0) return 64;
+	int n = 0;
+	if ((x & 0xFFFFFFFF00000000ULL) == 0) { n += 32; x <<= 32; }
+	if ((x & 0xFFFF000000000000ULL) == 0) { n += 16; x <<= 16; }
+	if ((x & 0xFF00000000000000ULL) == 0) { n += 8;  x <<= 8; }
+	if ((x & 0xF000000000000000ULL) == 0) { n += 4;  x <<= 4; }
+	if ((x & 0xC000000000000000ULL) == 0) { n += 2;  x <<= 2; }
+	if ((x & 0x8000000000000000ULL) == 0) { n += 1; }
+	return n;
+}
+
 inline constexpr uint32_t var_uint_bit_size(uint64_t val, uint32_t num_bytes)
 {
-	uint32_t size = 0;
-	for (uint32_t i = 0; i < num_bytes; ++i) {
-		if (val != 0) {
-			size += 9;
-		} else {
-			size += 1;
-			break;
-		}
-		val >>= 8;
+	if (val == 0) {
+		return 1;
 	}
-	return size;
+	uint32_t k = (71 - clz64(val)) >> 3;
+	if (k < num_bytes) {
+		return k * 9 + 1;
+	}
+	return num_bytes * 9;
 }
 
 template <typename WriterType>

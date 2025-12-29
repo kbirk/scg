@@ -41,7 +41,7 @@ trap cleanup EXIT INT TERM
 # Go WebSocket Tests (Go Client + Go Server)
 # ========================================
 echo -e "${YELLOW}Running Go WebSocket tests (Go Client + Go Server)...${NC}"
-run_with_timeout "Go WebSocket tests" go test -v -count=1 -run "^(TestWebSocket|TestWebSocketTLS)$" ./test/test_go/service_websocket_test.go ./test/test_go/service_test_suite.go ./test/test_go/test_utils.go
+run_with_timeout "Go WebSocket tests" go test -v -count=1 -run "^(TestWebSocket|TestWebSocketTLS)$" ./test/go/service_websocket_test.go ./test/go/service_test_suite.go ./test/go/test_utils.go
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go WebSocket tests passed${NC}"
 else
@@ -53,9 +53,9 @@ fi
 # Build C++ WebSocket Tests
 # ========================================
 echo -e "\n${YELLOW}Building C++ WebSocket tests...${NC}"
-mkdir -p .build
-cd .build
-cmake ../test/test_cpp
+mkdir -p ./test/cpp/build
+cd ./test/cpp/build
+cmake ../
 # Build only WebSocket-related targets
 make ws_tests server_ws_test server_ws_tls_test client_ws_tests client_ws_tls_tests
 if [ $? -eq 0 ]; then
@@ -98,7 +98,7 @@ fi
 echo -e "${GREEN}C++ WebSocket server started (pid: $pid)${NC}"
 
 # Run Go client tests with external server option
-if run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestWebSocketExternalServer ../test/test_go/service_websocket_test.go ../test/test_go/service_test_suite.go ../test/test_go/test_utils.go; then
+if run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestWebSocketExternalServer ../../../test/go/service_websocket_test.go ../../../test/go/service_test_suite.go ../../../test/go/test_utils.go; then
 	echo -e "${GREEN}Go Client + C++ Server tests passed${NC}"
 else
 	echo -e "${RED}Go Client + C++ Server tests failed${NC}"
@@ -130,7 +130,7 @@ fi
 echo -e "${GREEN}C++ WebSocket TLS server started (pid: $pid)${NC}"
 
 # Run Go client TLS tests with external server option
-if run_with_timeout "Go Client + C++ Server TLS tests" go test -v -count=1 -run TestWebSocketTLSExternalServer ../test/test_go/service_websocket_test.go ../test/test_go/service_test_suite.go ../test/test_go/test_utils.go; then
+if run_with_timeout "Go Client + C++ Server TLS tests" go test -v -count=1 -run TestWebSocketTLSExternalServer ../../../test/go/service_websocket_test.go ../../../test/go/service_test_suite.go ../../../test/go/test_utils.go; then
 	echo -e "${GREEN}Go Client + C++ Server TLS tests passed${NC}"
 else
 	echo -e "${RED}Go Client + C++ Server TLS tests failed${NC}"
@@ -150,7 +150,7 @@ sleep 1
 echo -e "\n${YELLOW}Running WebSocket tests (C++ Client + Go Server)...${NC}"
 
 # Build and start Go WebSocket server
-go build -o pingpong_ws ../test/pingpong_server_ws/main.go
+go build -o pingpong_ws ../../../test/go/pingpong_server_ws/main.go
 ./pingpong_ws > server.log 2>&1 &
 pid=$!
 echo "Started Go WebSocket server (PID: $pid)"
@@ -187,8 +187,8 @@ sleep 1
 echo -e "\n${YELLOW}Running WebSocket TLS tests (C++ Client + Go Server)...${NC}"
 
 # Build and start Go WebSocket TLS server
-go build -o pingpong_ws_tls ../test/pingpong_server_ws_tls/main.go
-./pingpong_ws_tls --cert=../test/server.crt --key=../test/server.key > server.log 2>&1 &
+go build -o pingpong_ws_tls ../../../test/go/pingpong_server_ws_tls/main.go
+./pingpong_ws_tls --cert=../../../test/server.crt --key=../../../test/server.key > server.log 2>&1 &
 pid=$!
 echo "Started Go WebSocket TLS server (PID: $pid)"
 

@@ -148,9 +148,9 @@
 #define SCG_APPLY_F_(M, ...) SCG_EXPAND(M(__VA_ARGS__))
 #define SCG_MAP_MEMBER(f, ...) SCG_EXPAND(SCG_APPLY_F_(SCG_CONCAT(SCG_APPLY_F, SCG_NARG(__VA_ARGS__)), f, __VA_ARGS__))
 
-#define SCG_SERIALIZE_MEMBER(MEMBER_NAME)  writer.write(arg.MEMBER_NAME);
-#define SCG_DESERIALIZE_MEMBER(MEMBER_NAME) err = reader.read(arg.MEMBER_NAME); if (err) { return err; }
-
+#define SCG_SERIALIZE_MEMBER(MEMBER_NAME) writer.write(arg.MEMBER_NAME);
+#define SCG_DESERIALIZE_MEMBER(MEMBER_NAME) { err = reader.read(arg.MEMBER_NAME); if (err) return err; }
+#define SCG_BIT_SIZE_MEMBER(MEMBER_NAME) + bit_size(arg.MEMBER_NAME)
 
 // Serialize public fields
 #define SCG_SERIALIZABLE_PUBLIC(...) \
@@ -167,6 +167,10 @@ scg::error::Error deserialize(ClassName&, ReaderType&)\
 {\
 	return nullptr;\
 }\
+inline uint32_t bit_size(const ClassName&)\
+{\
+	return 0;\
+}\
 static_assert(true, "")
 
 #define SCG_SERIALIZABLE_PUBLIC_IMPL_1(ClassName, ...) \
@@ -182,6 +186,11 @@ scg::error::Error deserialize(ClassName& arg, ReaderType& reader)\
 	scg::error::Error err;\
 	SCG_MAP_MEMBER(SCG_DESERIALIZE_MEMBER, __VA_ARGS__)\
 	return nullptr;\
+}\
+inline uint32_t bit_size(const ClassName& arg)\
+{\
+	using scg::serialize::bit_size;\
+	return 0 SCG_MAP_MEMBER(SCG_BIT_SIZE_MEMBER, __VA_ARGS__);\
 }\
 static_assert(true, "")
 
@@ -201,6 +210,10 @@ friend scg::error::Error deserialize(ClassName&, ReaderType&)\
 {\
 	return nullptr;\
 }\
+friend inline uint32_t bit_size(const ClassName&)\
+{\
+	return 0;\
+}\
 static_assert(true, "")
 
 #define SCG_SERIALIZABLE_PRIVATE_IMPL_1(ClassName, ...) \
@@ -216,6 +229,11 @@ friend scg::error::Error deserialize(ClassName& arg, ReaderType& reader)\
 	scg::error::Error err;\
 	SCG_MAP_MEMBER(SCG_DESERIALIZE_MEMBER, __VA_ARGS__)\
 	return nullptr;\
+}\
+friend inline uint32_t bit_size(const ClassName& arg)\
+{\
+	using scg::serialize::bit_size;\
+	return 0 SCG_MAP_MEMBER(SCG_BIT_SIZE_MEMBER, __VA_ARGS__);\
 }\
 static_assert(true, "")
 
@@ -238,6 +256,11 @@ scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
 	if (err) { return err; } \
 	return nullptr;\
 }\
+inline uint32_t bit_size(const DerivedName& arg)\
+{\
+	using scg::serialize::bit_size;\
+	return bit_size(static_cast<const BaseName&>(arg));\
+}\
 static_assert(true, "")
 
 #define SCG_SERIALIZABLE_DERIVED_PUBLIC_IMPL_1(DerivedName, BaseName, ...) \
@@ -255,6 +278,11 @@ scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
 	if (err) { return err; } \
 	SCG_MAP_MEMBER(SCG_DESERIALIZE_MEMBER, __VA_ARGS__)\
 	return nullptr;\
+}\
+inline uint32_t bit_size(const DerivedName& arg)\
+{\
+	using scg::serialize::bit_size;\
+	return bit_size(static_cast<const BaseName&>(arg)) SCG_MAP_MEMBER(SCG_BIT_SIZE_MEMBER, __VA_ARGS__);\
 }\
 static_assert(true, "")
 
@@ -277,6 +305,11 @@ friend scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
 	if (err) { return err; } \
 	return nullptr;\
 }\
+friend inline uint32_t bit_size(const DerivedName& arg)\
+{\
+	using scg::serialize::bit_size;\
+	return bit_size(static_cast<const BaseName&>(arg));\
+}\
 static_assert(true, "")
 
 #define SCG_SERIALIZABLE_DERIVED_PRIVATE_IMPL_1(DerivedName, BaseName, ...) \
@@ -294,5 +327,10 @@ friend scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
 	if (err) { return err; } \
 	SCG_MAP_MEMBER(SCG_DESERIALIZE_MEMBER, __VA_ARGS__)\
 	return nullptr;\
+}\
+friend inline uint32_t bit_size(const DerivedName& arg)\
+{\
+	using scg::serialize::bit_size;\
+	return bit_size(static_cast<const BaseName&>(arg)) SCG_MAP_MEMBER(SCG_BIT_SIZE_MEMBER, __VA_ARGS__);\
 }\
 static_assert(true, "")

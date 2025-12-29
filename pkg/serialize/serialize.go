@@ -1,6 +1,7 @@
 package serialize
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,20 +13,11 @@ func BitSizeUUID(data uuid.UUID) int {
 }
 
 func SerializeUUID(writer *Writer, data uuid.UUID) {
-	for _, b := range data {
-		writer.WriteBits(b, 8)
-	}
+	writer.WriteBytes(data[:])
 }
 
 func DeserializeUUID(data *uuid.UUID, reader *Reader) error {
-	for i := 0; i < 16; i++ {
-		var b byte
-		if err := reader.ReadBits(&b, 8); err != nil {
-			return err
-		}
-		data[i] = b
-	}
-	return nil
+	return reader.ReadBytes(data[:])
 }
 
 func BitSizeTime(data time.Time) int {
@@ -68,9 +60,7 @@ func BitSizeString(data string) int {
 
 func SerializeString(writer *Writer, data string) {
 	SerializeUInt32(writer, uint32(len(data)))
-	for i := 0; i < len(data); i++ {
-		writer.WriteBits(data[i], 8)
-	}
+	writer.WriteBytes([]byte(data))
 }
 
 func DeserializeString(data *string, reader *Reader) error {
@@ -87,6 +77,17 @@ func DeserializeString(data *string, reader *Reader) error {
 	// Single allocation using strings.Builder
 	var b strings.Builder
 	b.Grow(int(length))
+
+	// Fast path for byte-aligned reads
+	if reader.numBitsRead&7 == 0 {
+		byteIndex := reader.numBitsRead >> 3
+		if int(byteIndex)+int(length) > len(reader.bytes) {
+			return fmt.Errorf("Reader does not contain enough data to fill the argument")
+		}
+		*data = string(reader.bytes[byteIndex : byteIndex+length])
+		reader.numBitsRead += length * 8
+		return nil
+	}
 
 	for i := uint32(0); i < length; i++ {
 		var x byte
@@ -131,11 +132,11 @@ func BitSizeUInt8(data uint8) int {
 }
 
 func SerializeUInt8(writer *Writer, data uint8) {
-	writer.WriteBits(data, 8)
+	writer.WriteByte(data)
 }
 
 func DeserializeUInt8(data *uint8, reader *Reader) error {
-	return reader.ReadBits(data, 8)
+	return reader.ReadByte(data)
 }
 
 func BitSizeUInt16(data uint16) int {
@@ -258,19 +259,19 @@ func BitSizeFloat32(data float32) int {
 
 func SerializeFloat32(writer *Writer, data float32) {
 	packed := Pack754_32(data)
-	writer.WriteBits(uint8(packed>>24), 8)
-	writer.WriteBits(uint8(packed>>16), 8)
-	writer.WriteBits(uint8(packed>>8), 8)
-	writer.WriteBits(uint8(packed), 8)
+	writer.WriteByte(uint8(packed >> 24))
+	writer.WriteByte(uint8(packed >> 16))
+	writer.WriteByte(uint8(packed >> 8))
+	writer.WriteByte(uint8(packed))
 }
 
 func DeserializeFloat32(data *float32, reader *Reader) error {
 
 	var a, b, c, d uint8
-	reader.ReadBits(&a, 8)
-	reader.ReadBits(&b, 8)
-	reader.ReadBits(&c, 8)
-	reader.ReadBits(&d, 8)
+	reader.ReadByte(&a)
+	reader.ReadByte(&b)
+	reader.ReadByte(&c)
+	reader.ReadByte(&d)
 
 	packed :=
 		(uint32(a) << 24) |
@@ -287,37 +288,31 @@ func BitSizeFloat64(data float64) int {
 
 func SerializeFloat64(writer *Writer, data float64) {
 	packed := Pack754_64(data)
-	writer.WriteBits(uint8(packed>>56), 8)
-	writer.WriteBits(uint8(packed>>48), 8)
-	writer.WriteBits(uint8(packed>>40), 8)
-	writer.WriteBits(uint8(packed>>32), 8)
-	writer.WriteBits(uint8(packed>>24), 8)
-	writer.WriteBits(uint8(packed>>16), 8)
-	writer.WriteBits(uint8(packed>>8), 8)
-	writer.WriteBits(uint8(packed), 8)
+	writer.WriteByte(uint8(packed >> 56))
+	writer.WriteByte(uint8(packed >> 48))
+	writer.WriteByte(uint8(packed >> 40))
+	writer.WriteByte(uint8(packed >> 32))
+	writer.WriteByte(uint8(packed >> 24))
+	writer.WriteByte(uint8(packed >> 16))
+	writer.WriteByte(uint8(packed >> 8))
+	writer.WriteByte(uint8(packed))
 }
 
 func DeserializeFloat64(data *float64, reader *Reader) error {
+	var bytes [8]byte
+	if err := reader.ReadBytes(bytes[:]); err != nil {
+		return err
+	}
 
-	var a, b, c, d, e, f, g, h uint8
-	reader.ReadBits(&a, 8)
-	reader.ReadBits(&b, 8)
-	reader.ReadBits(&c, 8)
-	reader.ReadBits(&d, 8)
-	reader.ReadBits(&e, 8)
-	reader.ReadBits(&f, 8)
-	reader.ReadBits(&g, 8)
-	reader.ReadBits(&h, 8)
+	packed := (uint64(bytes[0]) << 56) |
+		(uint64(bytes[1]) << 48) |
+		(uint64(bytes[2]) << 40) |
+		(uint64(bytes[3]) << 32) |
+		(uint64(bytes[4]) << 24) |
+		(uint64(bytes[5]) << 16) |
+		(uint64(bytes[6]) << 8) |
+		uint64(bytes[7])
 
-	packed :=
-		(uint64(a) << 56) |
-			(uint64(b) << 48) |
-			(uint64(c) << 40) |
-			(uint64(d) << 32) |
-			(uint64(e) << 24) |
-			(uint64(f) << 16) |
-			(uint64(g) << 8) |
-			uint64(h)
 	*data = Unpack754_64(packed)
 	return nil
 }

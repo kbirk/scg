@@ -10,14 +10,6 @@ func BytesToBits(x int) int {
 	return x << 3 // same as (x * 8)
 }
 
-func getByteOffset(x uint32) uint32 {
-	return x >> 3 // same as (x / 8)
-}
-
-func getBitOffset(x uint32) uint8 {
-	return uint8(x & 0x7) // same as (x % 8)
-}
-
 func varUintBitSize(val uint64, numBytes uint32) uint32 {
 	size := uint32(0)
 	for i := uint32(0); i < numBytes; i++ {

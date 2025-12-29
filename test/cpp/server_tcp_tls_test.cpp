@@ -5,7 +5,7 @@
 #include <csignal>
 
 #include "scg/server.h"
-#include "scg/ws/transport_server_tls.h"
+#include "scg/tcp/transport_server_tls.h"
 #include "pingpong/pingpong.h"
 
 std::atomic<bool> running(true);
@@ -18,46 +18,36 @@ void signalHandler(int signum) {
 class PingPongServerImpl : public pingpong::PingPongServer {
 public:
 	std::pair<pingpong::PongResponse, scg::error::Error> ping(const scg::context::Context& ctx, const pingpong::PingRequest& req) override {
-	// Echo back the payload with incremented count
-	pingpong::PongResponse response;
-	response.pong.count = req.ping.count + 1;
-	response.pong.payload = req.ping.payload;
+		// Check for "sleep" metadata
+		std::string sleepStr;
+		if (!ctx.get(sleepStr, "sleep")) {
+			int sleepMs = std::stoi(sleepStr);
+			if (sleepMs > 0) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+			}
+		}
 
-	return std::make_pair(response, nullptr);
+		// Echo back the payload with incremented count
+		pingpong::PongResponse response;
+		response.pong.count = req.ping.count + 1;
+		response.pong.payload = req.ping.payload;
+
+		return std::make_pair(response, nullptr);
 	}
-};
-
-int main() {
+};int main() {
 	// Set up signal handler for graceful shutdown
 	signal(SIGINT, signalHandler);
 	signal(SIGTERM, signalHandler);
 
-	// Configure logging
-	scg::log::LoggingConfig logging;
-	logging.level = scg::log::LogLevel::INFO;
-	logging.debugLogger = [](std::string msg) {
-	printf("DEBUG: %s\n", msg.c_str());
-	};
-	logging.infoLogger = [](std::string msg) {
-	printf("INFO: %s\n", msg.c_str());
-	};
-	logging.warnLogger = [](std::string msg) {
-	printf("WARN: %s\n", msg.c_str());
-	};
-	logging.errorLogger = [](std::string msg) {
-	printf("ERROR: %s\n", msg.c_str());
-	};
-
-	// Configure transport with TLS
-	scg::ws::ServerTransportTLSConfig transportConfig;
-	transportConfig.port = 8000;
-	transportConfig.certFile = "../test/server.crt";
-	transportConfig.keyFile = "../test/server.key";
-	transportConfig.logging = logging;
+	// Configure transport
+	scg::tcp::ServerTransportTLSConfig transportConfig;
+	transportConfig.port = 9002;
+	transportConfig.certFile = "../../server.crt";
+	transportConfig.keyFile = "../../server.key";
 
 	// Configure server
 	scg::rpc::ServerConfig config;
-	config.transport = std::make_shared<scg::ws::ServerTransportWSTLS>(transportConfig);
+	config.transport = std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
 	config.errorHandler = [](const scg::error::Error& err) {
 	printf("Server error: %s\n", err.message.c_str());
 	};
@@ -76,7 +66,7 @@ int main() {
 	return 1;
 	}
 
-	printf("WebSocket TLS server started on port %d\n", transportConfig.port);
+	printf("TLS TCP Server started on port 9002\n");
 
 	// Wait for shutdown signal
 	while (running) {

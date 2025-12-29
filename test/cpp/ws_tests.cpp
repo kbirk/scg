@@ -48,8 +48,8 @@ TransportFactory createWebSocketTLSTransportFactory() {
 	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
 	scg::ws::ServerTransportTLSConfig transportConfig;
 	transportConfig.port = 18100 + id;
-	transportConfig.certFile = "../test/server.crt";
-	transportConfig.keyFile = "../test/server.key";
+	transportConfig.certFile = "../../server.crt";
+	transportConfig.keyFile = "../../server.key";
 	return std::make_shared<scg::ws::ServerTransportWSTLS>(transportConfig);
 	};
 

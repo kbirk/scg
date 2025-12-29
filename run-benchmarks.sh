@@ -19,3 +19,15 @@ else
 	echo -e "${RED}Go benchmarks failed${NC}"
 	exit 1
 fi
+
+# ========================================
+# C++ Benchmarks
+# ========================================
+echo -e "\n${YELLOW}Building C++ benchmarks...${NC}"
+mkdir -p ./benchmarks/cpp/build
+cd ./benchmarks/cpp/build
+cmake ../
+cmake --build . --target serialize_bench
+
+echo -e "${YELLOW}Running C++ benchmarks...${NC}"
+./serialize_bench

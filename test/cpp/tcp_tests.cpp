@@ -48,8 +48,8 @@ TransportFactory createTCPTLSTransportFactory() {
 	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
 	scg::tcp::ServerTransportTLSConfig transportConfig;
 	transportConfig.port = 19100 + id;
-	transportConfig.certFile = "../test/server.crt";
-	transportConfig.keyFile = "../test/server.key";
+	transportConfig.certFile = "../../server.crt";
+	transportConfig.keyFile = "../../server.key";
 	return std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
 	};
 

@@ -158,11 +158,15 @@ private:
 		asio::async_read(socket_, asio::buffer(body_buffer_),
 			[this, self](std::error_code ec, std::size_t /*length*/) {
 				if (!ec) {
-					if (messageHandler_) messageHandler_(body_buffer_);
+					if (messageHandler_) {
+						messageHandler_(body_buffer_);
+					}
 					read_header();
 				} else {
 					log(log::LogLevel::ERROR, "Read body error: " + ec.message());
-					if (failHandler_) failHandler_(error::Error(ec.message()));
+					if (failHandler_) {
+						failHandler_(error::Error(ec.message()));
+					}
 					close();
 				}
 			});
