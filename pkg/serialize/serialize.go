@@ -2,8 +2,8 @@ package serialize
 
 import (
 	"fmt"
-	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/google/uuid"
 )
@@ -74,30 +74,25 @@ func DeserializeString(data *string, reader *Reader) error {
 		return nil
 	}
 
-	// Single allocation using strings.Builder
-	var b strings.Builder
-	b.Grow(int(length))
-
 	// Fast path for byte-aligned reads
 	if reader.numBitsRead&7 == 0 {
 		byteIndex := reader.numBitsRead >> 3
 		if int(byteIndex)+int(length) > len(reader.bytes) {
 			return fmt.Errorf("Reader does not contain enough data to fill the argument")
 		}
-		*data = string(reader.bytes[byteIndex : byteIndex+length])
+		*data = string(reader.bytes[byteIndex : byteIndex+uint32(length)])
 		reader.numBitsRead += length * 8
 		return nil
 	}
 
-	for i := uint32(0); i < length; i++ {
-		var x byte
-		if err := reader.ReadBits(&x, 8); err != nil {
-			return err
-		}
-		b.WriteByte(x)
+	// Use ReadBytes for optimized unaligned reading
+	buf := make([]byte, length)
+	if err := reader.ReadBytes(buf); err != nil {
+		return err
 	}
-
-	*data = b.String()
+	// NOTE: buf is uniquely allocated and never mutated after this point
+	// Safe zero-copy conversion
+	*data = unsafe.String(&buf[0], len(buf))
 	return nil
 }
 

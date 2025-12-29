@@ -9,6 +9,8 @@
 #include "scg/serialize.h"
 #include "scg/writer.h"
 #include "scg/reader.h"
+#include "scg/uuid.h"
+#include "scg/timestamp.h"
 
 using namespace scg::serialize;
 
@@ -173,6 +175,48 @@ void BenchmarkDeserializeFloat64(int n) {
     }
 }
 
+void BenchmarkSerializeUUID(int n) {
+    scg::type::uuid id = scg::type::uuid::random();
+    for (int i = 0; i < n; ++i) {
+        Writer writer(bits_to_bytes(bit_size(id)));
+        serialize(writer, id);
+    }
+}
+
+void BenchmarkDeserializeUUID(int n) {
+    scg::type::uuid id = scg::type::uuid::random();
+    Writer writer(bits_to_bytes(bit_size(id)));
+    serialize(writer, id);
+    std::vector<uint8_t> data = writer.bytes();
+
+    for (int i = 0; i < n; ++i) {
+        Reader reader(data);
+        scg::type::uuid out;
+        deserialize(out, reader);
+    }
+}
+
+void BenchmarkSerializeTimestamp(int n) {
+    scg::type::timestamp ts;
+    for (int i = 0; i < n; ++i) {
+        Writer writer(bits_to_bytes(bit_size(ts)));
+        serialize(writer, ts);
+    }
+}
+
+void BenchmarkDeserializeTimestamp(int n) {
+    scg::type::timestamp ts;
+    Writer writer(bits_to_bytes(bit_size(ts)));
+    serialize(writer, ts);
+    std::vector<uint8_t> data = writer.bytes();
+
+    for (int i = 0; i < n; ++i) {
+        Reader reader(data);
+        scg::type::timestamp out;
+        deserialize(out, reader);
+    }
+}
+
 void BenchmarkWriteBytesAligned(int n) {
     std::vector<uint8_t> data(1024, 0xAA);
     volatile size_t total_size = 0;
@@ -289,6 +333,7 @@ int main(int argc, char** argv) {
     RunBenchmark("BenchmarkDeserializeString/Empty", [](int n){ BenchmarkDeserializeString(n, ""); });
     RunBenchmark("BenchmarkDeserializeString/Short", [](int n){ BenchmarkDeserializeString(n, "hello"); });
     RunBenchmark("BenchmarkDeserializeString/Medium", [](int n){ BenchmarkDeserializeString(n, "Hello, World! This is a medium length string for benchmarking."); });
+    RunBenchmark("BenchmarkDeserializeString/Long", [](int n){ BenchmarkDeserializeString(n, std::string(1024, 'A')); });
 
     RunBenchmark("BenchmarkSerializeFloat32", BenchmarkSerializeFloat32);
     RunBenchmark("BenchmarkSerializeFloat32Reuse", BenchmarkSerializeFloat32Reuse);
@@ -296,6 +341,11 @@ int main(int argc, char** argv) {
     RunBenchmark("BenchmarkSerializeFloat64", BenchmarkSerializeFloat64);
     RunBenchmark("BenchmarkSerializeFloat64Reuse", BenchmarkSerializeFloat64Reuse);
     RunBenchmark("BenchmarkDeserializeFloat64", BenchmarkDeserializeFloat64);
+
+    RunBenchmark("BenchmarkSerializeUUID", BenchmarkSerializeUUID);
+    RunBenchmark("BenchmarkDeserializeUUID", BenchmarkDeserializeUUID);
+    RunBenchmark("BenchmarkSerializeTimestamp", BenchmarkSerializeTimestamp);
+    RunBenchmark("BenchmarkDeserializeTimestamp", BenchmarkDeserializeTimestamp);
 
     RunBenchmark("BenchmarkWriteBytesAligned", BenchmarkWriteBytesAligned, 1000000);
     RunBenchmark("BenchmarkWriteBytesAlignedReuse", BenchmarkWriteBytesAlignedReuse, 1000000);

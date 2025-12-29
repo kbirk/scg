@@ -12,8 +12,8 @@ import (
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/rpc/tcp"
 	"github.com/kbirk/scg/pkg/rpc/websocket"
-	"github.com/kbirk/scg/test/files/output/basic"
-	"github.com/kbirk/scg/test/files/output/pingpong"
+	"github.com/kbirk/scg/test/scg/generated/basic"
+	"github.com/kbirk/scg/test/scg/generated/pingpong"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

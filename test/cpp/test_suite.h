@@ -19,7 +19,7 @@
 #include "scg/logger.h"
 #include "scg/middleware.h"
 #include "pingpong/pingpong.h"
-#include "../files/output/basic/service.h"
+#include "basic/service.h"
 
 // ============================================================================
 // Transport Factory Interface (similar to Go's TransportFactory)
@@ -249,7 +249,7 @@ public:
 		auto err = server_->start();
 		TEST_CHECK(!err);
 		if (err) {
-			printf("Failed to start server: %s\n", err.message.c_str());
+			printf("Failed to start server: %s\n", err.message().c_str());
 			return;
 		}
 	}
@@ -268,7 +268,7 @@ public:
 		auto err = server_->start();
 		TEST_CHECK(!err);
 		if (err) {
-			printf("Failed to start server: %s\n", err.message.c_str());
+			printf("Failed to start server: %s\n", err.message().c_str());
 			return;
 		}
 	}
@@ -351,7 +351,7 @@ inline void runPingPongTest(TestContext& ctx) {
 		auto [res, err] = pingPongClient.ping(context, req);
 		TEST_CHECK(err == nullptr);
 		if (err) {
-			printf("ERROR: %s\n", err.message.c_str());
+			printf("ERROR: %s\n", err.message().c_str());
 			break;
 		}
 		TEST_CHECK(res.pong.count == int32_t(i+1));
@@ -514,8 +514,8 @@ inline void runAuthFailTest(TestContext& ctx) {
 	auto [res, err] = pingPongClient.ping(context, req);
 	TEST_CHECK(err != nullptr);
 	if (err) {
-		TEST_CHECK(err.message == "invalid token");
-		printf("Got expected error: %s\n", err.message.c_str());
+		TEST_CHECK(err.message() == "invalid token");
+		printf("Got expected error: %s\n", err.message().c_str());
 	}
 
 	client->disconnect();
@@ -579,8 +579,8 @@ inline void runServerErrorTest(TestContext& ctx) {
 	auto [res, err] = pingPongClient.ping(context, req);
 	TEST_CHECK(err != nullptr);
 	if (err) {
-		TEST_CHECK(err.message == "unable to ping the pong");
-		printf("Got expected error: %s\n", err.message.c_str());
+		TEST_CHECK(err.message() == "unable to ping the pong");
+		printf("Got expected error: %s\n", err.message().c_str());
 	}
 
 	client->disconnect();
@@ -627,8 +627,8 @@ inline void runServerGroupsTest(TestContext& ctx) {
 		auto [res, err] = clientA.test(context, req);
 		TEST_CHECK(err != nullptr);
 		if (err) {
-			TEST_CHECK(err.message == "no metadata");
-			printf("TesterA without token: %s (expected)\n", err.message.c_str());
+			TEST_CHECK(err.message() == "no metadata");
+			printf("TesterA without token: %s (expected)\n", err.message().c_str());
 		}
 	}
 
@@ -698,8 +698,8 @@ inline void runServerNestedGroupsTest(TestContext& ctx) {
 		auto [res, err] = clientA.test(context, req);
 		TEST_CHECK(err != nullptr);
 		if (err) {
-			TEST_CHECK(err.message == "no metadata");
-			printf("TesterA without token: %s (expected)\n", err.message.c_str());
+			TEST_CHECK(err.message() == "no metadata");
+			printf("TesterA without token: %s (expected)\n", err.message().c_str());
 		}
 	}
 
@@ -713,8 +713,8 @@ inline void runServerNestedGroupsTest(TestContext& ctx) {
 		auto [res, err] = clientB.test(context, req);
 		TEST_CHECK(err != nullptr);
 		if (err) {
-			TEST_CHECK(err.message == "rejected");
-			printf("TesterB with valid token: %s (expected - rejected by nested middleware)\n", err.message.c_str());
+			TEST_CHECK(err.message() == "rejected");
+			printf("TesterB with valid token: %s (expected - rejected by nested middleware)\n", err.message().c_str());
 		}
 	}
 
@@ -1033,7 +1033,7 @@ inline void runMaxMessageSizeTest(TestContext& ctx) {
 
 		auto [res, err] = pingPongClient.ping(context, req);
 		TEST_CHECK(err != nullptr);
-		if (err) printf("Large message failed as expected: %s\n", err.message.c_str());
+		if (err) printf("Large message failed as expected: %s\n", err.message().c_str());
 	}
 
 	client->disconnect();
@@ -1063,7 +1063,7 @@ inline void runContextTimeoutTest(TestContext& ctx) {
 		auto [res, err] = pingPongClient.ping(context, req);
 		TEST_CHECK(err != nullptr);
 		if (err) {
-			printf("Timeout test passed: %s\n", err.message.c_str());
+			printf("Timeout test passed: %s\n", err.message().c_str());
 		}
 	}
 

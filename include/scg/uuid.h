@@ -189,7 +189,7 @@ inline void from_json(const nlohmann::json& j, scg::type::uuid& uuid)
 {
 	auto [res, err] = scg::type::uuid::fromString(j.get<std::string>());
 	if (err != nullptr) {
-		throw std::runtime_error(err.message);
+		throw std::runtime_error(err.message());
 	}
 	uuid = res;
 }

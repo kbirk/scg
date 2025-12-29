@@ -319,19 +319,25 @@ inline error::Error deserialize(std::string& value, ReaderType& reader)
 
 inline uint32_t bit_size(const error::Error& value)
 {
-	return bit_size(value.message);
+	return bit_size(value.message());
 }
 
 template <typename WriterType>
 inline void serialize(WriterType& writer, const error::Error& value)
 {
-	serialize(writer, value.message);
+	serialize(writer, value.message());
 }
 
 template <typename ReaderType>
 inline error::Error deserialize(error::Error& value, ReaderType& reader)
 {
-	return deserialize(value.message, reader);
+	std::string msg;
+	auto err = deserialize(msg, reader);
+	if (err) {
+		return err;
+	}
+	value = error::Error(msg);
+	return nullptr;
 }
 
 template <typename T,

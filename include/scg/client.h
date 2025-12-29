@@ -137,7 +137,7 @@ protected:
 			std::lock_guard<std::mutex> lock(mu_);
 			status_ = ConnectionStatus::FAILED;
 			// Fail all pending requests
-			failPendingRequestsUnsafe("Connection failed: " + err.message);
+			failPendingRequestsUnsafe("Connection failed: " + err.message());
 		});
 
 		connection_->setCloseHandler([this]() {

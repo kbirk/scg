@@ -57,7 +57,7 @@ int main() {
 	scg::rpc::ServerConfig config;
 	config.transport = std::make_shared<scg::ws::ServerTransportWS>(transportConfig);
 	config.errorHandler = [](const scg::error::Error& err) {
-	printf("Server error: %s\n", err.message.c_str());
+	printf("Server error: %s\n", err.message().c_str());
 	};
 
 	// Create server

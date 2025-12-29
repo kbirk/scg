@@ -7,7 +7,7 @@ import (
 
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/serialize"
-	"github.com/kbirk/scg/test/files/output/basic"
+	"github.com/kbirk/scg/test/scg/generated/basic"
 	"github.com/stretchr/testify/assert"
 )
 

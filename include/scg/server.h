@@ -466,7 +466,7 @@ private:
 	{
 		using scg::serialize::bit_size; // ADL trickery
 
-		std::string errMsg = err ? err.message : "Unknown error";
+		std::string errMsg = err ? err.message() : "Unknown error";
 
 		size_t bitSize =
 			bit_size(RESPONSE_PREFIX) +
@@ -486,12 +486,12 @@ private:
 	// Error handling
 	void handleError(const error::Error& err)
 	{
-		if (err.message == "connection closed") {
+		if (err.message() == "connection closed") {
 			// Normal connection close, don't log as error
 			return;
 		}
 
-		logError("Error: " + err.message);
+		logError("Error: " + err.message());
 
 		if (config_.errorHandler) {
 			config_.errorHandler(err);
@@ -552,7 +552,7 @@ inline std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Er
 {
 	using scg::serialize::bit_size; // ADL trickery
 
-	std::string errMsg = err ? err.message : "Unknown error";
+	std::string errMsg = err ? err.message() : "Unknown error";
 
 	size_t bitSize =
 		bit_size(RESPONSE_PREFIX) +

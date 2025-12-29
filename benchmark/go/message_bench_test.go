@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kbirk/scg/benchmarks/output/benchmark"
+	"github.com/kbirk/scg/benchmark/scg/generated/benchmark"
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/serialize"
 )
