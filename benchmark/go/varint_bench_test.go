@@ -9,6 +9,8 @@ import (
 func BenchmarkVarEncodeUint64(b *testing.B) {
 	writer := serialize.NewWriter(1024)
 	val := uint64(0xDEADBEEFCAFEBABE)
+
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		writer.Reset()
@@ -22,6 +24,7 @@ func BenchmarkVarDecodeUint64(b *testing.B) {
 	serialize.SerializeUInt64(writer, val)
 	data := writer.Bytes()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := serialize.NewReader(data)
@@ -31,11 +34,14 @@ func BenchmarkVarDecodeUint64(b *testing.B) {
 }
 
 func BenchmarkVarEncodeInt64(b *testing.B) {
+	writer := serialize.NewWriter(16)
 	val := int64(-1234567890123456789)
+
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w := serialize.NewWriter(16)
-		serialize.SerializeInt64(w, val)
+		writer.Reset()
+		serialize.SerializeInt64(writer, val)
 	}
 }
 
@@ -45,6 +51,7 @@ func BenchmarkVarDecodeInt64(b *testing.B) {
 	serialize.SerializeInt64(writer, val)
 	data := writer.Bytes()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := serialize.NewReader(data)

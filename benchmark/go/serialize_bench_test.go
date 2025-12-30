@@ -11,22 +11,10 @@ import (
 // BenchmarkSerializeUInt8 benchmarks uint8 serialization
 func BenchmarkSerializeUInt8(b *testing.B) {
 	var val uint8 = 123
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		writer := serialize.NewWriter(1)
-		serialize.SerializeUInt8(writer, val)
-	}
-}
-
-// BenchmarkSerializeUInt8Reuse benchmarks uint8 serialization with reuse
-func BenchmarkSerializeUInt8Reuse(b *testing.B) {
-	var val uint8 = 123
 	writer := serialize.NewWriter(1)
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		writer.Reset()
 		serialize.SerializeUInt8(writer, val)
@@ -39,8 +27,8 @@ func BenchmarkDeserializeUInt8(b *testing.B) {
 	serialize.SerializeUInt8(writer, 123)
 	bs := writer.Bytes()
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := serialize.NewReader(bs)
 		var val uint8
@@ -51,22 +39,10 @@ func BenchmarkDeserializeUInt8(b *testing.B) {
 // BenchmarkSerializeFloat32 benchmarks float32 serialization
 func BenchmarkSerializeFloat32(b *testing.B) {
 	var val float32 = 123.456
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		writer := serialize.NewWriter(4)
-		serialize.SerializeFloat32(writer, val)
-	}
-}
-
-// BenchmarkSerializeFloat32Reuse benchmarks float32 serialization with reuse
-func BenchmarkSerializeFloat32Reuse(b *testing.B) {
-	var val float32 = 123.456
 	writer := serialize.NewWriter(4)
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		writer.Reset()
 		serialize.SerializeFloat32(writer, val)
@@ -79,8 +55,8 @@ func BenchmarkDeserializeFloat32(b *testing.B) {
 	serialize.SerializeFloat32(writer, 123.456)
 	bs := writer.Bytes()
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := serialize.NewReader(bs)
 		var val float32
@@ -102,20 +78,10 @@ func BenchmarkSerializeUInt32(b *testing.B) {
 	for _, tc := range testCases {
 		b.Run(tc.name, func(b *testing.B) {
 			size := serialize.BitSizeUInt32(tc.val)
-
-			b.ResetTimer()
-			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
-				writer := serialize.NewWriter(serialize.BitsToBytes(size))
-				serialize.SerializeUInt32(writer, tc.val)
-			}
-		})
-		b.Run(tc.name+"Reuse", func(b *testing.B) {
-			size := serialize.BitSizeUInt32(tc.val)
 			writer := serialize.NewWriter(serialize.BitsToBytes(size))
 
-			b.ResetTimer()
 			b.ReportAllocs()
+			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				writer.Reset()
 				serialize.SerializeUInt32(writer, tc.val)
@@ -142,8 +108,8 @@ func BenchmarkDeserializeUInt32(b *testing.B) {
 			serialize.SerializeUInt32(writer, tc.val)
 			bs := writer.Bytes()
 
-			b.ResetTimer()
 			b.ReportAllocs()
+			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				reader := serialize.NewReader(bs)
 				var val uint32
@@ -168,11 +134,12 @@ func BenchmarkSerializeString(b *testing.B) {
 	for _, tc := range testCases {
 		b.Run(tc.name, func(b *testing.B) {
 			size := serialize.BitSizeString(tc.val)
+			writer := serialize.NewWriter(serialize.BitsToBytes(size))
 
-			b.ResetTimer()
 			b.ReportAllocs()
+			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				writer := serialize.NewWriter(serialize.BitsToBytes(size))
+				writer.Reset()
 				serialize.SerializeString(writer, tc.val)
 			}
 		})
@@ -198,8 +165,8 @@ func BenchmarkDeserializeString(b *testing.B) {
 			serialize.SerializeString(writer, tc.val)
 			bs := writer.Bytes()
 
-			b.ResetTimer()
 			b.ReportAllocs()
+			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				reader := serialize.NewReader(bs)
 				var val string
@@ -212,11 +179,12 @@ func BenchmarkDeserializeString(b *testing.B) {
 // BenchmarkSerializeUUID benchmarks UUID serialization
 func BenchmarkSerializeUUID(b *testing.B) {
 	id := uuid.New()
+	writer := serialize.NewWriter(16)
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		writer := serialize.NewWriter(16)
+		writer.Reset()
 		serialize.SerializeUUID(writer, id)
 	}
 }
@@ -228,8 +196,8 @@ func BenchmarkDeserializeUUID(b *testing.B) {
 	serialize.SerializeUUID(writer, id)
 	bs := writer.Bytes()
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := serialize.NewReader(bs)
 		var val uuid.UUID
@@ -241,11 +209,12 @@ func BenchmarkDeserializeUUID(b *testing.B) {
 func BenchmarkSerializeTime(b *testing.B) {
 	now := time.Now()
 	size := serialize.BitSizeTime(now)
+	writer := serialize.NewWriter(serialize.BitsToBytes(size))
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+		writer.Reset()
 		serialize.SerializeTime(writer, now)
 	}
 }
@@ -258,8 +227,8 @@ func BenchmarkDeserializeTime(b *testing.B) {
 	serialize.SerializeTime(writer, now)
 	bs := writer.Bytes()
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := serialize.NewReader(bs)
 		var val time.Time
@@ -270,11 +239,12 @@ func BenchmarkDeserializeTime(b *testing.B) {
 // BenchmarkSerializeFloat64 benchmarks float64 serialization
 func BenchmarkSerializeFloat64(b *testing.B) {
 	val := 3.14159265359
+	writer := serialize.NewWriter(8)
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		writer := serialize.NewWriter(8)
+		writer.Reset()
 		serialize.SerializeFloat64(writer, val)
 	}
 }
@@ -286,8 +256,8 @@ func BenchmarkDeserializeFloat64(b *testing.B) {
 	serialize.SerializeFloat64(writer, val)
 	bs := writer.Bytes()
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := serialize.NewReader(bs)
 		var v float64
@@ -298,8 +268,8 @@ func BenchmarkDeserializeFloat64(b *testing.B) {
 // BenchmarkWriterOperations benchmarks low-level writer operations
 func BenchmarkWriterOperations(b *testing.B) {
 	b.Run("Writer", func(b *testing.B) {
-		b.ResetTimer()
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			writer := serialize.NewWriter(1024)
 			for j := 0; j < 100; j++ {
@@ -319,14 +289,90 @@ func BenchmarkReaderOperations(b *testing.B) {
 	}
 	bs := writer.Bytes()
 
-	b.ResetTimer()
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		reader := serialize.NewReader(bs)
 		var val byte
 		for j := 0; j < dataSize; j++ {
 			reader.ReadBits(&val, 8)
 		}
+	}
+}
+
+// BenchmarkWriteBytesAligned benchmarks writing aligned byte slices
+func BenchmarkWriteBytesAligned(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 0xAA
+	}
+	writer := serialize.NewWriter(1024)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		writer.Reset()
+		writer.WriteBytes(data)
+	}
+}
+
+// BenchmarkWriteBytesUnaligned benchmarks writing unaligned byte slices
+func BenchmarkWriteBytesUnaligned(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 0xAA
+	}
+	writer := serialize.NewWriter(1024 + 1)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		writer.Reset()
+		writer.WriteBits(1, 1)
+		writer.WriteBytes(data)
+	}
+}
+
+// BenchmarkReadBytesAligned benchmarks reading aligned byte slices
+func BenchmarkReadBytesAligned(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 0xAA
+	}
+	writer := serialize.NewWriter(1024)
+	writer.WriteBytes(data)
+	bs := writer.Bytes()
+
+	out := make([]byte, 1024)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader := serialize.NewReader(bs)
+		reader.ReadBytes(out)
+	}
+}
+
+// BenchmarkReadBytesUnaligned benchmarks reading unaligned byte slices
+func BenchmarkReadBytesUnaligned(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 0xAA
+	}
+	writer := serialize.NewWriter(1024 + 1)
+	writer.WriteBits(1, 1)
+	writer.WriteBytes(data)
+	bs := writer.Bytes()
+
+	out := make([]byte, 1024)
+
+	var dummy byte
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader := serialize.NewReader(bs)
+		reader.ReadBits(&dummy, 1)
+		reader.ReadBytes(out)
 	}
 }
 
@@ -400,8 +446,8 @@ func BenchmarkComplexMessage(b *testing.B) {
 		}
 		bs := writer.Bytes()
 
-		b.ResetTimer()
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			reader := serialize.NewReader(bs)
 			var result ComplexMessage

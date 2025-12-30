@@ -20,9 +20,13 @@ func BenchmarkGeneratedMessageSmall(b *testing.B) {
 
 	b.Run("Serialize", func(b *testing.B) {
 		size := msg.BitSize()
+
+		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+			writer.Reset()
 			msg.Serialize(writer)
 			_ = writer.Bytes()
 		}
@@ -35,6 +39,8 @@ func BenchmarkGeneratedMessageSmall(b *testing.B) {
 		bs := writer.Bytes()
 
 		b.ReportAllocs()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			reader := serialize.NewReader(bs)
 			var result benchmark.SmallMessage
@@ -58,9 +64,12 @@ func BenchmarkGeneratedMessageEcho(b *testing.B) {
 
 	b.Run("Request/Serialize", func(b *testing.B) {
 		size := req.BitSize()
+		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+			writer.Reset()
 			req.Serialize(writer)
 			_ = writer.Bytes()
 		}
@@ -82,9 +91,12 @@ func BenchmarkGeneratedMessageEcho(b *testing.B) {
 
 	b.Run("Response/Serialize", func(b *testing.B) {
 		size := resp.BitSize()
+		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+			writer.Reset()
 			resp.Serialize(writer)
 			_ = writer.Bytes()
 		}
@@ -160,9 +172,12 @@ func BenchmarkGeneratedMessageProcess(b *testing.B) {
 
 	b.Run("Request/Serialize", func(b *testing.B) {
 		size := req.BitSize()
+		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+			writer.Reset()
 			req.Serialize(writer)
 			_ = writer.Bytes()
 		}
@@ -184,9 +199,12 @@ func BenchmarkGeneratedMessageProcess(b *testing.B) {
 
 	b.Run("Response/Serialize", func(b *testing.B) {
 		size := resp.BitSize()
+		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+			writer.Reset()
 			resp.Serialize(writer)
 			_ = writer.Bytes()
 		}
@@ -229,9 +247,12 @@ func BenchmarkGeneratedMessageNested(b *testing.B) {
 
 	b.Run("Serialize", func(b *testing.B) {
 		size := msg.BitSize()
+		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+			writer.Reset()
 			msg.Serialize(writer)
 			_ = writer.Bytes()
 		}
@@ -282,9 +303,12 @@ func BenchmarkGeneratedMessageLargePayload(b *testing.B) {
 
 	b.Run("1KB/Serialize", func(b *testing.B) {
 		size := req.BitSize()
+		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+			writer.Reset()
 			req.Serialize(writer)
 			_ = writer.Bytes()
 		}
@@ -297,6 +321,8 @@ func BenchmarkGeneratedMessageLargePayload(b *testing.B) {
 		bs := writer.Bytes()
 
 		b.ReportAllocs()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			reader := serialize.NewReader(bs)
 			var result benchmark.LargePayloadRequest
@@ -313,9 +339,12 @@ func BenchmarkGeneratedMessageLargePayload(b *testing.B) {
 
 	b.Run("10KB/Serialize", func(b *testing.B) {
 		size := req.BitSize()
+		writer := serialize.NewWriter(serialize.BitsToBytes(size))
+
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(serialize.BitsToBytes(size))
+			writer.Reset()
 			req.Serialize(writer)
 			_ = writer.Bytes()
 		}
@@ -328,6 +357,8 @@ func BenchmarkGeneratedMessageLargePayload(b *testing.B) {
 		bs := writer.Bytes()
 
 		b.ReportAllocs()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			reader := serialize.NewReader(bs)
 			var result benchmark.LargePayloadRequest
@@ -355,17 +386,19 @@ func BenchmarkFullRPCCycle(b *testing.B) {
 	}
 
 	b.Run("Request/Serialize", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(
-				serialize.BitsToBytes(
-					rpc.BitSizePrefix() +
-						rpc.BitSizeContext(ctx) +
-						serialize.BitSizeUInt64(requestID) +
-						serialize.BitSizeUInt64(serviceID) +
-						serialize.BitSizeUInt64(methodID) +
-						req.BitSize()))
+		writer := serialize.NewWriter(
+			serialize.BitsToBytes(
+				rpc.BitSizePrefix() +
+					rpc.BitSizeContext(ctx) +
+					serialize.BitSizeUInt64(requestID) +
+					serialize.BitSizeUInt64(serviceID) +
+					serialize.BitSizeUInt64(methodID) +
+					req.BitSize()))
 
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			writer.Reset()
 			rpc.SerializePrefix(writer, rpc.RequestPrefix)
 			rpc.SerializeContext(writer, ctx)
 			serialize.SerializeUInt64(writer, requestID)
@@ -377,15 +410,17 @@ func BenchmarkFullRPCCycle(b *testing.B) {
 	})
 
 	b.Run("Response/Serialize", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			writer := serialize.NewWriter(
-				serialize.BitsToBytes(
-					rpc.BitSizePrefix() +
-						serialize.BitSizeUInt64(requestID) +
-						serialize.BitSizeUInt8(rpc.MessageResponse) +
-						resp.BitSize()))
+		writer := serialize.NewWriter(
+			serialize.BitsToBytes(
+				rpc.BitSizePrefix() +
+					serialize.BitSizeUInt64(requestID) +
+					serialize.BitSizeUInt8(rpc.MessageResponse) +
+					resp.BitSize()))
 
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			writer.Reset()
 			rpc.SerializePrefix(writer, rpc.ResponsePrefix)
 			serialize.SerializeUInt64(writer, requestID)
 			serialize.SerializeUInt8(writer, rpc.MessageResponse)
@@ -414,6 +449,7 @@ func BenchmarkFullRPCCycle(b *testing.B) {
 
 	b.Run("Request/Deserialize", func(b *testing.B) {
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			reader := serialize.NewReader(reqBytes)
 
@@ -449,6 +485,7 @@ func BenchmarkFullRPCCycle(b *testing.B) {
 
 	b.Run("Response/Deserialize", func(b *testing.B) {
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			reader := serialize.NewReader(respBytes)
 

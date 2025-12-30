@@ -253,27 +253,16 @@ func BitSizeFloat32(data float32) int {
 }
 
 func SerializeFloat32(writer *Writer, data float32) {
-	packed := Pack754_32(data)
-	writer.WriteByte(uint8(packed >> 24))
-	writer.WriteByte(uint8(packed >> 16))
-	writer.WriteByte(uint8(packed >> 8))
-	writer.WriteByte(uint8(packed))
+	writer.WriteBytes(PackFloat32(data))
 }
 
 func DeserializeFloat32(data *float32, reader *Reader) error {
-
-	var a, b, c, d uint8
-	reader.ReadByte(&a)
-	reader.ReadByte(&b)
-	reader.ReadByte(&c)
-	reader.ReadByte(&d)
-
-	packed :=
-		(uint32(a) << 24) |
-			(uint32(b) << 16) |
-			(uint32(c) << 8) |
-			uint32(d)
-	*data = Unpack754_32(packed)
+	b := []byte{0, 0, 0, 0}
+	err := reader.ReadBytes(b)
+	if err != nil {
+		return err
+	}
+	*data = UnpackFloat32(b)
 	return nil
 }
 
@@ -282,32 +271,15 @@ func BitSizeFloat64(data float64) int {
 }
 
 func SerializeFloat64(writer *Writer, data float64) {
-	packed := Pack754_64(data)
-	writer.WriteByte(uint8(packed >> 56))
-	writer.WriteByte(uint8(packed >> 48))
-	writer.WriteByte(uint8(packed >> 40))
-	writer.WriteByte(uint8(packed >> 32))
-	writer.WriteByte(uint8(packed >> 24))
-	writer.WriteByte(uint8(packed >> 16))
-	writer.WriteByte(uint8(packed >> 8))
-	writer.WriteByte(uint8(packed))
+	writer.WriteBytes(PackFloat64(data))
 }
 
 func DeserializeFloat64(data *float64, reader *Reader) error {
-	var bytes [8]byte
-	if err := reader.ReadBytes(bytes[:]); err != nil {
+	b := []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	err := reader.ReadBytes(b)
+	if err != nil {
 		return err
 	}
-
-	packed := (uint64(bytes[0]) << 56) |
-		(uint64(bytes[1]) << 48) |
-		(uint64(bytes[2]) << 40) |
-		(uint64(bytes[3]) << 32) |
-		(uint64(bytes[4]) << 24) |
-		(uint64(bytes[5]) << 16) |
-		(uint64(bytes[6]) << 8) |
-		uint64(bytes[7])
-
-	*data = Unpack754_64(packed)
+	*data = UnpackFloat64(b)
 	return nil
 }

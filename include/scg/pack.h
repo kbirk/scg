@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <array>
 
 #include "scg/error.h"
 
@@ -158,83 +159,70 @@ inline error::Error var_decode_int(int64_t& val, ReaderType& reader, uint32_t nu
 	return nullptr;
 }
 
-/**
- * Bit packing macros
- * Brian "Beej Jorgensen" Hall
- * http://beej.us/guide/bgnet/output/html/singlepage/bgnet.html#serialization
- */
-#define pack754_32(f) (static_cast<uint32_t>(pack754((f), 32, 8)))
-#define pack754_64(f) (pack754((f), 64, 11))
-#define unpack754_32(i) (static_cast<float32_t>(unpack754((i), 32, 8)))
-#define unpack754_64(i) (unpack754((i), 64, 11))
 
-inline constexpr uint64_t pack754(float64_t f, uint32_t bits, uint32_t expbits)
+static_assert(std::numeric_limits<float32_t>::is_iec559, "Requires IEEE-754 float32_t");
+static_assert(std::numeric_limits<float64_t>::is_iec559, "Requires IEEE-754 float64_t");
+static_assert(sizeof(float32_t) == 4, "float32_t must be 32-bit");
+static_assert(sizeof(float64_t) == 8, "float64_t must be 64-bit");
+
+inline std::array<std::uint8_t, 4> pack_float32(float32_t f)
 {
-	float64_t fnorm = 0;
-	int32_t shift = 0;
-	int64_t sign = 0;
-	int64_t expo = 0;
-	int64_t significand = 0;
-	uint32_t significandbits = bits - expbits - 1; // -1 for sign bit
-	if (f == 0.0) {
-		// get this special case out of the way
-		return 0;
-	}
-	// check sign and begin normalization
-	if (f < 0) {
-		sign = 1;
-		fnorm = -f;
-	} else {
-		sign = 0;
-		fnorm = f;
-	}
-	// get the normalized form of f and track the exponent
-	shift = 0;
-	while (fnorm >= 2.0) {
-		fnorm /= 2.0;
-		shift++;
-	}
-	while (fnorm < 1.0) {
-		fnorm *= 2.0;
-		shift--;
-	}
-	fnorm = fnorm - 1.0;
-	// calculate the binary form (non-float) of the significand data
-	significand = fnorm * ((1LL << significandbits) + 0.5f);
-	// get the biased exponent
-	expo = shift + ((1 << (expbits - 1)) - 1); // shift + bias
-	// return the final answer
-	return (sign << (bits - 1)) | (expo << (bits - expbits - 1)) | significand;
+	std::uint32_t bits;
+	std::memcpy(&bits, &f, sizeof(bits));
+
+	return {
+		static_cast<uint8_t>(bits >> 24),
+		static_cast<uint8_t>(bits >> 16),
+		static_cast<uint8_t>(bits >> 8),
+		static_cast<uint8_t>(bits)
+	};
 }
 
-inline constexpr float64_t unpack754(uint64_t i, uint32_t bits, uint32_t expbits)
+inline std::array<std::uint8_t, 8> pack_float64(float64_t f)
 {
-	float64_t result = 0;
-	int64_t shift = 0;
-	uint32_t bias = 0;
-	uint32_t significandbits = bits - expbits - 1; // -1 for sign bit
-	if (i == 0) {
-		// get this special case out of the way
-		return 0.0;
-	}
-	// pull the significand
-	result = (i & ((1LL << significandbits) - 1)); // mask
-	result /= (1LL << significandbits); // convert back to float
-	result += 1.0f; // add the one back on
-	// deal with the exponent
-	bias = (1 << (expbits - 1)) - 1;
-	shift = ((i >> significandbits) & ((1LL << expbits) - 1)) - bias;
-	while (shift > 0) {
-		result *= 2.0;
-		shift--;
-	}
-	while (shift < 0) {
-		result /= 2.0;
-		shift++;
-	}
-	// sign it
-	result *= (i >> (bits - 1)) & 1 ? -1.0 : 1.0;
-	return result;
+	std::uint64_t bits;
+	std::memcpy(&bits, &f, sizeof(bits));
+
+	return {
+		static_cast<uint8_t>(bits >> 56),
+		static_cast<uint8_t>(bits >> 48),
+		static_cast<uint8_t>(bits >> 40),
+		static_cast<uint8_t>(bits >> 32),
+		static_cast<uint8_t>(bits >> 24),
+		static_cast<uint8_t>(bits >> 16),
+		static_cast<uint8_t>(bits >> 8),
+		static_cast<uint8_t>(bits)
+	};
+}
+
+inline float32_t unpack_float32(const std::uint8_t* b)
+{
+	std::uint32_t bits =
+		(std::uint32_t(b[0]) << 24) |
+		(std::uint32_t(b[1]) << 16) |
+		(std::uint32_t(b[2]) << 8)  |
+		(std::uint32_t(b[3]));
+
+	float32_t f;
+	std::memcpy(&f, &bits, sizeof(f));
+	return f;
+}
+
+inline float64_t unpack_float64(const std::uint8_t* b)
+{
+	std::uint64_t bits =
+		(std::uint64_t(b[0]) << 56) |
+		(std::uint64_t(b[1]) << 48) |
+		(std::uint64_t(b[2]) << 40) |
+		(std::uint64_t(b[3]) << 32) |
+		(std::uint64_t(b[4]) << 24) |
+		(std::uint64_t(b[5]) << 16) |
+		(std::uint64_t(b[6]) << 8)  |
+		(std::uint64_t(b[7]));
+
+	float64_t d;
+	std::memcpy(&d, &bits, sizeof(d));
+	return d;
 }
 
 }

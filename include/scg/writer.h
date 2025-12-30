@@ -13,6 +13,8 @@
 #include "scg/error.h"
 #include "scg/serialize.h"
 
+#define ENSURE_CAPACITY(cn, s) assert((s) <= bytes_.size() && cn " overflow: insufficient capacity");
+
 namespace scg {
 namespace serialize {
 
@@ -51,21 +53,17 @@ public:
 		uint8_t dstBitOffset = numBitsWritten_ & 7;
 
 		// Ensure capacity
-		ensureCapacity((numBitsWritten_ + num_bits_to_write + 7) / 8);
+		ENSURE_CAPACITY("Writer", (numBitsWritten_ + num_bits_to_write + 7) / 8);
 
 		// Calculate how many bits fit in the current byte
 		uint8_t bitsInFirstByte = 8 - dstBitOffset;
 
-		if (num_bits_to_write <= bitsInFirstByte) {
-			// Fits in one byte
-			orByte(dstByteIndex, val << dstBitOffset);
-		} else {
-			// Spans two bytes
-			// Write first part
-			orByte(dstByteIndex, val << dstBitOffset);
+		// Write first part
+		bytes_[dstByteIndex] |= val << dstBitOffset;
 
-			// Write second part
-			orByte(dstByteIndex + 1, val >> bitsInFirstByte);
+		if (num_bits_to_write > bitsInFirstByte) {
+			// Spans two bytes, write second part
+			bytes_[dstByteIndex + 1] |= val >> bitsInFirstByte;
 		}
 
 		numBitsWritten_ += num_bits_to_write;
@@ -75,7 +73,7 @@ public:
 	{
 		if ((numBitsWritten_ & 7) == 0) {
 			uint32_t byteIndex = numBitsWritten_ >> 3;
-			ensureCapacity(byteIndex + 1);
+			ENSURE_CAPACITY("Writer", byteIndex + 1);
 			bytes_[byteIndex] = val;
 			numBitsWritten_ += 8;
 		} else {
@@ -89,14 +87,12 @@ public:
 			return;
 		}
 		if ((numBitsWritten_ & 7) == 0) {
-			uint32_t needed = (numBitsWritten_ >> 3) + size;
-			ensureCapacity(needed);
+			ENSURE_CAPACITY("Writer", (numBitsWritten_ >> 3) + size);
 			uint32_t startByte = numBitsWritten_ >> 3;
 			std::copy(data, data + size, bytes_.begin() + startByte);
 			numBitsWritten_ += size * 8;
 		} else {
-			uint32_t needed = (numBitsWritten_ + size * 8 + 7) / 8;
-			ensureCapacity(needed);
+			ENSURE_CAPACITY("Writer", (numBitsWritten_ + size * 8 + 7) / 8);
 			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
 			numBitsWritten_ += size * 8;
 		}
@@ -108,16 +104,6 @@ public:
 	}
 
 private:
-
-	void orByte(uint32_t index, uint8_t mask)
-	{
-		bytes_[index] |= mask;
-	}
-
-	void ensureCapacity(uint32_t size)
-	{
-		assert(size <= bytes_.size() && "Writer overflow: insufficient capacity");
-	}
 
 	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
 	{
@@ -161,6 +147,7 @@ public:
 	inline explicit WriterView(std::vector<uint8_t>& data)
 		: bytes_(data)
 	{
+		assert(!data.empty() && "WriterView must be created with non-zero size");
 	}
 
 	template <typename T>
@@ -182,21 +169,17 @@ public:
 		uint8_t dstBitOffset = numBitsWritten_ & 7;
 
 		// Ensure capacity
-		ensureCapacity((numBitsWritten_ + num_bits_to_write + 7) / 8);
+		ENSURE_CAPACITY("WriterView", (numBitsWritten_ + num_bits_to_write + 7) / 8);
 
 		// Calculate how many bits fit in the current byte
 		uint8_t bitsInFirstByte = 8 - dstBitOffset;
 
-		if (num_bits_to_write <= bitsInFirstByte) {
-			// Fits in one byte
-			orByte(dstByteIndex, val << dstBitOffset);
-		} else {
-			// Spans two bytes
-			// Write first part
-			orByte(dstByteIndex, val << dstBitOffset);
+		// Write first part
+		bytes_[dstByteIndex] |= val << dstBitOffset;
 
-			// Write second part
-			orByte(dstByteIndex + 1, val >> bitsInFirstByte);
+		if (num_bits_to_write > bitsInFirstByte) {
+			// Spans two bytes, write second part
+			bytes_[dstByteIndex + 1] |= val >> bitsInFirstByte;
 		}
 
 		numBitsWritten_ += num_bits_to_write;
@@ -206,7 +189,7 @@ public:
 	{
 		if ((numBitsWritten_ & 7) == 0) {
 			uint32_t byteIndex = numBitsWritten_ >> 3;
-			ensureCapacity(byteIndex + 1);
+			ENSURE_CAPACITY("WriterView", byteIndex + 1);
 			bytes_[byteIndex] = val;
 			numBitsWritten_ += 8;
 		} else {
@@ -220,14 +203,12 @@ public:
 			return;
 		}
 		if ((numBitsWritten_ & 7) == 0) {
-			uint32_t needed = (numBitsWritten_ >> 3) + size;
-			ensureCapacity(needed);
+			ENSURE_CAPACITY("WriterView", (numBitsWritten_ >> 3) + size);
 			uint32_t startByte = numBitsWritten_ >> 3;
 			std::copy(data, data + size, bytes_.begin() + startByte);
 			numBitsWritten_ += size * 8;
 		} else {
-			uint32_t needed = (numBitsWritten_ + size * 8 + 7) / 8;
-			ensureCapacity(needed);
+			ENSURE_CAPACITY("WriterView", (numBitsWritten_ + size * 8 + 7) / 8);
 			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
 			numBitsWritten_ += size * 8;
 		}
@@ -239,16 +220,6 @@ public:
 	}
 
 private:
-
-	void orByte(uint32_t index, uint8_t mask)
-	{
-		bytes_[index] |= mask;
-	}
-
-	void ensureCapacity(uint32_t size)
-	{
-		assert(size <= bytes_.size() && "WriterView overflow: insufficient capacity");
-	}
 
 	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
 	{
