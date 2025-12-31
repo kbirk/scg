@@ -16,14 +16,14 @@ TransportFactory createTCPClientTransportFactory() {
 	// Server transport is not used in external server mode, but we need to provide it
 	// to satisfy the interface. It won't be called.
 	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-	return nullptr;
+		return nullptr;
 	};
 
 	factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-	scg::tcp::ClientTransportConfig transportConfig;
-	transportConfig.host = "127.0.0.1";
-	transportConfig.port = 9001;  // Must match Go server port (pingpong_server_tcp)
-	return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
+		scg::tcp::ClientTransportConfig transportConfig;
+		transportConfig.host = "127.0.0.1";
+		transportConfig.port = 9001;  // Must match Go server port (pingpong_server_tcp)
+		return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
 	};
 
 	factory.createLimitedClientTransport = nullptr;

@@ -13,25 +13,25 @@ TransportFactory createTCPTransportFactory() {
 	factory.name = "TCP";
 
 	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-	scg::tcp::ServerTransportConfig transportConfig;
-	transportConfig.port = 19000 + id;
-	return std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
+		scg::tcp::ServerTransportConfig transportConfig;
+		transportConfig.port = 19000 + id;
+		return std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
 	};
 
 	factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-	scg::tcp::ClientTransportConfig transportConfig;
-	transportConfig.host = "127.0.0.1";
-	transportConfig.port = 19000 + id;
-	return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
+		scg::tcp::ClientTransportConfig transportConfig;
+		transportConfig.host = "127.0.0.1";
+		transportConfig.port = 19000 + id;
+		return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
 	};
 
 	factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-	scg::tcp::ClientTransportConfig transportConfig;
-	transportConfig.host = "127.0.0.1";
-	transportConfig.port = 19000 + id;
-	transportConfig.maxSendMessageSize = 1024;
-	transportConfig.maxRecvMessageSize = 1024;
-	return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
+		scg::tcp::ClientTransportConfig transportConfig;
+		transportConfig.host = "127.0.0.1";
+		transportConfig.port = 19000 + id;
+		transportConfig.maxSendMessageSize = 1024;
+		transportConfig.maxRecvMessageSize = 1024;
+		return std::make_shared<scg::tcp::ClientTransportTCP>(transportConfig);
 	};
 
 	return factory;
@@ -46,29 +46,29 @@ TransportFactory createTCPTLSTransportFactory() {
 	factory.name = "TCP-TLS";
 
 	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-	scg::tcp::ServerTransportTLSConfig transportConfig;
-	transportConfig.port = 19100 + id;
-	transportConfig.certFile = "../../server.crt";
-	transportConfig.keyFile = "../../server.key";
-	return std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
+		scg::tcp::ServerTransportTLSConfig transportConfig;
+		transportConfig.port = 19100 + id;
+		transportConfig.certFile = "../../server.crt";
+		transportConfig.keyFile = "../../server.key";
+		return std::make_shared<scg::tcp::ServerTransportTCPTLS>(transportConfig);
 	};
 
 	factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-	scg::tcp::ClientTransportTLSConfig transportConfig;
-	transportConfig.host = "127.0.0.1";
-	transportConfig.port = 19100 + id;
-	transportConfig.verifyPeer = false;  // Self-signed cert
-	return std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
+		scg::tcp::ClientTransportTLSConfig transportConfig;
+		transportConfig.host = "127.0.0.1";
+		transportConfig.port = 19100 + id;
+		transportConfig.verifyPeer = false;  // Self-signed cert
+		return std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
 	};
 
 	factory.createLimitedClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-	scg::tcp::ClientTransportTLSConfig transportConfig;
-	transportConfig.host = "127.0.0.1";
-	transportConfig.port = 19100 + id;
-	transportConfig.verifyPeer = false;  // Self-signed cert
-	transportConfig.maxSendMessageSize = 1024;
-	transportConfig.maxRecvMessageSize = 1024;
-	return std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
+		scg::tcp::ClientTransportTLSConfig transportConfig;
+		transportConfig.host = "127.0.0.1";
+		transportConfig.port = 19100 + id;
+		transportConfig.verifyPeer = false;  // Self-signed cert
+		transportConfig.maxSendMessageSize = 1024;
+		transportConfig.maxRecvMessageSize = 1024;
+		return std::make_shared<scg::tcp::ClientTransportTCPTLS>(transportConfig);
 	};
 
 	return factory;

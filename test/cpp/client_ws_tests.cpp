@@ -17,15 +17,15 @@ TransportFactory createWebSocketClientTransportFactory() {
 
 	// Server transport is not used in external server mode
 	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-	return nullptr;
+		return nullptr;
 	};
 
 	factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-	scg::ws::ClientTransportConfig transportConfig;
-	transportConfig.host = "localhost";
-	transportConfig.port = 8000;  // Must match Go server port (pingpong_server_ws)
-	transportConfig.path = "/rpc";
-	return std::make_shared<scg::ws::ClientTransportWS>(transportConfig);
+		scg::ws::ClientTransportConfig transportConfig;
+		transportConfig.host = "localhost";
+		transportConfig.port = 8000;  // Must match Go server port (pingpong_server_ws)
+		transportConfig.path = "/rpc";
+		return std::make_shared<scg::ws::ClientTransportWS>(transportConfig);
 	};
 
 	factory.createLimitedClientTransport = nullptr;

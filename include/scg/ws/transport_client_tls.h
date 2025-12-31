@@ -6,6 +6,7 @@
 
 #include "scg/transport.h"
 #include "scg/error.h"
+#include "scg/logger.h"
 #include <memory>
 #include <string>
 #include <thread>
@@ -47,7 +48,9 @@ public:
 
 	error::Error send(const std::vector<uint8_t>& data) override
 	{
-		if (closed_) return error::Error("Connection closed");
+		if (closed_) {
+			return error::Error("Connection closed");
+		}
 
 		if (maxSendMessageSize_ > 0 && data.size() > maxSendMessageSize_) {
 			return error::Error("Message size exceeds send limit");
@@ -67,8 +70,9 @@ public:
 
 		websocketpp::lib::error_code ec;
 		client_tls::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
-		if (ec) return;
-
+		if (ec) {
+			return;
+		}
 		con->set_message_handler([this](websocketpp::connection_hdl, client_tls::message_ptr msg) {
 			if (messageHandler_) {
 				auto& payload = msg->get_payload();
@@ -83,7 +87,9 @@ public:
 		failHandler_ = handler;
 		websocketpp::lib::error_code ec;
 		client_tls::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
-		if (ec) return;
+		if (ec) {
+			return;
+		}
 
 		con->set_fail_handler([this, con](websocketpp::connection_hdl) {
 			if (failHandler_) failHandler_(error::Error(con->get_ec().message()));
@@ -95,7 +101,9 @@ public:
 		closeHandler_ = handler;
 		websocketpp::lib::error_code ec;
 		client_tls::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
-		if (ec) return;
+		if (ec) {
+			return;
+		}
 
 		con->set_close_handler([this](websocketpp::connection_hdl) {
 			closed_ = true;
@@ -106,6 +114,7 @@ public:
 	error::Error close() override
 	{
 		if (!closed_) {
+			SCG_LOG_INFO("WebSocket TLS connection closing");
 			closed_ = true;
 
 			// Ensure handlers are cleared so they don't run after destruction
@@ -138,6 +147,7 @@ private:
 	uint32_t maxSendMessageSize_;
 };
 
+
 class ClientTransportWSTLS : public scg::rpc::ClientTransport
 {
 public:
@@ -169,6 +179,7 @@ public:
 
 	std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override
 	{
+		SCG_LOG_INFO("Connecting to WebSocket TLS server at wss://" + config_.host + ":" + std::to_string(config_.port) + config_.path);
 		websocketpp::lib::error_code ec;
 		std::string uri = "wss://" + config_.host + ":" + std::to_string(config_.port) + config_.path;
 		client_tls::connection_ptr con = client_.get_connection(uri, ec);
@@ -199,14 +210,17 @@ public:
 
 		auto err = future.get();
 		if (err) {
+			SCG_LOG_ERROR("WebSocket TLS connection failed: " + err.message);
 			return {nullptr, err};
 		}
 
+		SCG_LOG_INFO("WebSocket TLS connection established");
 		return {connection, nullptr};
 	}
 
 	void shutdown() override
 	{
+		SCG_LOG_INFO("Shutting down WebSocket TLS client transport");
 		if (!client_.stopped()) {
 			client_.stop_perpetual();
 			client_.stop();
@@ -217,14 +231,16 @@ public:
 	}
 
 private:
-	websocketpp::lib::shared_ptr<asio::ssl::context> on_tls_init() {
+	websocketpp::lib::shared_ptr<asio::ssl::context> on_tls_init()
+	{
 		auto ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
 
 		try {
-			ctx->set_options(asio::ssl::context::default_workarounds |
-							 asio::ssl::context::no_sslv2 |
-							 asio::ssl::context::no_sslv3 |
-							 asio::ssl::context::single_dh_use);
+			ctx->set_options(
+				asio::ssl::context::default_workarounds |
+				asio::ssl::context::no_sslv2 |
+				asio::ssl::context::no_sslv3 |
+				asio::ssl::context::single_dh_use);
 
 			if (config_.verifyPeer) {
 				ctx->set_verify_mode(asio::ssl::verify_peer);
@@ -237,7 +253,7 @@ private:
 				ctx->set_verify_mode(asio::ssl::verify_none);
 			}
 		} catch (std::exception& e) {
-			std::cout << "TLS Init Error: " << e.what() << std::endl;
+			SCG_LOG_ERROR("TLS Init Error: " + std::string(e.what()));
 		}
 		return ctx;
 	}

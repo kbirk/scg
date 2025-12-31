@@ -18,12 +18,12 @@ void signalHandler(int signum) {
 class PingPongServerImpl : public pingpong::PingPongServer {
 public:
 	std::pair<pingpong::PongResponse, scg::error::Error> ping(const scg::context::Context& ctx, const pingpong::PingRequest& req) override {
-	// Echo back the payload with incremented count
-	pingpong::PongResponse response;
-	response.pong.count = req.ping.count + 1;
-	response.pong.payload = req.ping.payload;
+		// Echo back the payload with incremented count
+		pingpong::PongResponse response;
+		response.pong.count = req.ping.count + 1;
+		response.pong.payload = req.ping.payload;
 
-	return std::make_pair(response, nullptr);
+		return std::make_pair(response, nullptr);
 	}
 };
 
@@ -32,32 +32,15 @@ int main() {
 	signal(SIGINT, signalHandler);
 	signal(SIGTERM, signalHandler);
 
-	// Configure logging
-	scg::log::LoggingConfig logging;
-	logging.level = scg::log::LogLevel::INFO;
-	logging.debugLogger = [](std::string msg) {
-	printf("DEBUG: %s\n", msg.c_str());
-	};
-	logging.infoLogger = [](std::string msg) {
-	printf("INFO: %s\n", msg.c_str());
-	};
-	logging.warnLogger = [](std::string msg) {
-	printf("WARN: %s\n", msg.c_str());
-	};
-	logging.errorLogger = [](std::string msg) {
-	printf("ERROR: %s\n", msg.c_str());
-	};
-
 	// Configure transport
 	scg::ws::ServerTransportConfig transportConfig;
 	transportConfig.port = 8000;
-	transportConfig.logging = logging;
 
 	// Configure server
 	scg::rpc::ServerConfig config;
 	config.transport = std::make_shared<scg::ws::ServerTransportWS>(transportConfig);
 	config.errorHandler = [](const scg::error::Error& err) {
-	printf("Server error: %s\n", err.message().c_str());
+		printf("Server error: %s\n", err.message().c_str());
 	};
 
 	// Create server
@@ -70,12 +53,12 @@ int main() {
 	// Start server in background thread
 	auto err = server->start();
 	if (err) {
-	return 1;
+		return 1;
 	}
 
 	// Wait for shutdown signal
 	while (running) {
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 
 	// Stop server

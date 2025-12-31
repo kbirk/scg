@@ -18,14 +18,24 @@ class Benchmark {
 public:
 	int N;
 
-	Benchmark(int iterations) : N(iterations), timer_started_(false) {}
+	Benchmark(int iterations) : N(iterations), timer_started_(false), timer_stopped_(false) {}
 
 	void resetTimer() {
 		timer_started_ = true;
 		start_ = std::chrono::high_resolution_clock::now();
 	}
 
+	void stopTimer() {
+		if (timer_started_) {
+			end_ = std::chrono::high_resolution_clock::now();
+			timer_stopped_ = true;
+		}
+	}
+
 	std::chrono::duration<double, std::nano> elapsed() const {
+		if (timer_stopped_) {
+			return end_ - start_;
+		}
 		auto end = std::chrono::high_resolution_clock::now();
 		return end - start_;
 	}
@@ -34,7 +44,9 @@ public:
 
 private:
 	std::chrono::high_resolution_clock::time_point start_;
+	std::chrono::high_resolution_clock::time_point end_;
 	bool timer_started_;
+	bool timer_stopped_;
 };
 
 // Benchmark harness (like Go's testing framework)

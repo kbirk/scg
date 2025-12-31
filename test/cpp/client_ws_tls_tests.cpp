@@ -15,17 +15,17 @@ TransportFactory createWebSocketTLSClientTransportFactory() {
 
 	// Server transport is not used in external server mode
 	factory.createServerTransport = [](int id) -> std::shared_ptr<scg::rpc::ServerTransport> {
-	return nullptr;
+		return nullptr;
 	};
 
 	factory.createClientTransport = [](int id) -> std::shared_ptr<scg::rpc::ClientTransport> {
-	scg::ws::ClientTransportTLSConfig transportConfig;
-	transportConfig.host = "localhost";
-	transportConfig.port = 8001;  // Must match Go server port (pingpong_server_ws_tls)
-	// Self-signed cert, skip verification (verifyPeer defaults to false for TLS client)
-	transportConfig.verifyPeer = false;
-	transportConfig.path = "/rpc";
-	return std::make_shared<scg::ws::ClientTransportWSTLS>(transportConfig);
+		scg::ws::ClientTransportTLSConfig transportConfig;
+		transportConfig.host = "localhost";
+		transportConfig.port = 8001;  // Must match Go server port (pingpong_server_ws_tls)
+		// Self-signed cert, skip verification (verifyPeer defaults to false for TLS client)
+		transportConfig.verifyPeer = false;
+		transportConfig.path = "/rpc";
+		return std::make_shared<scg::ws::ClientTransportWSTLS>(transportConfig);
 	};
 
 	factory.createLimitedClientTransport = nullptr;

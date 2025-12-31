@@ -21,7 +21,6 @@ struct ServerTransportConfig {
 	int port;
 	uint32_t maxSendMessageSize = 0;
 	uint32_t maxRecvMessageSize = 0;
-	scg::log::LoggingConfig logging;
 };
 
 typedef websocketpp::server<websocketpp::config::asio> server;
@@ -97,6 +96,7 @@ public:
 	error::Error close() override
 	{
 		if (!closed_) {
+			SCG_LOG_INFO("WebSocket connection closing");
 			closed_ = true;
 			websocketpp::lib::error_code ec;
 			server_->close(hdl_, websocketpp::close::status::normal, "", ec);
@@ -115,11 +115,13 @@ private:
 	uint32_t maxSendMessageSize_;
 };
 
+
 class ServerTransportWS : public scg::rpc::ServerTransport
 {
 public:
 	ServerTransportWS(const ServerTransportConfig& config)
 		: config_(config)
+
 	{
 		server_.clear_access_channels(websocketpp::log::alevel::all);
 		server_.clear_error_channels(websocketpp::log::elevel::all);
@@ -130,6 +132,7 @@ public:
 		}
 
 		server_.set_open_handler([this](websocketpp::connection_hdl hdl) {
+			SCG_LOG_INFO("WebSocket server accepted new connection");
 			auto conn = std::make_shared<ConnectionWSServer>(&server_, hdl, config_.maxSendMessageSize);
 			if (onConnectionHandler_) {
 				onConnectionHandler_(conn);
@@ -150,11 +153,13 @@ public:
 	error::Error startListening() override
 	{
 		try {
+			SCG_LOG_INFO("WebSocket server listening on port " + std::to_string(config_.port));
 			server_.set_reuse_addr(true);
 			server_.listen(config_.port);
 			server_.start_accept();
 			return nullptr;
 		} catch (const std::exception& e) {
+			SCG_LOG_ERROR("WebSocket server failed to start: " + std::string(e.what()));
 			return error::Error(e.what());
 		}
 	}
@@ -166,6 +171,7 @@ public:
 
 	void stop() override
 	{
+		SCG_LOG_INFO("Stopping WebSocket server");
 		if (server_.is_listening()) {
 			server_.stop_listening();
 		}

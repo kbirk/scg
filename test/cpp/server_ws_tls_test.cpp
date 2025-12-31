@@ -32,34 +32,17 @@ int main() {
 	signal(SIGINT, signalHandler);
 	signal(SIGTERM, signalHandler);
 
-	// Configure logging
-	scg::log::LoggingConfig logging;
-	logging.level = scg::log::LogLevel::INFO;
-	logging.debugLogger = [](std::string msg) {
-	printf("DEBUG: %s\n", msg.c_str());
-	};
-	logging.infoLogger = [](std::string msg) {
-	printf("INFO: %s\n", msg.c_str());
-	};
-	logging.warnLogger = [](std::string msg) {
-	printf("WARN: %s\n", msg.c_str());
-	};
-	logging.errorLogger = [](std::string msg) {
-	printf("ERROR: %s\n", msg.c_str());
-	};
-
 	// Configure transport with TLS
 	scg::ws::ServerTransportTLSConfig transportConfig;
 	transportConfig.port = 8000;
 	transportConfig.certFile = "../../server.crt";
 	transportConfig.keyFile = "../../server.key";
-	transportConfig.logging = logging;
 
 	// Configure server
 	scg::rpc::ServerConfig config;
 	config.transport = std::make_shared<scg::ws::ServerTransportWSTLS>(transportConfig);
 	config.errorHandler = [](const scg::error::Error& err) {
-	printf("Server error: %s\n", err.message().c_str());
+		printf("Server error: %s\n", err.message().c_str());
 	};
 
 	// Create server
@@ -72,15 +55,15 @@ int main() {
 	// Start server in background thread
 	auto err = server->start();
 	if (err) {
-	printf("Failed to start server: %s\n", err.message().c_str());
-	return 1;
+		printf("Failed to start server: %s\n", err.message().c_str());
+		return 1;
 	}
 
 	printf("WebSocket TLS server started on port %d\n", transportConfig.port);
 
 	// Wait for shutdown signal
 	while (running) {
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 
 	// Stop server

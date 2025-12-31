@@ -1,8 +1,13 @@
 package benchmark;
 
 service BenchmarkService {
-	rpc Echo (EchoRequest) returns (EchoResponse);
-	rpc Process (ProcessRequest) returns (ProcessResponse);
+	rpc Call (Request) returns (Response);
+}
+
+message Request {
+}
+
+message Response {
 }
 
 message EchoRequest {

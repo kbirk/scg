@@ -70,31 +70,8 @@ func setupBenchmarkService(server *rpc.Server) {
 // benchmarkServiceImpl implements the BenchmarkService
 type benchmarkServiceImpl struct{}
 
-func (s *benchmarkServiceImpl) Echo(ctx context.Context, req *benchmark.EchoRequest) (*benchmark.EchoResponse, error) {
-	return &benchmark.EchoResponse{
-		Message:         req.Message,
-		Timestamp:       req.Timestamp,
-		ServerTimestamp: uint64(time.Now().UnixNano()),
-	}, nil
-}
-
-func (s *benchmarkServiceImpl) Process(ctx context.Context, req *benchmark.ProcessRequest) (*benchmark.ProcessResponse, error) {
-	totalAmount := 0.0
-	for _, item := range req.Items {
-		totalAmount += item.TotalPrice
-	}
-
-	return &benchmark.ProcessResponse{
-		ID:          req.ID,
-		ProcessedAt: time.Now(),
-		Status:      benchmark.ProcessStatus_Success,
-		Message:     "Processed successfully",
-		Stats: benchmark.ProcessingStats{
-			ItemsProcessed:   uint32(len(req.Items)),
-			TotalAmount:      totalAmount,
-			ProcessingTimeMs: 1,
-		},
-	}, nil
+func (s *benchmarkServiceImpl) Call(ctx context.Context, req *benchmark.Request) (*benchmark.Response, error) {
+	return &benchmark.Response{}, nil
 }
 
 // benchmarkRPCTransport runs benchmarks for a specific transport
@@ -138,105 +115,57 @@ func benchmarkRPCTransport(b *testing.B, factory TransportBenchmarkFactory, base
 	time.Sleep(100 * time.Millisecond)
 
 	b.Run("Echo/Simple", func(b *testing.B) {
-		req := &benchmark.EchoRequest{
-			Message:   "Hello, World!",
-			Timestamp: uint64(time.Now().UnixNano()),
-		}
+		req := &benchmark.Request{}
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			ctx := context.Background()
-			_, err := benchmarkClient.Echo(ctx, req)
+			_, err := benchmarkClient.Call(ctx, req)
 			if err != nil {
-				b.Fatalf("Echo failed: %v", err)
+				b.Fatalf("Call failed: %v", err)
 			}
 		}
 	})
 
 	b.Run("Echo/LongMessage", func(b *testing.B) {
-		longMsg := make([]byte, 1024)
-		for i := range longMsg {
-			longMsg[i] = byte('A' + (i % 26))
-		}
-		req := &benchmark.EchoRequest{
-			Message:   string(longMsg),
-			Timestamp: uint64(time.Now().UnixNano()),
-		}
+		req := &benchmark.Request{}
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			ctx := context.Background()
-			_, err := benchmarkClient.Echo(ctx, req)
+			_, err := benchmarkClient.Call(ctx, req)
 			if err != nil {
-				b.Fatalf("Echo failed: %v", err)
+				b.Fatalf("Call failed: %v", err)
 			}
 		}
 	})
 
 	b.Run("Process/SingleItem", func(b *testing.B) {
-		req := &benchmark.ProcessRequest{
-			ID:        "order-1",
-			CreatedAt: time.Now(),
-			User: benchmark.UserInfo{
-				Username: "testuser",
-				Email:    "test@example.com",
-				Role:     benchmark.UserRole_User,
-			},
-			Items: []benchmark.OrderItem{
-				{
-					Name:       "Product A",
-					Quantity:   1,
-					UnitPrice:  19.99,
-					TotalPrice: 19.99,
-				},
-			},
-		}
+		req := &benchmark.Request{}
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			ctx := context.Background()
-			_, err := benchmarkClient.Process(ctx, req)
+			_, err := benchmarkClient.Call(ctx, req)
 			if err != nil {
-				b.Fatalf("Process failed: %v", err)
+				b.Fatalf("Call failed: %v", err)
 			}
 		}
 	})
 
 	b.Run("Process/MultipleItems", func(b *testing.B) {
-		items := make([]benchmark.OrderItem, 5)
-		for i := range items {
-			items[i] = benchmark.OrderItem{
-				Name:       fmt.Sprintf("Product %d", i),
-				Quantity:   uint32(i + 1),
-				UnitPrice:  9.99 * float64(i+1),
-				TotalPrice: 9.99 * float64(i+1) * float64(i+1),
-			}
-		}
-
-		req := &benchmark.ProcessRequest{
-			ID:        "order-multi",
-			CreatedAt: time.Now(),
-			User: benchmark.UserInfo{
-				Username: "testuser",
-				Email:    "test@example.com",
-				Role:     benchmark.UserRole_User,
-			},
-			Items: items,
-			Metadata: map[string]string{
-				"source": "benchmark",
-			},
-		}
+		req := &benchmark.Request{}
 
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			ctx := context.Background()
-			_, err := benchmarkClient.Process(ctx, req)
+			_, err := benchmarkClient.Call(ctx, req)
 			if err != nil {
-				b.Fatalf("Process failed: %v", err)
+				b.Fatalf("Call failed: %v", err)
 			}
 		}
 	})
@@ -291,19 +220,16 @@ func BenchmarkRPC_Parallel(b *testing.B) {
 			benchmarkClient := benchmark.NewBenchmarkServiceClient(client)
 			time.Sleep(100 * time.Millisecond)
 
-			req := &benchmark.EchoRequest{
-				Message:   "Parallel test",
-				Timestamp: uint64(time.Now().UnixNano()),
-			}
+			req := &benchmark.Request{}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					ctx := context.Background()
-					_, err := benchmarkClient.Echo(ctx, req)
+					_, err := benchmarkClient.Call(ctx, req)
 					if err != nil {
-						b.Errorf("Echo failed: %v", err)
+						b.Errorf("Call failed: %v", err)
 					}
 				}
 			})
@@ -358,10 +284,7 @@ func BenchmarkRPC_Throughput(b *testing.B) {
 				}
 				time.Sleep(100 * time.Millisecond)
 
-				req := &benchmark.EchoRequest{
-					Message:   "Throughput test",
-					Timestamp: uint64(time.Now().UnixNano()),
-				}
+				req := &benchmark.Request{}
 
 				b.ReportAllocs()
 				b.ResetTimer()
@@ -379,9 +302,9 @@ func BenchmarkRPC_Throughput(b *testing.B) {
 						defer wg.Done()
 						for j := 0; j < opsPerClient; j++ {
 							ctx := context.Background()
-							_, err := client.Echo(ctx, req)
+							_, err := client.Call(ctx, req)
 							if err != nil {
-								b.Errorf("Echo failed: %v", err)
+								b.Errorf("Call failed: %v", err)
 								return
 							}
 						}

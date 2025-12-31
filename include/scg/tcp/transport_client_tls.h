@@ -6,6 +6,7 @@
 
 #include "scg/transport.h"
 #include "scg/error.h"
+#include "scg/logger.h"
 #include <memory>
 #include <string>
 #include <thread>
@@ -36,6 +37,7 @@ public:
 		, maxRecvMessageSize_(maxRecvMessageSize)
 	{
 		socket_.lowest_layer().set_option(asio::ip::tcp::no_delay(true));
+		SCG_LOG_INFO("TCP TLS connection established");
 	}
 
 	error::Error send(const std::vector<uint8_t>& data) override
@@ -88,6 +90,7 @@ public:
 	error::Error close() override
 	{
 		if (!closed_) {
+			SCG_LOG_INFO("TCP TLS connection closing");
 			closed_ = true;
 			auto self = shared_from_this();
 			asio::post(socket_.get_executor(), [this, self]() {
@@ -178,6 +181,7 @@ private:
 	uint32_t maxRecvMessageSize_;
 };
 
+
 class ClientTransportTCPTLS : public scg::rpc::ClientTransport
 {
 public:
@@ -211,6 +215,7 @@ public:
 	std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override
 	{
 		try {
+			SCG_LOG_INFO("Connecting to TCP TLS server at " + config_.host + ":" + std::to_string(config_.port));
 			asio::ip::tcp::resolver resolver(io_context_);
 			auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
 
@@ -225,12 +230,14 @@ public:
 
 			return {std::make_shared<ConnectionTLS>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
 		} catch (const std::exception& e) {
+			SCG_LOG_ERROR("TCP TLS connection failed: " + std::string(e.what()));
 			return {nullptr, error::Error(e.what())};
 		}
 	}
 
 	void shutdown() override
 	{
+		SCG_LOG_INFO("Shutting down TCP TLS client transport");
 		io_context_.stop();
 		if (thread_.joinable()) {
 			thread_.join();

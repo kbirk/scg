@@ -6,6 +6,7 @@
 
 #include "scg/transport.h"
 #include "scg/error.h"
+#include "scg/logger.h"
 #include <memory>
 #include <string>
 #include <thread>
@@ -104,6 +105,7 @@ public:
 	error::Error close() override
 	{
 		if (!closed_) {
+			SCG_LOG_INFO("WebSocket connection closing");
 			closed_ = true;
 
 			// Ensure handlers are cleared so they don't run after destruction
@@ -136,11 +138,13 @@ private:
 	uint32_t maxSendMessageSize_;
 };
 
+
 class ClientTransportWS : public scg::rpc::ClientTransport
 {
 public:
 	ClientTransportWS(const ClientTransportConfig& config)
 		: config_(config)
+
 	{
 		client_.clear_access_channels(websocketpp::log::alevel::all);
 		client_.clear_error_channels(websocketpp::log::elevel::all);
@@ -163,11 +167,12 @@ public:
 
 	std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override
 	{
-		std::cout << "Client connecting..." << std::endl;
+		SCG_LOG_INFO("Connecting to WebSocket server at ws://" + config_.host + ":" + std::to_string(config_.port) + config_.path);
 		websocketpp::lib::error_code ec;
 		std::string uri = "ws://" + config_.host + ":" + std::to_string(config_.port) + config_.path;
 		client::connection_ptr con = client_.get_connection(uri, ec);
 		if (ec) {
+			SCG_LOG_ERROR("Failed to create WebSocket connection: " + ec.message());
 			return {nullptr, error::Error(ec.message())};
 		}
 
@@ -177,33 +182,32 @@ public:
 		auto future = promise->get_future();
 
 		con->set_open_handler([promise](websocketpp::connection_hdl) {
-			std::cout << "Client connected" << std::endl;
 			promise->set_value(nullptr);
 		});
 
 		con->set_fail_handler([promise, con](websocketpp::connection_hdl) {
-			std::cout << "Client connection failed: " << con->get_ec().message() << std::endl;
 			promise->set_value(error::Error(con->get_ec().message()));
 		});
 
 		client_.connect(con);
 
-		// std::cout << "Client waiting for connection..." << std::endl;
 		if (future.wait_for(std::chrono::seconds(10)) == std::future_status::timeout) {
-			// std::cout << "Client connection timeout" << std::endl;
 			return {nullptr, error::Error("Connection timed out")};
 		}
 
 		auto err = future.get();
 		if (err) {
+			SCG_LOG_ERROR("WebSocket connection failed: " + err.message);
 			return {nullptr, err};
 		}
 
+		SCG_LOG_INFO("WebSocket connection established");
 		return {connection, nullptr};
 	}
 
 	void shutdown() override
 	{
+		SCG_LOG_INFO("Shutting down WebSocket client transport");
 		if (!client_.stopped()) {
 			client_.stop_perpetual();
 			client_.stop();

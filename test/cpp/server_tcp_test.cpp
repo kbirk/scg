@@ -49,7 +49,7 @@ int main() {
 	scg::rpc::ServerConfig config;
 	config.transport = std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
 	config.errorHandler = [](const scg::error::Error& err) {
-	printf("Server error: %s\n", err.message().c_str());
+		printf("Server error: %s\n", err.message().c_str());
 	};
 
 	// Create server
@@ -62,15 +62,15 @@ int main() {
 	// Start server in background thread
 	auto err = server->start();
 	if (err) {
-	printf("Failed to start server: %s\n", err.message().c_str());
-	return 1;
+		printf("Failed to start server: %s\n", err.message().c_str());
+		return 1;
 	}
 
 	printf("Server started on port 9001\n");
 
 	// Wait for shutdown signal
 	while (running) {
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 
 	// Stop server

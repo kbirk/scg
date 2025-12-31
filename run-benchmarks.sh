@@ -52,6 +52,10 @@ echo -e "\n${YELLOW}Running C++ Message benchmarks...${NC}"
 echo "Running C++ Message benchmarks..." >> "$RAW_OUTPUT"
 ./message_bench | tee -a "$RAW_OUTPUT"
 
+echo -e "\n${YELLOW}Running C++ RPC benchmarks...${NC}"
+echo "Running C++ RPC benchmarks..." >> "$RAW_OUTPUT"
+./rpc_bench | tee -a "$RAW_OUTPUT"
+
 # ========================================
 # Analysis
 # ========================================

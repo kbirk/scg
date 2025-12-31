@@ -23,7 +23,6 @@ struct ServerTransportTLSConfig {
 	std::string keyFile;
 	uint32_t maxSendMessageSize = 0;
 	uint32_t maxRecvMessageSize = 0;
-	scg::log::LoggingConfig logging;
 };
 
 typedef websocketpp::server<websocketpp::config::asio_tls> server_tls;
@@ -35,6 +34,7 @@ public:
 		, hdl_(hdl)
 		, closed_(false)
 		, maxSendMessageSize_(maxSendMessageSize)
+
 	{
 	}
 
@@ -99,6 +99,7 @@ public:
 	error::Error close() override
 	{
 		if (!closed_) {
+			SCG_LOG_INFO("WebSocket TLS connection closing");
 			closed_ = true;
 			websocketpp::lib::error_code ec;
 			server_->close(hdl_, websocketpp::close::status::normal, "", ec);
@@ -117,11 +118,13 @@ private:
 	uint32_t maxSendMessageSize_;
 };
 
+
 class ServerTransportWSTLS : public scg::rpc::ServerTransport
 {
 public:
 	ServerTransportWSTLS(const ServerTransportTLSConfig& config)
 		: config_(config)
+
 	{
 		server_.clear_access_channels(websocketpp::log::alevel::all);
 		server_.clear_error_channels(websocketpp::log::elevel::all);
@@ -136,6 +139,7 @@ public:
 		});
 
 		server_.set_open_handler([this](websocketpp::connection_hdl hdl) {
+			SCG_LOG_INFO("WebSocket TLS server accepted new connection");
 			auto conn = std::make_shared<ConnectionWSServerTLS>(&server_, hdl, config_.maxSendMessageSize);
 			if (onConnectionHandler_) {
 				onConnectionHandler_(conn);
@@ -156,11 +160,13 @@ public:
 	error::Error startListening() override
 	{
 		try {
+			SCG_LOG_INFO("WebSocket TLS server listening on port " + std::to_string(config_.port));
 			server_.set_reuse_addr(true);
 			server_.listen(config_.port);
 			server_.start_accept();
 			return nullptr;
 		} catch (const std::exception& e) {
+			SCG_LOG_ERROR("WebSocket TLS server failed to start: " + std::string(e.what()));
 			return error::Error(e.what());
 		}
 	}
@@ -172,6 +178,7 @@ public:
 
 	void stop() override
 	{
+		SCG_LOG_INFO("Stopping WebSocket TLS server");
 		if (server_.is_listening()) {
 			server_.stop_listening();
 		}
@@ -179,20 +186,22 @@ public:
 	}
 
 private:
-	websocketpp::lib::shared_ptr<asio::ssl::context> on_tls_init() {
+	websocketpp::lib::shared_ptr<asio::ssl::context> on_tls_init()
+	{
 		auto ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
 
 		try {
-			ctx->set_options(asio::ssl::context::default_workarounds |
-							 asio::ssl::context::no_sslv2 |
-							 asio::ssl::context::no_sslv3 |
-							 asio::ssl::context::single_dh_use);
+			ctx->set_options(
+				asio::ssl::context::default_workarounds |
+				asio::ssl::context::no_sslv2 |
+				asio::ssl::context::no_sslv3 |
+				asio::ssl::context::single_dh_use);
 
 			ctx->use_certificate_chain_file(config_.certFile);
 			ctx->use_private_key_file(config_.keyFile, asio::ssl::context::pem);
 
 		} catch (std::exception& e) {
-			std::cout << "TLS Init Error: " << e.what() << std::endl;
+			SCG_LOG_ERROR("TLS Init Error: " + std::string(e.what()));
 		}
 		return ctx;
 	}
