@@ -6,10 +6,11 @@
 #include <mutex>
 #include <map>
 #include <vector>
-#include <queue>
 #include <array>
 #include <thread>
-#include <condition_variable>
+
+#define ASIO_STANDALONE
+#include <asio.hpp>
 
 #include "scg/error.h"
 #include "scg/serialize.h"
@@ -45,7 +46,6 @@ using ServiceHandler = std::function<std::vector<uint8_t>(
 struct ServerConfig {
 	std::shared_ptr<ServerTransport> transport;
 	std::function<void(const error::Error&)> errorHandler;
-	std::shared_ptr<log::Logger> logger;
 };
 
 // Server group for organizing services and middleware
@@ -107,6 +107,7 @@ public:
 		, transport_(config.transport)
 		, running_(false)
 		, nextConnectionID_(1)
+		, threadPool_(std::thread::hardware_concurrency())
 	{
 		rootGroup_ = std::make_shared<ServerGroup>();
 		activeGroup_ = rootGroup_;
@@ -127,18 +128,7 @@ public:
 
 		// Start transport thread
 		transportThread_ = std::thread([this]() {
-			logInfo("Transport thread started");
 			transport_->runEventLoop();
-			logInfo("Transport thread stopped");
-		});
-
-		// Start message processing thread
-		serverThread_ = std::thread([this]() {
-			logInfo("Server thread started");
-
-			processMessages();
-
-			logInfo("Server thread stopped");
 		});
 
 		return nullptr;
@@ -150,18 +140,14 @@ public:
 		// Check if already stopped
 		if (!running_) {
 			// Join threads if they're still running
-			if (serverThread_.joinable()) {
-				serverThread_.join();
-			}
 			if (transportThread_.joinable()) {
 				transportThread_.join();
 			}
 			return nullptr;
 		}
 
-		// Signal shutdown - this will cause the server loop to exit
+		// Signal shutdown
 		running_ = false;
-		cv_.notify_all();
 
 		// Stop the transport
 		if (transport_) {
@@ -171,9 +157,6 @@ public:
 		// Wait for threads to finish
 		if (transportThread_.joinable()) {
 			transportThread_.join();
-		}
-		if (serverThread_.joinable()) {
-			serverThread_.join();
 		}
 
 		// Now clean up (thread is stopped, no more concurrent access)
@@ -185,12 +168,6 @@ public:
 		}
 		connections_.clear();
 
-		// Clear message queue
-		while (!messageQueue_.empty()) {
-			messageQueue_.pop();
-		}
-
-		logInfo("Server shutdown complete");
 		return nullptr;
 	}
 
@@ -282,8 +259,21 @@ private:
 
 		uint64_t connID = nextConnectionID_++;
 
-		conn->setMessageHandler([this, connID](const std::vector<uint8_t>& data) {
-			onMessage(connID, data);
+		// Store the connection first
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			connections_[connID] = conn;
+		}
+
+		// Process messages using thread pool to avoid blocking io_context
+		conn->setMessageHandler([this, conn](const std::vector<uint8_t>& data) {
+			if (!running_) {
+				return;
+			}
+			// Submit to thread pool to avoid blocking event loop
+			asio::post(threadPool_, [this, conn, data]() {
+				handleMessage(conn, data);
+			});
 		});
 
 		conn->setCloseHandler([this, connID]() {
@@ -293,58 +283,6 @@ private:
 		conn->setFailHandler([this, connID](const error::Error& err) {
 			onConnectionFail(connID, err);
 		});
-
-		// Store the connection
-		{
-			std::lock_guard<std::mutex> lock(mu_);
-			connections_[connID] = conn;
-		}
-
-		logInfo("New client connected (id: " + std::to_string(connID) + ")");
-	}
-
-	// Process messages from the queue
-	void processMessages()
-	{
-		while (running_) {
-			std::unique_lock<std::mutex> lock(mu_);
-
-			cv_.wait(lock, [this] {
-				return !messageQueue_.empty() || !running_;
-			});
-
-			if (!running_) {
-				return;
-			}
-
-			// Get next message
-			PendingMessage msg = messageQueue_.front();
-			messageQueue_.pop();
-
-			// Unlock while processing (long operation)
-			lock.unlock();
-
-			handleMessage(msg.connection, msg.data);
-		}
-	}
-
-	// Called when a message is received
-	void onMessage(uint64_t connID, const std::vector<uint8_t>& data)
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-
-		if (!running_) {
-			return;
-		}
-
-		auto it = connections_.find(connID);
-		if (it == connections_.end()) {
-			return;  // Connection no longer exists
-		}
-
-		// Queue the message for processing
-		messageQueue_.push(PendingMessage{it->second, data});
-		cv_.notify_one();
 	}
 
 	// Called when a connection closes
@@ -355,7 +293,6 @@ private:
 		auto it = connections_.find(connID);
 		if (it != connections_.end()) {
 			connections_.erase(it);
-			logInfo("Client disconnected (id: " + std::to_string(connID) + ")");
 		}
 	}
 
@@ -491,39 +428,8 @@ private:
 			return;
 		}
 
-		logError("Error: " + err.message());
-
 		if (config_.errorHandler) {
 			config_.errorHandler(err);
-		}
-	}
-
-	// Logging helpers
-	void logDebug(const std::string& msg)
-	{
-		if (config_.logger) {
-			config_.logger->debug(msg);
-		}
-	}
-
-	void logInfo(const std::string& msg)
-	{
-		if (config_.logger) {
-			config_.logger->info(msg);
-		}
-	}
-
-	void logWarn(const std::string& msg)
-	{
-		if (config_.logger) {
-			config_.logger->warn(msg);
-		}
-	}
-
-	void logError(const std::string& msg)
-	{
-		if (config_.logger) {
-			config_.logger->error(msg);
 		}
 	}
 
@@ -539,12 +445,9 @@ private:
 	std::map<uint64_t, std::shared_ptr<Connection>> connections_;
 	std::atomic<uint64_t> nextConnectionID_;
 
-	std::queue<PendingMessage> messageQueue_;
-
-	std::thread serverThread_;
+	asio::thread_pool threadPool_;
 	std::thread transportThread_;
 	mutable std::mutex mu_;
-	std::condition_variable cv_;
 };
 
 // Helper function to create an error response
