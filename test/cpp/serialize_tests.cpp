@@ -663,6 +663,90 @@ void test_serialize_multiple_strings_in_sequence()
 	}
 }
 
+void test_writer_resize_behavior()
+{
+	// Test that writer correctly resizes when required space is more than double current capacity
+	// Start with a small writer (8 bytes)
+	scg::serialize::Writer writer(8);
+
+	// Create data that requires more than 2x the current size (> 16 bytes)
+	// Using a 100-byte array to ensure we exceed 2x the initial capacity
+	std::vector<uint8_t> largeData(100);
+	for (size_t i = 0; i < largeData.size(); i++) {
+		largeData[i] = static_cast<uint8_t>(i % 256);
+	}
+
+	// Write the large data - this should trigger resize to at least 100 bytes (not just 16)
+	writer.writeBytes(largeData.data(), largeData.size());
+
+	// Verify the data was written correctly
+	const auto& bs = writer.bytes();
+	TEST_CHECK(bs.size() >= 100);
+
+	// Verify the data matches
+	for (size_t i = 0; i < 100; i++) {
+		TEST_CHECK(bs[i] == static_cast<uint8_t>(i % 256));
+	}
+
+	// Test with writeByte as well - start fresh with a small writer
+	scg::serialize::Writer writer2(4);
+
+	// Write small amount first
+	writer2.writeByte(0xFF);
+
+	// Now write data that requires > 2x current capacity
+	// Writer should have ~4 bytes, we'll write enough to require > 8 bytes
+	for (int i = 0; i < 80; i++) { // 80 bytes
+		writer2.writeByte(static_cast<uint8_t>(i % 256));
+	}
+
+	const auto& bs2 = writer2.bytes();
+	TEST_CHECK(bs2.size() >= 81);
+
+	// Verify first byte
+	TEST_CHECK(bs2[0] == 0xFF);
+
+	// Verify remaining bytes
+	for (size_t i = 1; i < 81; i++) {
+		TEST_CHECK(bs2[i] == static_cast<uint8_t>((i - 1) % 256));
+	}
+}
+
+void test_writer_resize_unaligned_write()
+{
+	// Test resize behavior with unaligned writes (when numBitsWritten is not byte-aligned)
+	scg::serialize::Writer writer(4);
+
+	// Write 3 bits to make it unaligned
+	writer.writeBits(0b101, 3);
+
+	// Now write a large amount of data that requires > 2x capacity
+	std::vector<uint8_t> largeData(50);
+	for (size_t i = 0; i < largeData.size(); i++) {
+		largeData[i] = static_cast<uint8_t>(i);
+	}
+
+	writer.writeBytes(largeData.data(), largeData.size());
+
+	// Deserialize and verify
+	scg::serialize::Reader reader(writer.bytes());
+
+	// Read the 3 bits back
+	uint8_t bits = 0;
+	auto err = reader.readBits(bits, 3);
+	TEST_CHECK(!err);
+	TEST_CHECK(bits == 0b101);
+
+	// Read the bytes back
+	std::vector<uint8_t> result(50);
+	err = reader.readBytes(result.data(), result.size());
+	TEST_CHECK(!err);
+
+	for (size_t i = 0; i < 50; i++) {
+		TEST_CHECK(result[i] == static_cast<uint8_t>(i));
+	}
+}
+
 // helper method to reduce redundant test typing
 #define TEST(x) {#x, x}
 
@@ -688,6 +772,8 @@ TEST_LIST = {
 	TEST(test_serialize_macros),
 	TEST(test_serialize_multiple_types_in_sequence),
 	TEST(test_serialize_multiple_strings_in_sequence),
+	TEST(test_writer_resize_behavior),
+	TEST(test_writer_resize_unaligned_write),
 
 	{ NULL, NULL }
 };

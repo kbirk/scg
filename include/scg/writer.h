@@ -105,10 +105,11 @@ public:
 
 private:
 
-	inline void ensureCapacity(uint32_t bytes)
+	inline void ensureCapacity(uint32_t neededBytes)
 	{
-		if (bytes > bytes_.size()) {
-			bytes_.resize(bytes * 2, 0);
+		if (neededBytes > bytes_.size()) {
+			auto newSize = neededBytes > bytes_.size() * 2 ? neededBytes : bytes_.size() * 2;
+			bytes_.resize(newSize, 0);
 		}
 	}
 

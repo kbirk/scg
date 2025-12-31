@@ -408,3 +408,86 @@ func TestSerializeMultipleStringsInSequence(t *testing.T) {
 		assert.Equal(t, expected, actual, "String %d mismatch", i)
 	}
 }
+
+func TestWriterResizeBehavior(t *testing.T) {
+	// Test that writer correctly resizes when required space is more than double current capacity
+	// Start with a small writer (8 bytes)
+	writer := NewWriter(8)
+
+	// Create data that requires more than 2x the current size (> 16 bytes)
+	// Using a 100-byte array to ensure we exceed 2x the initial capacity
+	largeData := make([]byte, 100)
+	for i := range largeData {
+		largeData[i] = byte(i % 256)
+	}
+
+	// Write the large data - this should trigger resize to at least 100 bytes (not just 16)
+	writer.WriteBytes(largeData)
+
+	// Verify the data was written correctly
+	bs := writer.Bytes()
+	require.Equal(t, 100, len(bs), "Writer should have written all 100 bytes")
+
+	// Verify the data matches
+	for i := 0; i < 100; i++ {
+		assert.Equal(t, byte(i%256), bs[i], "Byte mismatch at index %d", i)
+	}
+
+	// Test with WriteBits as well - start fresh with a small writer
+	writer2 := NewWriter(4)
+
+	// Write small amount first
+	writer2.WriteByte(0xFF)
+
+	// Now write data that requires > 2x current capacity
+	// Writer should have ~4 bytes, we'll write enough bits to require > 8 bytes
+	for i := 0; i < 80; i++ { // 80 bytes = 640 bits
+		writer2.WriteByte(byte(i % 256))
+	}
+
+	bs2 := writer2.Bytes()
+	require.Equal(t, 81, len(bs2), "Writer should have written 81 bytes")
+
+	// Verify first byte
+	assert.Equal(t, uint8(0xFF), bs2[0])
+
+	// Verify remaining bytes
+	for i := 1; i < 81; i++ {
+		assert.Equal(t, byte((i-1)%256), bs2[i], "Byte mismatch at index %d", i)
+	}
+}
+
+func TestWriterResizeUnalignedWrite(t *testing.T) {
+	// Test resize behavior with unaligned writes (when numBitsWritten is not byte-aligned)
+	writer := NewWriter(4)
+
+	// Write 3 bits to make it unaligned
+	writer.WriteBits(0b101, 3)
+
+	// Now write a large amount of data that requires > 2x capacity
+	largeData := make([]byte, 50)
+	for i := range largeData {
+		largeData[i] = byte(i)
+	}
+
+	writer.WriteBytes(largeData)
+
+	// Deserialize and verify
+	bs := writer.Bytes()
+	reader := NewReader(bs)
+
+	// Read the 3 bits back
+	var bits uint8
+	err := reader.ReadBits(&bits, 3)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(0b101), bits)
+
+	// Read the bytes back
+	result := make([]byte, 50)
+	err = reader.ReadBytes(result)
+	require.NoError(t, err)
+
+	for i := 0; i < 50; i++ {
+		assert.Equal(t, byte(i), result[i], "Byte mismatch at index %d", i)
+	}
+}

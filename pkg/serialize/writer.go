@@ -2,7 +2,6 @@ package serialize
 
 import (
 	"encoding/binary"
-	"fmt"
 )
 
 type Writer struct {
@@ -16,8 +15,18 @@ func NewWriter(size int) *Writer {
 	}
 }
 
-func panicInsufficientCapacity(needed, have int) {
-	panic(fmt.Sprintf("insufficient capacity: need %d bytes, have %d", needed, have))
+func (w *Writer) ensureCapacity(neededBytes uint32) {
+	// Check capacity before writing
+	if neededBytes > uint32(len(w.bytes)) {
+		// grow the buffer
+		newSize := len(w.bytes) * 2
+		if int(neededBytes) > newSize {
+			newSize = int(neededBytes)
+		}
+		newBytes := make([]byte, newSize)
+		copy(newBytes, w.bytes)
+		w.bytes = newBytes
+	}
 }
 
 func (w *Writer) WriteBits(val uint8, numBitsToWrite uint32) {
@@ -27,9 +36,7 @@ func (w *Writer) WriteBits(val uint8, numBitsToWrite uint32) {
 
 	// Check capacity before writing
 	neededBytes := (w.numBitsWritten + numBitsToWrite + 7) / 8
-	if neededBytes > uint32(len(w.bytes)) {
-		panicInsufficientCapacity(int(neededBytes), len(w.bytes))
-	}
+	w.ensureCapacity(neededBytes)
 
 	// Mask val to ensure we only write numBitsToWrite bits
 	val &= (1 << numBitsToWrite) - 1
@@ -55,7 +62,7 @@ func (w *Writer) WriteByte(val byte) {
 	if w.numBitsWritten&7 == 0 {
 		byteIndex := w.numBitsWritten >> 3
 		if int(byteIndex)+1 > len(w.bytes) {
-			panicInsufficientCapacity(len(w.bytes), int(byteIndex)+1)
+			w.ensureCapacity(uint32(byteIndex) + 1)
 		}
 		w.bytes[byteIndex] = val
 		w.numBitsWritten += 8
@@ -73,7 +80,7 @@ func (w *Writer) WriteBytes(data []byte) {
 		byteIndex := w.numBitsWritten >> 3
 		neededBytes := int(byteIndex) + len(data)
 		if neededBytes > len(w.bytes) {
-			panicInsufficientCapacity(len(w.bytes), neededBytes)
+			w.ensureCapacity(uint32(neededBytes))
 		}
 		copy(w.bytes[byteIndex:], data)
 		w.numBitsWritten += uint32(len(data) * 8)
@@ -85,7 +92,7 @@ func (w *Writer) WriteBytes(data []byte) {
 		totalBits := w.numBitsWritten + uint32(len(data)*8)
 		neededBytes := (totalBits + 7) / 8
 		if neededBytes > uint32(len(w.bytes)) {
-			panicInsufficientCapacity(len(w.bytes), int(neededBytes))
+			w.ensureCapacity(neededBytes)
 		}
 
 		// Try to write 8 bytes at a time using encoding/binary for safety and portability
