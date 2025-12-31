@@ -6,10 +6,11 @@
 #include <mutex>
 #include <map>
 #include <vector>
-#include <queue>
 #include <array>
 #include <thread>
-#include <condition_variable>
+
+#define ASIO_STANDALONE
+#include <asio.hpp>
 
 #include "scg/error.h"
 #include "scg/serialize.h"
@@ -23,10 +24,6 @@
 
 namespace scg {
 namespace rpc {
-
-// Forward declarations
-class Server;
-class ServerGroup;
 
 // Message to be processed by the server
 struct PendingMessage {
@@ -45,7 +42,6 @@ using ServiceHandler = std::function<std::vector<uint8_t>(
 struct ServerConfig {
 	std::shared_ptr<ServerTransport> transport;
 	std::function<void(const error::Error&)> errorHandler;
-	std::shared_ptr<log::Logger> logger;
 };
 
 // Server group for organizing services and middleware
@@ -107,6 +103,7 @@ public:
 		, transport_(config.transport)
 		, running_(false)
 		, nextConnectionID_(1)
+		, threadPool_(std::thread::hardware_concurrency())
 	{
 		rootGroup_ = std::make_shared<ServerGroup>();
 		activeGroup_ = rootGroup_;
@@ -127,18 +124,7 @@ public:
 
 		// Start transport thread
 		transportThread_ = std::thread([this]() {
-			logInfo("Transport thread started");
 			transport_->runEventLoop();
-			logInfo("Transport thread stopped");
-		});
-
-		// Start message processing thread
-		serverThread_ = std::thread([this]() {
-			logInfo("Server thread started");
-
-			processMessages();
-
-			logInfo("Server thread stopped");
 		});
 
 		return nullptr;
@@ -150,18 +136,14 @@ public:
 		// Check if already stopped
 		if (!running_) {
 			// Join threads if they're still running
-			if (serverThread_.joinable()) {
-				serverThread_.join();
-			}
 			if (transportThread_.joinable()) {
 				transportThread_.join();
 			}
 			return nullptr;
 		}
 
-		// Signal shutdown - this will cause the server loop to exit
+		// Signal shutdown
 		running_ = false;
-		cv_.notify_all();
 
 		// Stop the transport
 		if (transport_) {
@@ -172,25 +154,13 @@ public:
 		if (transportThread_.joinable()) {
 			transportThread_.join();
 		}
-		if (serverThread_.joinable()) {
-			serverThread_.join();
-		}
 
 		// Now clean up (thread is stopped, no more concurrent access)
 		std::lock_guard<std::mutex> lock(mu_);
 
-		// Close all active connections
-		for (auto& pair : connections_) {
-			pair.second->close();
-		}
+		// Just clear connections - their destructors will call close()
 		connections_.clear();
 
-		// Clear message queue
-		while (!messageQueue_.empty()) {
-			messageQueue_.pop();
-		}
-
-		logInfo("Server shutdown complete");
 		return nullptr;
 	}
 
@@ -282,8 +252,21 @@ private:
 
 		uint64_t connID = nextConnectionID_++;
 
+		// Store the connection first
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			connections_[connID] = conn;
+		}
+
+		// Process messages using thread pool to avoid blocking io_context
 		conn->setMessageHandler([this, connID](const std::vector<uint8_t>& data) {
-			onMessage(connID, data);
+			if (!running_) {
+				return;
+			}
+			// Submit to thread pool to avoid blocking event loop
+			asio::post(threadPool_, [this, connID, data]() {
+				handleMessage(connID, data);
+			});
 		});
 
 		conn->setCloseHandler([this, connID]() {
@@ -293,58 +276,6 @@ private:
 		conn->setFailHandler([this, connID](const error::Error& err) {
 			onConnectionFail(connID, err);
 		});
-
-		// Store the connection
-		{
-			std::lock_guard<std::mutex> lock(mu_);
-			connections_[connID] = conn;
-		}
-
-		logInfo("New client connected (id: " + std::to_string(connID) + ")");
-	}
-
-	// Process messages from the queue
-	void processMessages()
-	{
-		while (running_) {
-			std::unique_lock<std::mutex> lock(mu_);
-
-			cv_.wait(lock, [this] {
-				return !messageQueue_.empty() || !running_;
-			});
-
-			if (!running_) {
-				return;
-			}
-
-			// Get next message
-			PendingMessage msg = messageQueue_.front();
-			messageQueue_.pop();
-
-			// Unlock while processing (long operation)
-			lock.unlock();
-
-			handleMessage(msg.connection, msg.data);
-		}
-	}
-
-	// Called when a message is received
-	void onMessage(uint64_t connID, const std::vector<uint8_t>& data)
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-
-		if (!running_) {
-			return;
-		}
-
-		auto it = connections_.find(connID);
-		if (it == connections_.end()) {
-			return;  // Connection no longer exists
-		}
-
-		// Queue the message for processing
-		messageQueue_.push(PendingMessage{it->second, data});
-		cv_.notify_one();
 	}
 
 	// Called when a connection closes
@@ -355,7 +286,6 @@ private:
 		auto it = connections_.find(connID);
 		if (it != connections_.end()) {
 			connections_.erase(it);
-			logInfo("Client disconnected (id: " + std::to_string(connID) + ")");
 		}
 	}
 
@@ -373,7 +303,7 @@ private:
 	}
 
 	// Handle a single message
-	void handleMessage(std::shared_ptr<Connection> conn, const std::vector<uint8_t>& data)
+	void handleMessage(uint64_t connID, const std::vector<uint8_t>& data)
 	{
 		serialize::Reader reader(data);
 
@@ -399,11 +329,20 @@ private:
 			uint64_t serviceID = 0;
 			serialize::deserialize(serviceID, reader);
 
-			// Get service handler and middleware
+			// Get service handler and middleware and connection
+			// Hold shared_ptr to keep connection alive even if removed from map
 			ServiceHandler handler;
 			std::vector<middleware::Middleware> middlewareStack;
+			std::shared_ptr<Connection> conn;
 			{
 				std::lock_guard<std::mutex> lock(mu_);
+
+				auto it = connections_.find(connID);
+				if (it == connections_.end()) {
+					return;  // Connection no longer exists
+				}
+				conn = it->second;  // Copy shared_ptr to keep alive
+
 				handler = getService(serviceID);
 				middlewareStack = getMiddlewareStack(serviceID);
 			}
@@ -466,14 +405,15 @@ private:
 	{
 		using scg::serialize::bit_size; // ADL trickery
 
-		std::string errMsg = err ? err.message : "Unknown error";
+		std::string errMsg = err ? err.message() : "Unknown error";
 
-		size_t bitSize = bit_size(RESPONSE_PREFIX) +
-						 bit_size(requestID) +
-						 bit_size(ERROR_RESPONSE) +
-						 bit_size(errMsg);
+		size_t bitSize =
+			bit_size(RESPONSE_PREFIX) +
+			bit_size(requestID) +
+			bit_size(ERROR_RESPONSE) +
+			bit_size(errMsg);
 
-		serialize::FixedSizeWriter writer(serialize::bits_to_bytes(bitSize));
+		serialize::Writer writer(serialize::bits_to_bytes(bitSize));
 		writer.write(RESPONSE_PREFIX);
 		writer.write(requestID);
 		writer.write(ERROR_RESPONSE);
@@ -485,44 +425,13 @@ private:
 	// Error handling
 	void handleError(const error::Error& err)
 	{
-		if (err.message == "connection closed") {
+		if (err.message() == "connection closed") {
 			// Normal connection close, don't log as error
 			return;
 		}
 
-		logError("Error: " + err.message);
-
 		if (config_.errorHandler) {
 			config_.errorHandler(err);
-		}
-	}
-
-	// Logging helpers
-	void logDebug(const std::string& msg)
-	{
-		if (config_.logger) {
-			config_.logger->debug(msg);
-		}
-	}
-
-	void logInfo(const std::string& msg)
-	{
-		if (config_.logger) {
-			config_.logger->info(msg);
-		}
-	}
-
-	void logWarn(const std::string& msg)
-	{
-		if (config_.logger) {
-			config_.logger->warn(msg);
-		}
-	}
-
-	void logError(const std::string& msg)
-	{
-		if (config_.logger) {
-			config_.logger->error(msg);
 		}
 	}
 
@@ -538,12 +447,9 @@ private:
 	std::map<uint64_t, std::shared_ptr<Connection>> connections_;
 	std::atomic<uint64_t> nextConnectionID_;
 
-	std::queue<PendingMessage> messageQueue_;
-
-	std::thread serverThread_;
+	asio::thread_pool threadPool_;
 	std::thread transportThread_;
 	mutable std::mutex mu_;
-	std::condition_variable cv_;
 };
 
 // Helper function to create an error response
@@ -551,14 +457,15 @@ inline std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Er
 {
 	using scg::serialize::bit_size; // ADL trickery
 
-	std::string errMsg = err ? err.message : "Unknown error";
+	std::string errMsg = err ? err.message() : "Unknown error";
 
-	size_t bitSize = bit_size(RESPONSE_PREFIX) +
-					 bit_size(requestID) +
-					 bit_size(ERROR_RESPONSE) +
-					 bit_size(errMsg);
+	size_t bitSize =
+		bit_size(RESPONSE_PREFIX) +
+		bit_size(requestID) +
+		bit_size(ERROR_RESPONSE) +
+		bit_size(errMsg);
 
-	serialize::FixedSizeWriter writer(serialize::bits_to_bytes(bitSize));
+	serialize::Writer writer(serialize::bits_to_bytes(bitSize));
 	writer.write(RESPONSE_PREFIX);
 	writer.write(requestID);
 	writer.write(ERROR_RESPONSE);
@@ -573,12 +480,13 @@ std::vector<uint8_t> respondWithMessage(uint64_t requestID, const T& msg)
 {
 	using scg::serialize::bit_size; // ADL trickery
 
-	size_t bitSize = bit_size(RESPONSE_PREFIX) +
-					 bit_size(requestID) +
-					 bit_size(MESSAGE_RESPONSE) +
-					 bit_size(msg);
+	size_t bitSize =
+		bit_size(RESPONSE_PREFIX) +
+		bit_size(requestID) +
+		bit_size(MESSAGE_RESPONSE) +
+		bit_size(msg);
 
-	serialize::FixedSizeWriter writer(serialize::bits_to_bytes(bitSize));
+	serialize::Writer writer(serialize::bits_to_bytes(bitSize));
 	writer.write(RESPONSE_PREFIX);
 	writer.write(requestID);
 	writer.write(MESSAGE_RESPONSE);

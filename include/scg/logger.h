@@ -1,36 +1,25 @@
 #pragma once
 
-#include <string>
-#include <functional>
+// User-overridable logging macros
+// Define these before including SCG headers to customize logging behavior
+// By default, all logging is disabled (zero cost)
 
-namespace scg {
-namespace log {
+#ifndef SCG_LOG_DEBUG
+#define SCG_LOG_DEBUG(msg) ((void)0)
+#endif
 
-// Simple logger interface
-class Logger {
-public:
-	virtual ~Logger() = default;
-	virtual void debug(const std::string& msg) = 0;
-	virtual void info(const std::string& msg) = 0;
-	virtual void warn(const std::string& msg) = 0;
-	virtual void error(const std::string& msg) = 0;
-};
+#ifndef SCG_LOG_INFO
+#define SCG_LOG_INFO(msg) ((void)0)
+#endif
 
-enum class LogLevel {
-	DEBUG,
-	INFO,
-	WARN,
-	ERROR,
-	NONE
-};
+#ifndef SCG_LOG_WARN
+#define SCG_LOG_WARN(msg) ((void)0)
+#endif
 
-struct LoggingConfig {
-	LogLevel level = LogLevel::INFO;
-	std::function<void(std::string)> debugLogger;
-	std::function<void(std::string)> infoLogger;
-	std::function<void(std::string)> warnLogger;
-	std::function<void(std::string)> errorLogger;
-};
+#ifndef SCG_LOG_ERROR
+#define SCG_LOG_ERROR(msg) ((void)0)
+#endif
 
-}
-}
+// Example usage (user can define before including headers):
+// #define SCG_LOG_INFO(msg) std::cout << "[INFO] " << msg << std::endl
+// #define SCG_LOG_ERROR(msg) std::cerr << "[ERROR] " << msg << std::endl

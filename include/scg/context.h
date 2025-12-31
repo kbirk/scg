@@ -6,6 +6,7 @@
 
 #include "scg/serialize.h"
 #include "scg/error.h"
+#include "scg/writer.h"
 
 namespace scg {
 namespace context {
@@ -13,7 +14,8 @@ namespace context {
 class Context {
 public:
 
-	Context() : hasDeadline_(false)
+	Context()
+		: hasDeadline_(false)
 	{
 	}
 
@@ -50,11 +52,11 @@ public:
 		auto size = bit_size(str);
 
 		std::vector<uint8_t> data;
-		data.reserve(scg::serialize::bits_to_bytes(size));
+		data.resize(scg::serialize::bits_to_bytes(size), 0);
 		scg::serialize::WriterView writer(data);
 		serialize(writer, str);
 
-		put(key, data);
+		values_[key] = std::move(data);
 	}
 
 	template <typename T>
@@ -66,11 +68,11 @@ public:
 		auto size = bit_size(val);
 
 		std::vector<uint8_t> data;
-		data.reserve(scg::serialize::bits_to_bytes(size));
+		data.resize(scg::serialize::bits_to_bytes(size), 0);
 		scg::serialize::WriterView writer(data);
 		serialize(writer, val);
 
-		put(key, data);
+		values_[key] = std::move(data);
 	}
 
 	inline scg::error::Error get(std::string& t, const std::string& key) const

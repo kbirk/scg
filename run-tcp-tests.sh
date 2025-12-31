@@ -42,7 +42,7 @@ trap cleanup EXIT INT TERM
 # Go TCP Tests (Go Client + Go Server)
 # ========================================
 echo -e "${YELLOW}Running Go TCP tests (Go Client + Go Server)...${NC}"
-run_with_timeout "Go TCP tests" go test -v -count=1 -run "^(TestTCP|TestTCPTLS)$" ./test/test_go/service_tcp_test.go ./test/test_go/service_test_suite.go ./test/test_go/test_utils.go
+run_with_timeout "Go TCP tests" go test -v -count=1 -run "^(TestTCP|TestTCPTLS)$" ./test/go/service_tcp_test.go ./test/go/service_test_suite.go ./test/go/test_utils.go
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go TCP tests passed${NC}"
 else
@@ -54,11 +54,11 @@ fi
 # Build C++ Tests
 # ========================================
 echo -e "\n${YELLOW}Building C++ TCP tests...${NC}"
-mkdir -p .build
-cd .build
-cmake ../test/test_cpp
+mkdir -p ./test/cpp/build
+cd ./test/cpp/build
+cmake ../
 # Build only TCP-related targets
-make tcp_tests server_tcp_test server_tcp_tls_test client_tcp_tests client_tcp_tls_tests
+make -j$(nproc) tcp_tests server_tcp_test server_tcp_tls_test client_tcp_tests client_tcp_tls_tests
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}C++ TCP tests built successfully${NC}"
 else
@@ -102,7 +102,7 @@ if ! kill -0 $pid 2>/dev/null; then
 fi
 
 # Run Go client tests with external server option
-run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestTCPExternalServer ../test/test_go/service_tcp_test.go ../test/test_go/service_test_suite.go ../test/test_go/test_utils.go
+run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestTCPExternalServer ../../../test/go/service_tcp_test.go ../../../test/go/service_test_suite.go ../../../test/go/test_utils.go
 status=$?
 
 # Stop server
@@ -138,7 +138,7 @@ if ! kill -0 $pid 2>/dev/null; then
 fi
 
 # Run Go client tests with external server option
-run_with_timeout "Go Client + C++ TLS Server tests" go test -v -count=1 -run TestTCPTLSExternalServer ../test/test_go/service_tcp_test.go ../test/test_go/service_test_suite.go ../test/test_go/test_utils.go
+run_with_timeout "Go Client + C++ TLS Server tests" go test -v -count=1 -run TestTCPTLSExternalServer ../../../test/go/service_tcp_test.go ../../../test/go/service_test_suite.go ../../../test/go/test_utils.go
 status=$?
 
 # Stop server
@@ -159,7 +159,7 @@ fi
 echo -e "\n${YELLOW}Running TCP tests (C++ Client + Go Server)...${NC}"
 
 # Build and start Go TCP server
-go build -o pingpong_tcp ../test/pingpong_server_tcp/main.go
+go build -o pingpong_tcp ../../../test/go/pingpong_server_tcp/main.go
 ./pingpong_tcp > server.log 2>&1 &
 pid=$!
 echo "Started Go TCP server (PID: $pid)"
@@ -196,8 +196,8 @@ sleep 1
 echo -e "\n${YELLOW}Running TCP TLS tests (C++ Client + Go Server)...${NC}"
 
 # Build and start Go TCP TLS server
-go build -o pingpong_tcp_tls ../test/pingpong_server_tcp_tls/main.go
-./pingpong_tcp_tls --cert=../test/server.crt --key=../test/server.key > server.log 2>&1 &
+go build -o pingpong_tcp_tls ../../../test/go/pingpong_server_tcp_tls/main.go
+./pingpong_tcp_tls --cert=../../../test/server.crt --key=../../../test/server.key > server.log 2>&1 &
 pid=$!
 echo "Started Go TCP TLS server (PID: $pid)"
 

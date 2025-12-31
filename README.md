@@ -22,7 +22,7 @@ go install github.com/kbirk/scg/cmd/scg-cpp@latest
 ### Golang:
 
 -   Websockets: [gorilla/websocket](https://github.com/gorilla/websocket)
--   TCP
+-   TCP: [net](https://pkg.go.dev/net)
 
 ### C++:
 
@@ -248,7 +248,7 @@ int main() {
 	scg::rpc::ServerConfig config;
 	config.transport = std::make_shared<scg::tcp::ServerTransportTCP>(transportConfig);
 	config.errorHandler = [](const scg::error::Error& err) {
-	printf("Server error: %s\n", err.message.c_str());
+	printf("Server error: %s\n", err.message().c_str());
 	};
 
 	// Create server
@@ -545,12 +545,12 @@ cd ./third_party && ./install-deps.sh &&  cd ..
 Run the tests:
 
 ```sh
-./run-tests.sh
+./run-serialize-tests.sh
+./run-tcp-tests.sh
+./run-websocket-tests.sh
 ```
 
 ## TODO:
 
--   Implement context cancellations and deadlines
 -   Opentracing hooks and context serialization
 -   Add stream support
--   Add C++ server code

@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 # Go Serialization Tests
 # ========================================
 echo -e "${YELLOW}Running Go serialization tests...${NC}"
-go test -v -count=1 ./test/test_go -run "Serialize"
+go test -v -count=1 ./test/go -run "Serialize"
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go serialization tests passed${NC}"
 else
@@ -24,11 +24,11 @@ fi
 # Build C++ Tests
 # ========================================
 echo -e "\n${YELLOW}Building C++ serialization tests...${NC}"
-mkdir -p .build
-cd .build
-cmake ../test/test_cpp
+mkdir -p ./test/cpp/build
+cd ./test/cpp/build
+cmake ../
 # Build only serialization-related targets
-cmake --build . --target serialize_tests --target uuid_tests --target macro_test
+cmake --build . -j$(nproc) --target serialize_tests --target uuid_tests --target macro_test
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}C++ serialization tests built successfully${NC}"
 else

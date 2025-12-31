@@ -26,7 +26,8 @@ public:
 			bs[8], bs[9], bs[10], bs[11],
 			bs[12], bs[13], bs[14], bs[15]
 		}
-	{}
+	{
+	}
 
 	constexpr inline uuid()
 		: bytes_{
@@ -188,7 +189,7 @@ inline void from_json(const nlohmann::json& j, scg::type::uuid& uuid)
 {
 	auto [res, err] = scg::type::uuid::fromString(j.get<std::string>());
 	if (err != nullptr) {
-		throw std::runtime_error(err.message);
+		throw std::runtime_error(err.message());
 	}
 	uuid = res;
 }

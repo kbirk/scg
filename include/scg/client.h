@@ -137,7 +137,7 @@ protected:
 			std::lock_guard<std::mutex> lock(mu_);
 			status_ = ConnectionStatus::FAILED;
 			// Fail all pending requests
-			failPendingRequestsUnsafe("Connection failed: " + err.message);
+			failPendingRequestsUnsafe("Connection failed: " + err.message());
 		});
 
 		connection_->setCloseHandler([this]() {
@@ -182,7 +182,7 @@ protected:
 	{
 		using scg::serialize::bit_size; // adl trickery
 
-		serialize::FixedSizeWriter writer(
+		serialize::Writer writer(
 			scg::serialize::bits_to_bytes(
 				bit_size(ERROR_RESPONSE) +
 				bit_size(err)));
@@ -231,16 +231,16 @@ protected:
 	template <typename T>
 	std::tuple<std::future<serialize::Reader>, uint64_t, error::Error> sendMessage(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
 	{
+		// Get request ID first (single lock for ID + promise registration)
 		uint64_t requestID = 0;
 		{
 			std::lock_guard<std::mutex> lock(mu_);
-
 			requestID = requestID_++;
 		}
 
 		using scg::serialize::bit_size; // adl trickery
 
-		serialize::FixedSizeWriter writer(
+		serialize::Writer writer(
 			scg::serialize::bits_to_bytes(
 				bit_size(REQUEST_PREFIX) +
 				bit_size(ctx) +
@@ -256,9 +256,9 @@ protected:
 		writer.write(methodID);
 		writer.write(msg);
 
-		std::lock_guard<std::mutex> lock(mu_);
-
 		auto promise = std::make_shared<std::promise<serialize::Reader>>();
+
+		std::lock_guard<std::mutex> lock(mu_);
 
 		requests_[requestID] = promise;
 

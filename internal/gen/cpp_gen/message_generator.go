@@ -92,8 +92,9 @@ void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& data)
 
 std::vector<uint8_t> {{.MessageNamePascalCase}}::toBytes() const
 {
+	// Use view for copy elision
 	std::vector<uint8_t> data;
-	data.reserve(scg::serialize::bits_to_bytes(bit_size(*this)));
+	data.resize(scg::serialize::bits_to_bytes(bit_size(*this)), 0);
 	scg::serialize::WriterView writer(data);
 	serialize(writer, *this);
 	return data;

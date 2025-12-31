@@ -6,6 +6,7 @@
 
 #include "scg/transport.h"
 #include "scg/error.h"
+#include "scg/logger.h"
 #include <memory>
 #include <string>
 #include <thread>
@@ -35,12 +36,17 @@ public:
 		, maxSendMessageSize_(maxSendMessageSize)
 		, maxRecvMessageSize_(maxRecvMessageSize)
 	{
-		socket_.lowest_layer().set_option(asio::ip::tcp::no_delay(true));
+		if (socket_.lowest_layer().is_open()) {
+			socket_.lowest_layer().set_option(asio::ip::tcp::no_delay(true));
+		}
+		SCG_LOG_INFO("TCP TLS connection established");
 	}
 
 	error::Error send(const std::vector<uint8_t>& data) override
 	{
-		if (closed_) return error::Error("Connection closed");
+		if (closed_) {
+			return error::Error("Connection closed");
+		}
 
 		uint32_t len = static_cast<uint32_t>(data.size());
 
@@ -58,11 +64,11 @@ public:
 		buffer.insert(buffer.end(), data.begin(), data.end());
 
 		auto self = shared_from_this();
-		asio::post(socket_.get_executor(), [this, self, buffer = std::move(buffer)]() {
-			bool write_in_progress = !write_queue_.empty();
-			write_queue_.push_back(std::move(buffer));
+		asio::post(socket_.get_executor(), [self, buffer = std::move(buffer)]() {
+			bool write_in_progress = !self->write_queue_.empty();
+			self->write_queue_.push_back(std::move(buffer));
 			if (!write_in_progress) {
-				do_write();
+				self->do_write();
 			}
 		});
 
@@ -87,20 +93,16 @@ public:
 
 	error::Error close() override
 	{
-		if (!closed_) {
-			closed_ = true;
-			auto self = shared_from_this();
-			asio::post(socket_.get_executor(), [this, self]() {
-				if (socket_.lowest_layer().is_open()) {
-					socket_.lowest_layer().close();
-				}
-				if (closeHandler_) closeHandler_();
+		// Atomically set closed_ to true if it was false
+		bool expected = false;
+		if (closed_.compare_exchange_strong(expected, true)) {
+			SCG_LOG_INFO("TCP TLS connection closing");
 
-				// Break potential reference cycles
-				messageHandler_ = nullptr;
-				failHandler_ = nullptr;
-				closeHandler_ = nullptr;
-				write_queue_.clear();
+			auto self = shared_from_this();
+			asio::post(socket_.get_executor(), [self]() {
+				if (self->socket_.lowest_layer().is_open()) {
+					self->socket_.lowest_layer().close();
+				}
 			});
 		}
 		return nullptr;
@@ -111,17 +113,17 @@ private:
 	{
 		auto self = shared_from_this();
 		asio::async_write(socket_, asio::buffer(write_queue_.front()),
-			[this, self](std::error_code ec, std::size_t /*length*/) {
+			[self](std::error_code ec, std::size_t /*length*/) {
 				if (!ec) {
-					write_queue_.pop_front();
-					if (!write_queue_.empty()) {
-						do_write();
+					self->write_queue_.pop_front();
+					if (!self->write_queue_.empty()) {
+						self->do_write();
 					}
 				} else {
-					if (failHandler_) {
-						failHandler_(error::Error(ec.message()));
+					if (self->failHandler_) {
+						self->failHandler_(error::Error(ec.message()));
 					}
-					close();
+					self->close();
 				}
 			});
 	}
@@ -130,18 +132,25 @@ private:
 	{
 		auto self = shared_from_this();
 		asio::async_read(socket_, asio::buffer(read_buffer_, 4),
-			[this, self](std::error_code ec, std::size_t /*length*/) {
+			[self](std::error_code ec, std::size_t /*length*/) {
 				if (!ec) {
-					uint32_t len = (read_buffer_[0] << 24) | (read_buffer_[1] << 16) | (read_buffer_[2] << 8) | read_buffer_[3];
-					if (maxRecvMessageSize_ > 0 && len > maxRecvMessageSize_) {
-						if (failHandler_) failHandler_(error::Error("Message size exceeds receive limit"));
-						close();
+					uint32_t len = (self->read_buffer_[0] << 24) | (self->read_buffer_[1] << 16) | (self->read_buffer_[2] << 8) | self->read_buffer_[3];
+					if (self->maxRecvMessageSize_ > 0 && len > self->maxRecvMessageSize_) {
+						if (self->failHandler_) {
+							self->failHandler_(error::Error("Message size exceeds receive limit"));
+						}
+						self->close();
 						return;
 					}
-					read_body(len);
+					self->read_body(len);
 				} else {
-					if (ec != asio::error::eof && failHandler_) failHandler_(error::Error(ec.message()));
-					close();
+					if (ec != asio::error::eof) {
+						SCG_LOG_ERROR("TCP TLS read header error: " + ec.message());
+						if (self->failHandler_) {
+							self->failHandler_(error::Error(ec.message()));
+						}
+					}
+					self->close();
 				}
 			});
 	}
@@ -151,13 +160,20 @@ private:
 		auto self = shared_from_this();
 		body_buffer_.resize(length);
 		asio::async_read(socket_, asio::buffer(body_buffer_),
-			[this, self](std::error_code ec, std::size_t /*length*/) {
+			[self](std::error_code ec, std::size_t /*length*/) {
 				if (!ec) {
-					if (messageHandler_) messageHandler_(body_buffer_);
-					read_header();
+					if (self->messageHandler_) {
+						self->messageHandler_(self->body_buffer_);
+					}
+					self->read_header();
 				} else {
-					if (failHandler_) failHandler_(error::Error(ec.message()));
-					close();
+					if (ec != asio::error::eof) {
+						SCG_LOG_ERROR("TCP TLS read body error: " + ec.message());
+						if (self->failHandler_) {
+							self->failHandler_(error::Error(ec.message()));
+						}
+					}
+					self->close();
 				}
 			});
 	}
@@ -173,6 +189,7 @@ private:
 	uint32_t maxSendMessageSize_;
 	uint32_t maxRecvMessageSize_;
 };
+
 
 class ClientTransportTCPTLS : public scg::rpc::ClientTransport
 {
@@ -207,6 +224,7 @@ public:
 	std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override
 	{
 		try {
+			SCG_LOG_INFO("Connecting to TCP TLS server at " + config_.host + ":" + std::to_string(config_.port));
 			asio::ip::tcp::resolver resolver(io_context_);
 			auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
 
@@ -221,12 +239,14 @@ public:
 
 			return {std::make_shared<ConnectionTLS>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
 		} catch (const std::exception& e) {
+			SCG_LOG_ERROR("TCP TLS connection failed: " + std::string(e.what()));
 			return {nullptr, error::Error(e.what())};
 		}
 	}
 
 	void shutdown() override
 	{
+		SCG_LOG_INFO("Shutting down TCP TLS client transport");
 		io_context_.stop();
 		if (thread_.joinable()) {
 			thread_.join();
