@@ -208,17 +208,16 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 
 	ch := make(chan *serialize.Reader)
 	c.requests[requestID] = ch
-	c.mu.Unlock()
 
 	// Send message
 	err = c.conn.Send(bs, serviceID)
 	if err != nil {
-		c.mu.Lock()
 		delete(c.requests, requestID)
 		c.mu.Unlock()
 		return nil, c.handleError(err)
 	}
 
+	c.mu.Unlock()
 	return ch, nil
 }
 

@@ -21,7 +21,7 @@ struct ServerTransportTLSConfig {
 	uint32_t maxRecvMessageSize = 0; // 0 for no limit
 };
 
-class ServerTransportTCPTLS : public scg::rpc::ServerTransport {
+class ServerTransportTCPTLS : public scg::rpc::ServerTransport, public std::enable_shared_from_this<ServerTransportTCPTLS> {
 public:
 	ServerTransportTCPTLS(const ServerTransportTLSConfig& config)
 		: config_(config)
@@ -88,19 +88,26 @@ private:
 	void start_accept()
 	{
 		auto socket = std::make_shared<asio::ip::tcp::socket>(io_context_);
-		acceptor_.async_accept(*socket, [this, socket](const asio::error_code& error) {
+
+		auto self = shared_from_this();
+		acceptor_.async_accept(*socket, [self, socket](const asio::error_code& error) {
 			if (!error) {
-				auto ssl_stream = std::make_shared<asio::ssl::stream<asio::ip::tcp::socket>>(std::move(*socket), ssl_context_);
-				ssl_stream->async_handshake(asio::ssl::stream_base::server, [this, ssl_stream](const asio::error_code& error) {
+				auto ssl_stream = std::make_shared<asio::ssl::stream<asio::ip::tcp::socket>>(std::move(*socket), self->ssl_context_);
+				ssl_stream->async_handshake(asio::ssl::stream_base::server, [self, ssl_stream](const asio::error_code& error) {
 					if (!error) {
 						SCG_LOG_INFO("TCP TLS server accepted new connection");
-						if (onConnectionHandler_) {
-							onConnectionHandler_(std::make_shared<ConnectionTLS>(std::move(*ssl_stream), config_.maxSendMessageSize, config_.maxRecvMessageSize));
+						if (self->onConnectionHandler_) {
+							self->onConnectionHandler_(std::make_shared<ConnectionTLS>(std::move(*ssl_stream), self->config_.maxSendMessageSize, self->config_.maxRecvMessageSize));
 						}
 					}
 				});
-				start_accept();
+			} else {
+				if (error == asio::error::operation_aborted) {
+					return; // clean shutdown
+				}
+				SCG_LOG_ERROR("TCP TLS server accept error: " + error.message());
 			}
+			self->start_accept();
 		});
 	}
 

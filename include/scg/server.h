@@ -25,10 +25,6 @@
 namespace scg {
 namespace rpc {
 
-// Forward declarations
-class Server;
-class ServerGroup;
-
 // Message to be processed by the server
 struct PendingMessage {
 	std::shared_ptr<Connection> connection;
@@ -162,10 +158,7 @@ public:
 		// Now clean up (thread is stopped, no more concurrent access)
 		std::lock_guard<std::mutex> lock(mu_);
 
-		// Close all active connections
-		for (auto& pair : connections_) {
-			pair.second->close();
-		}
+		// Just clear connections - their destructors will call close()
 		connections_.clear();
 
 		return nullptr;
@@ -266,13 +259,13 @@ private:
 		}
 
 		// Process messages using thread pool to avoid blocking io_context
-		conn->setMessageHandler([this, conn](const std::vector<uint8_t>& data) {
+		conn->setMessageHandler([this, connID](const std::vector<uint8_t>& data) {
 			if (!running_) {
 				return;
 			}
 			// Submit to thread pool to avoid blocking event loop
-			asio::post(threadPool_, [this, conn, data]() {
-				handleMessage(conn, data);
+			asio::post(threadPool_, [this, connID, data]() {
+				handleMessage(connID, data);
 			});
 		});
 
@@ -310,7 +303,7 @@ private:
 	}
 
 	// Handle a single message
-	void handleMessage(std::shared_ptr<Connection> conn, const std::vector<uint8_t>& data)
+	void handleMessage(uint64_t connID, const std::vector<uint8_t>& data)
 	{
 		serialize::Reader reader(data);
 
@@ -336,11 +329,20 @@ private:
 			uint64_t serviceID = 0;
 			serialize::deserialize(serviceID, reader);
 
-			// Get service handler and middleware
+			// Get service handler and middleware and connection
+			// Hold shared_ptr to keep connection alive even if removed from map
 			ServiceHandler handler;
 			std::vector<middleware::Middleware> middlewareStack;
+			std::shared_ptr<Connection> conn;
 			{
 				std::lock_guard<std::mutex> lock(mu_);
+
+				auto it = connections_.find(connID);
+				if (it == connections_.end()) {
+					return;  // Connection no longer exists
+				}
+				conn = it->second;  // Copy shared_ptr to keep alive
+
 				handler = getService(serviceID);
 				middlewareStack = getMiddlewareStack(serviceID);
 			}

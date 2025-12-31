@@ -4,6 +4,32 @@
 #include "scg/tcp/transport_client.h"
 #include "scg/tcp/transport_client_tls.h"
 
+#include <csignal>
+#include <execinfo.h>
+#include <cxxabi.h>
+#include <unistd.h>
+
+void signalHandler(int sig) {
+	const int max_frames = 128;
+	void* buffer[max_frames];
+
+	std::cerr << "\n=== SIGNAL " << sig << " CAUGHT ===" << std::endl;
+
+	int nptrs = backtrace(buffer, max_frames);
+	std::cerr << "Backtrace (" << nptrs << " frames):" << std::endl;
+
+	char** symbols = backtrace_symbols(buffer, nptrs);
+	if (symbols) {
+		for (int i = 0; i < nptrs; i++) {
+			std::cerr << symbols[i] << std::endl;
+		}
+		free(symbols);
+	}
+
+	std::cerr << "=== END BACKTRACE ===" << std::endl;
+	_exit(1);
+}
+
 // ============================================================================
 // TCP Transport Factory
 // ============================================================================
@@ -79,6 +105,9 @@ TransportFactory createTCPTLSTransportFactory() {
 // ============================================================================
 
 void test_tcp_suite() {
+	signal(SIGSEGV, signalHandler);
+	signal(SIGABRT, signalHandler);
+
 	TestSuiteConfig config;
 	config.factory = createTCPTransportFactory();
 	config.startingId = 0;
@@ -87,6 +116,9 @@ void test_tcp_suite() {
 }
 
 void test_tcp_tls_suite() {
+	signal(SIGSEGV, signalHandler);
+	signal(SIGABRT, signalHandler);
+
 	TestSuiteConfig config;
 	config.factory = createTCPTLSTransportFactory();
 	config.startingId = 0;

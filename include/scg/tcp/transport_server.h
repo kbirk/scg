@@ -19,7 +19,7 @@ struct ServerTransportConfig {
 	uint32_t maxRecvMessageSize = 0; // 0 for no limit
 };
 
-class ServerTransportTCP : public scg::rpc::ServerTransport {
+class ServerTransportTCP : public scg::rpc::ServerTransport, public std::enable_shared_from_this<ServerTransportTCP> {
 public:
 	ServerTransportTCP(const ServerTransportConfig& config)
 		: config_(config)
@@ -77,20 +77,21 @@ private:
 	void start_accept()
 	{
 		auto socket = std::make_shared<asio::ip::tcp::socket>(io_context_);
-		acceptor_.async_accept(*socket, [this, socket](const asio::error_code& error) {
+
+		auto self = shared_from_this();
+		acceptor_.async_accept(*socket, [self, socket](const asio::error_code& error) {
 			if (!error) {
 				SCG_LOG_INFO("TCP server accepted new connection");
-				if (onConnectionHandler_) {
-					onConnectionHandler_(std::make_shared<ConnectionTCP>(std::move(*socket), config_.maxSendMessageSize, config_.maxRecvMessageSize));
+				if (self->onConnectionHandler_) {
+					self->onConnectionHandler_(std::make_shared<ConnectionTCP>(std::move(*socket), self->config_.maxSendMessageSize, self->config_.maxRecvMessageSize));
 				}
 			} else {
+				if (error == asio::error::operation_aborted) {
+					return; // clean shutdown
+				}
 				SCG_LOG_ERROR("TCP server accept error: " + error.message());
 			}
-
-			// Re-arm unless we're shutting down
-			if (acceptor_.is_open()) {
-				start_accept();
-			}
+			self->start_accept();
 		});
 	}
 

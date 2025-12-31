@@ -29,7 +29,7 @@ struct ClientTransportConfig {
 
 typedef websocketpp::client<websocketpp::config::asio_client> client;
 
-class ConnectionWS : public scg::rpc::Connection {
+class ConnectionWS : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionWS> {
 public:
 	ConnectionWS(client* c, websocketpp::connection_hdl hdl, uint32_t maxSendMessageSize = 0)
 		: client_(c)
@@ -46,17 +46,22 @@ public:
 
 	error::Error send(const std::vector<uint8_t>& data) override
 	{
-		if (closed_) return error::Error("Connection closed");
+		if (closed_) {
+			return error::Error("Connection closed");
+		}
 
 		if (maxSendMessageSize_ > 0 && data.size() > maxSendMessageSize_) {
 			return error::Error("Message size exceeds send limit");
 		}
 
-		websocketpp::lib::error_code ec;
-		client_->send(hdl_, data.data(), data.size(), websocketpp::frame::opcode::binary, ec);
-		if (ec) {
-			return error::Error(ec.message());
-		}
+		auto self = shared_from_this();
+		client_->get_io_service().post([self, data]() {
+			websocketpp::lib::error_code ec;
+			self->client_->send(self->hdl_, data.data(), data.size(), websocketpp::frame::opcode::binary, ec);
+			if (ec) {
+				SCG_LOG_ERROR("WebSocket send error: " + ec.message());
+			}
+		});
 		return nullptr;
 	}
 
@@ -66,13 +71,16 @@ public:
 
 		websocketpp::lib::error_code ec;
 		client::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
-		if (ec) return;
+		if (ec) {
+			return;
+		}
 
-		con->set_message_handler([this](websocketpp::connection_hdl, client::message_ptr msg) {
-			if (messageHandler_) {
+		auto self = shared_from_this();
+		con->set_message_handler([self](websocketpp::connection_hdl, client::message_ptr msg) {
+			if (self->messageHandler_) {
 				auto& payload = msg->get_payload();
 				std::vector<uint8_t> data(payload.begin(), payload.end());
-				messageHandler_(data);
+				self->messageHandler_(data);
 			}
 		});
 	}
@@ -82,10 +90,15 @@ public:
 		failHandler_ = handler;
 		websocketpp::lib::error_code ec;
 		client::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
-		if (ec) return;
+		if (ec) {
+			return;
+		}
 
-		con->set_fail_handler([this, con](websocketpp::connection_hdl) {
-			if (failHandler_) failHandler_(error::Error(con->get_ec().message()));
+		auto self = shared_from_this();
+		con->set_fail_handler([self, con](websocketpp::connection_hdl) {
+			if (self->failHandler_) {
+				self->failHandler_(error::Error(con->get_ec().message()));
+			}
 		});
 	}
 
@@ -94,19 +107,25 @@ public:
 		closeHandler_ = handler;
 		websocketpp::lib::error_code ec;
 		client::connection_ptr con = client_->get_con_from_hdl(hdl_, ec);
-		if (ec) return;
+		if (ec) {
+			return;
+		}
 
-		con->set_close_handler([this](websocketpp::connection_hdl) {
-			closed_ = true;
-			if (closeHandler_) closeHandler_();
+		auto self = shared_from_this();
+		con->set_close_handler([self](websocketpp::connection_hdl) {
+			self->closed_ = true;
+			if (self->closeHandler_) {
+				self->closeHandler_();
+			}
 		});
 	}
 
 	error::Error close() override
 	{
-		if (!closed_) {
+		// Atomically set closed_ to true if it was false
+		bool expected = false;
+		if (closed_.compare_exchange_strong(expected, true)) {
 			SCG_LOG_INFO("WebSocket connection closing");
-			closed_ = true;
 
 			// Ensure handlers are cleared so they don't run after destruction
 			// and to break potential reference cycles
@@ -123,7 +142,9 @@ public:
 			closeHandler_ = nullptr;
 
 			client_->close(hdl_, websocketpp::close::status::normal, "", ec);
-			if (ec) return error::Error(ec.message());
+			if (ec) {
+				return error::Error(ec.message());
+			}
 		}
 		return nullptr;
 	}

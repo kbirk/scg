@@ -231,18 +231,15 @@ protected:
 	template <typename T>
 	std::tuple<std::future<serialize::Reader>, uint64_t, error::Error> sendMessage(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
 	{
-		using scg::serialize::bit_size; // adl trickery
-
 		// Get request ID first (single lock for ID + promise registration)
 		uint64_t requestID = 0;
-		auto promise = std::make_shared<std::promise<serialize::Reader>>();
 		{
 			std::lock_guard<std::mutex> lock(mu_);
 			requestID = requestID_++;
-			requests_[requestID] = promise;
 		}
 
-		// Now create the writer with the correct size
+		using scg::serialize::bit_size; // adl trickery
+
 		serialize::Writer writer(
 			scg::serialize::bits_to_bytes(
 				bit_size(REQUEST_PREFIX) +
@@ -259,8 +256,12 @@ protected:
 		writer.write(methodID);
 		writer.write(msg);
 
-		// Send with lock
+		auto promise = std::make_shared<std::promise<serialize::Reader>>();
+
 		std::lock_guard<std::mutex> lock(mu_);
+
+		requests_[requestID] = promise;
+
 		auto err = sendBytesUnsafe(writer.bytes());
 		if (err) {
 			requests_.erase(requestID);
