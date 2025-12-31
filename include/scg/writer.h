@@ -13,13 +13,13 @@
 #include "scg/error.h"
 #include "scg/serialize.h"
 
-#define ENSURE_CAPACITY(cn, s) assert((s) <= bytes_.size() && cn " overflow: insufficient capacity");
-
 namespace scg {
 namespace serialize {
 
 class Writer {
 public:
+
+	inline Writer() = default;
 
 	inline explicit Writer(uint32_t size)
 	{
@@ -53,7 +53,7 @@ public:
 		uint8_t dstBitOffset = numBitsWritten_ & 7;
 
 		// Ensure capacity
-		ENSURE_CAPACITY("Writer", (numBitsWritten_ + num_bits_to_write + 7) / 8);
+		ensureCapacity((numBitsWritten_ + num_bits_to_write + 7) / 8);
 
 		// Calculate how many bits fit in the current byte
 		uint8_t bitsInFirstByte = 8 - dstBitOffset;
@@ -73,7 +73,7 @@ public:
 	{
 		if ((numBitsWritten_ & 7) == 0) {
 			uint32_t byteIndex = numBitsWritten_ >> 3;
-			ENSURE_CAPACITY("Writer", byteIndex + 1);
+			ensureCapacity(byteIndex + 1);
 			bytes_[byteIndex] = val;
 			numBitsWritten_ += 8;
 		} else {
@@ -87,12 +87,12 @@ public:
 			return;
 		}
 		if ((numBitsWritten_ & 7) == 0) {
-			ENSURE_CAPACITY("Writer", (numBitsWritten_ >> 3) + size);
+			ensureCapacity((numBitsWritten_ >> 3) + size);
 			uint32_t startByte = numBitsWritten_ >> 3;
 			std::copy(data, data + size, bytes_.begin() + startByte);
 			numBitsWritten_ += size * 8;
 		} else {
-			ENSURE_CAPACITY("Writer", (numBitsWritten_ + size * 8 + 7) / 8);
+			ensureCapacity((numBitsWritten_ + size * 8 + 7) / 8);
 			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
 			numBitsWritten_ += size * 8;
 		}
@@ -104,6 +104,13 @@ public:
 	}
 
 private:
+
+	inline void ensureCapacity(uint32_t bytes)
+	{
+		if (bytes > bytes_.size()) {
+			bytes_.resize(bytes * 2, 0);
+		}
+	}
 
 	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
 	{
@@ -169,7 +176,7 @@ public:
 		uint8_t dstBitOffset = numBitsWritten_ & 7;
 
 		// Ensure capacity
-		ENSURE_CAPACITY("WriterView", (numBitsWritten_ + num_bits_to_write + 7) / 8);
+		ensureCapacity((numBitsWritten_ + num_bits_to_write + 7) / 8);
 
 		// Calculate how many bits fit in the current byte
 		uint8_t bitsInFirstByte = 8 - dstBitOffset;
@@ -189,7 +196,7 @@ public:
 	{
 		if ((numBitsWritten_ & 7) == 0) {
 			uint32_t byteIndex = numBitsWritten_ >> 3;
-			ENSURE_CAPACITY("WriterView", byteIndex + 1);
+			ensureCapacity(byteIndex + 1);
 			bytes_[byteIndex] = val;
 			numBitsWritten_ += 8;
 		} else {
@@ -203,12 +210,12 @@ public:
 			return;
 		}
 		if ((numBitsWritten_ & 7) == 0) {
-			ENSURE_CAPACITY("WriterView", (numBitsWritten_ >> 3) + size);
+			ensureCapacity((numBitsWritten_ >> 3) + size);
 			uint32_t startByte = numBitsWritten_ >> 3;
 			std::copy(data, data + size, bytes_.begin() + startByte);
 			numBitsWritten_ += size * 8;
 		} else {
-			ENSURE_CAPACITY("WriterView", (numBitsWritten_ + size * 8 + 7) / 8);
+			ensureCapacity((numBitsWritten_ + size * 8 + 7) / 8);
 			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
 			numBitsWritten_ += size * 8;
 		}
@@ -220,6 +227,13 @@ public:
 	}
 
 private:
+
+	inline void ensureCapacity(uint32_t bytes) const
+	{
+		if (bytes > bytes_.size()) {
+			bytes_.resize(bytes * 2, 0);
+		}
+	}
 
 	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
 	{

@@ -224,7 +224,7 @@ public:
 
 		auto err = future.get();
 		if (err) {
-			SCG_LOG_ERROR("WebSocket TLS connection failed: " + err.message);
+			SCG_LOG_ERROR("WebSocket TLS connection failed: " + err.message());
 			return {nullptr, err};
 		}
 

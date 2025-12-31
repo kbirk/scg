@@ -8,8 +8,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
 
 # Include directories
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../include")
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/include")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../scg/generated")
+include_directories(SYSTEM "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/include")
 
 # Find gperftools
 find_library(PROFILER_LIB profiler)

@@ -508,7 +508,7 @@ void test_serialize_macros()
 
 	TestStructEmpty inputEmpty;
 
-	scg::serialize::Writer writer(scg::serialize::bits_to_bytes(bit_size(inputA) + bit_size(inputEmpty)));
+	scg::serialize::Writer writer;
 	serialize(writer, inputA);
 	serialize(writer, inputEmpty);
 
@@ -529,7 +529,7 @@ void test_serialize_macros()
 	inputDerivedA.b = 3.14;
 	inputDerivedA.c = "456";
 
-	scg::serialize::Writer writer2(scg::serialize::bits_to_bytes(bit_size(inputDerivedA)));
+	scg::serialize::Writer writer2;
 	serialize(writer2, inputDerivedA);
 
 	scg::serialize::Reader reader2(writer2.bytes());
@@ -543,7 +543,7 @@ void test_serialize_macros()
 
 	TestClassPrivate inputPrivate(123, 3.14);
 
-	scg::serialize::Writer writer3(scg::serialize::bits_to_bytes(bit_size(inputPrivate)));
+	scg::serialize::Writer writer3;
 	serialize(writer3, inputPrivate);
 
 	scg::serialize::Reader reader3(writer3.bytes());
@@ -556,7 +556,7 @@ void test_serialize_macros()
 
 	TestDerivedPrivate inputDerivedPrivate(123, 3.14, "456");
 
-	scg::serialize::Writer writer4(scg::serialize::bits_to_bytes(bit_size(inputDerivedPrivate)));
+	scg::serialize::Writer writer4;
 	serialize(writer4, inputDerivedPrivate);
 
 	scg::serialize::Reader reader4(writer4.bytes());
@@ -581,18 +581,8 @@ void test_serialize_multiple_types_in_sequence()
 	int64_t int64Value = -9876543210;
 	float64_t float64Value = 3.14159;
 
-	// Calculate total size
-	int totalSize = bit_size(strValue) +
-		bit_size(uuidValue) +
-		bit_size(timeValue) +
-		bit_size(boolValue) +
-		bit_size(uint8Value) +
-		bit_size(uint32Value) +
-		bit_size(int64Value) +
-		bit_size(float64Value);
-
 	// Serialize all types into a single buffer
-	scg::serialize::Writer writer(scg::serialize::bits_to_bytes(totalSize));
+	scg::serialize::Writer writer;
 	serialize(writer, strValue);
 	serialize(writer, uuidValue);
 	serialize(writer, timeValue);
@@ -657,14 +647,8 @@ void test_serialize_multiple_strings_in_sequence()
 		"final string with special chars \n\t@#$%"             // special chars
 	};
 
-	// Calculate total size
-	int totalSize = 0;
-	for (const auto& s : strings) {
-		totalSize += bit_size(s);
-	}
-
 	// Serialize all strings
-	scg::serialize::Writer writer(scg::serialize::bits_to_bytes(totalSize));
+	scg::serialize::Writer writer;
 	for (const auto& s : strings) {
 		serialize(writer, s);
 	}

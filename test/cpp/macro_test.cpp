@@ -39,7 +39,7 @@ SCG_SERIALIZABLE_DERIVED_PUBLIC(DerivedWithFields, Base, derived_val);
 int main() {
 	// Test Empty
 	{
-		scg::serialize::Writer writer(scg::serialize::bits_to_bytes(bit_size(Empty())));
+		scg::serialize::Writer writer;
 		Empty e1;
 		serialize(writer, e1);
 		std::cout << "Empty serialized: " << writer.bytes().size() << " bytes" << std::endl;
@@ -48,7 +48,7 @@ int main() {
 	// Test WithFields
 	{
 		WithFields wf1{42, 3.14};
-		scg::serialize::Writer writer(scg::serialize::bits_to_bytes(bit_size(wf1)));
+		scg::serialize::Writer writer;
 		serialize(writer, wf1);
 		std::cout << "WithFields serialized: " << writer.bytes().size() << " bytes" << std::endl;
 
@@ -65,7 +65,7 @@ int main() {
 	{
 		DerivedEmpty de1;
 		de1.base_val = 100;
-		scg::serialize::Writer writer(scg::serialize::bits_to_bytes(bit_size(de1)));
+		scg::serialize::Writer writer;
 		serialize(writer, de1);
 		std::cout << "DerivedEmpty serialized: " << writer.bytes().size() << " bytes" << std::endl;
 
@@ -82,7 +82,7 @@ int main() {
 		DerivedWithFields dwf1;
 		dwf1.base_val = 200;
 		dwf1.derived_val = 2.71;
-		scg::serialize::Writer writer(scg::serialize::bits_to_bytes(bit_size(dwf1)));
+		scg::serialize::Writer writer;
 		serialize(writer, dwf1);
 		std::cout << "DerivedWithFields serialized: " << writer.bytes().size() << " bytes" << std::endl;
 
