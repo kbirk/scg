@@ -57,7 +57,7 @@ mkdir -p ./test/cpp/build
 cd ./test/cpp/build
 cmake ../
 # Build only WebSocket-related targets
-make ws_tests server_ws_test server_ws_tls_test client_ws_tests client_ws_tls_tests
+make -j$(nproc) ws_tests server_ws_test server_ws_tls_test client_ws_tests client_ws_tls_tests
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}C++ WebSocket tests built successfully${NC}"
 else

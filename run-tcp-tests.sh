@@ -58,7 +58,7 @@ mkdir -p ./test/cpp/build
 cd ./test/cpp/build
 cmake ../
 # Build only TCP-related targets
-make tcp_tests server_tcp_test server_tcp_tls_test client_tcp_tests client_tcp_tls_tests
+make -j$(nproc) tcp_tests server_tcp_test server_tcp_tls_test client_tcp_tests client_tcp_tls_tests
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}C++ TCP tests built successfully${NC}"
 else

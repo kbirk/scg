@@ -41,7 +41,9 @@ public:
 
 	error::Error send(const std::vector<uint8_t>& data) override
 	{
-		if (closed_) return error::Error("Connection closed");
+		if (closed_) {
+			return error::Error("Connection closed");
+		}
 
 		uint32_t len = static_cast<uint32_t>(data.size());
 

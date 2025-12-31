@@ -14,7 +14,8 @@ namespace context {
 class Context {
 public:
 
-	Context() : hasDeadline_(false)
+	Context()
+		: hasDeadline_(false)
 	{
 	}
 

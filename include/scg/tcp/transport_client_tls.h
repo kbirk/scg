@@ -36,13 +36,17 @@ public:
 		, maxSendMessageSize_(maxSendMessageSize)
 		, maxRecvMessageSize_(maxRecvMessageSize)
 	{
-		socket_.lowest_layer().set_option(asio::ip::tcp::no_delay(true));
+		if (socket_.lowest_layer().is_open()) {
+			socket_.lowest_layer().set_option(asio::ip::tcp::no_delay(true));
+		}
 		SCG_LOG_INFO("TCP TLS connection established");
 	}
 
 	error::Error send(const std::vector<uint8_t>& data) override
 	{
-		if (closed_) return error::Error("Connection closed");
+		if (closed_) {
+			return error::Error("Connection closed");
+		}
 
 		uint32_t len = static_cast<uint32_t>(data.size());
 
