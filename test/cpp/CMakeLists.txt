@@ -37,6 +37,9 @@ add_executable(serialize_tests "serialize_tests.cpp")
 # UUID tests
 add_executable(uuid_tests "uuid_tests.cpp")
 
+# Error tests
+add_executable(error_tests "error_tests.cpp")
+
 # Macro test
 add_executable(macro_test "macro_test.cpp")
 

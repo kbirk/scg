@@ -1,8 +1,8 @@
 # scg - Simple Code Generator
 
-This is a toy code generator for generating messages and RPC client / server boilerplate.
+A lightweight, high-performance code generator for messages and RPC client/server boilerplate.
 
-Similar to protobuf + gRPC, but worse in every conceivable way.
+SCG provides efficient serialization and RPC performance while maintaining a significantly smaller footprint and simpler codebase than heavyweight alternatives.
 
 Message code is generated for both golang and C++ with JSON and binary serialization.
 
@@ -32,7 +32,7 @@ go install github.com/kbirk/scg/cmd/scg-cpp@latest
 
 ## Syntax:
 
-Shameless rip-off of protobuf / gRPC with a few simplifications and modifications.
+Familiar protobuf-inspired syntax with practical simplifications and enhancements.
 
 ```
 package pingpong;
@@ -522,7 +522,7 @@ inline scg::error::Error deserialize(glm::vec2& value, ReaderType& reader)
 }
 ```
 
-## Development / Testing:
+## Testing:
 
 Generate test files:
 

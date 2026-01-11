@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <cstring>
 #include <algorithm>
+#include <fstream>
 
 #include "scg/pack.h"
 #include "scg/error.h"
@@ -108,8 +109,8 @@ private:
 	inline void ensureCapacity(uint32_t neededBytes)
 	{
 		if (neededBytes > bytes_.size()) {
-			auto newSize = neededBytes > bytes_.size() * 2 ? neededBytes : bytes_.size() * 2;
-			bytes_.resize(newSize, 0);
+			bytes_.reserve(std::max(neededBytes, uint32_t(bytes_.capacity() * 2)));
+			bytes_.resize(neededBytes, 0);
 		}
 	}
 
@@ -229,10 +230,11 @@ public:
 
 private:
 
-	inline void ensureCapacity(uint32_t bytes) const
+	inline void ensureCapacity(uint32_t neededBytes)
 	{
-		if (bytes > bytes_.size()) {
-			bytes_.resize(bytes * 2, 0);
+		if (neededBytes > bytes_.size()) {
+			bytes_.reserve(std::max(neededBytes, uint32_t(bytes_.capacity() * 2)));
+			bytes_.resize(neededBytes, 0);
 		}
 	}
 
