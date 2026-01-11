@@ -20,15 +20,15 @@ echo "Benchmark run started at ${TIMESTAMP}" > "$RAW_OUTPUT"
 # ========================================
 # Go Benchmarks
 # ========================================
-# echo -e "${YELLOW}Running Go benchmarks...${NC}"
-# go test -bench=. -benchmem ./benchmark/go | tee -a "$RAW_OUTPUT"
-# if [ $? -eq 0 ]; then
-# 	echo -e "${GREEN}Go benchmarks completed successfully${NC}"
-#     echo "Go benchmarks completed successfully" >> "$RAW_OUTPUT"
-# else
-# 	echo -e "${RED}Go benchmarks failed${NC}"
-# 	exit 1
-# fi
+echo -e "${YELLOW}Running Go benchmarks...${NC}"
+go test -bench=. -benchmem ./benchmark/go | tee -a "$RAW_OUTPUT"
+if [ $? -eq 0 ]; then
+	echo -e "${GREEN}Go benchmarks completed successfully${NC}"
+    echo "Go benchmarks completed successfully" >> "$RAW_OUTPUT"
+else
+	echo -e "${RED}Go benchmarks failed${NC}"
+	exit 1
+fi
 
 # ========================================
 # C++ Benchmarks

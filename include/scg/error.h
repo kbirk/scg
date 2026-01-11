@@ -19,7 +19,7 @@ public:
 
 	inline explicit Error(const char* msg)
 	{
-		if (msg) {
+		if (msg && msg[0] != '\0') {
 			size_t len = std::strlen(msg);
 			msg_ = new char[len + 1];
 			std::memcpy(msg_, msg, len + 1);
@@ -28,9 +28,11 @@ public:
 
 	inline explicit Error(const std::string& msg)
 	{
-		size_t len = msg.size();
-		msg_ = new char[len + 1];
-		std::memcpy(msg_, msg.c_str(), len + 1);
+		if (!msg.empty()) {
+			size_t len = msg.size();
+			msg_ = new char[len + 1];
+			std::memcpy(msg_, msg.c_str(), len + 1);
+		}
 	}
 
 	inline Error(const Error& other)

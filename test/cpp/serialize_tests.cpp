@@ -383,9 +383,7 @@ void test_stream_writer_reader()
 
 	std::string filename = "/tmp/test_" + id.toString();
 
-	std::ofstream ofs(filename, std::ios::out | std::ios::binary);
-	scg::serialize::StreamWriter writer(ofs);
-
+	// Create test data
 	pingpong::NestedPayload nested1;
 	nested1.valString = "Hello, 世界";
 	nested1.valDouble = 3.14;
@@ -422,42 +420,115 @@ void test_stream_writer_reader()
 	input.valNestedEmpty = nested;
 	input.valByteArray = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
-	serialize(writer, input);
+	// Test 1: StreamWriter -> StreamReader
+	{
+		std::ofstream ofs(filename, std::ios::out | std::ios::binary);
+		scg::serialize::StreamWriter writer(ofs);
 
-	ofs.close();
+		serialize(writer, input);
 
-	std::ifstream ifs(filename, std::ios::in | std::ios::binary);
-	TEST_CHECK(ifs.is_open() && ifs.good());
+		ofs.close();
 
-	scg::serialize::StreamReader reader(ifs);
+		std::ifstream ifs(filename, std::ios::in | std::ios::binary);
+		TEST_CHECK(ifs.is_open() && ifs.good());
 
-	pingpong::TestPayload output;
-	auto err = deserialize(output, reader);
-	TEST_CHECK(!err);
+		scg::serialize::StreamReader reader(ifs);
 
-	TEST_CHECK(output.valUint8 == input.valUint8);
-	TEST_CHECK(output.valUint16 == input.valUint16);
-	TEST_CHECK(output.valUint32 == input.valUint32);
-	TEST_CHECK(output.valUint64 == input.valUint64);
-	TEST_CHECK(output.valInt8 == input.valInt8);
-	TEST_CHECK(output.valInt16 == input.valInt16);
-	TEST_CHECK(output.valInt32 == input.valInt32);
-	TEST_CHECK(output.valInt64 == input.valInt64);
-	TEST_CHECK(output.valFloat == input.valFloat);
-	TEST_CHECK(output.valDouble == input.valDouble);
-	TEST_CHECK(output.valString == input.valString);
-	TEST_CHECK(output.valBool == input.valBool);
-	TEST_CHECK(output.valEnum == input.valEnum);
-	TEST_CHECK(output.valUUID == input.valUUID);
-	TEST_CHECK(output.valListPayload.size() == 2);
-	TEST_CHECK(output.valListPayload[0].valString == nested1.valString);
-	TEST_CHECK(output.valListPayload[0].valDouble == nested1.valDouble);
-	TEST_CHECK(output.valListPayload[1].valString == nested2.valString);
-	TEST_CHECK(output.valListPayload[1].valDouble == nested2.valDouble);
-	TEST_CHECK(output.valMapKeyEnum.size() == 2);
-	TEST_CHECK(output.valMapKeyEnum[pingpong::KeyType("key_1")] == pingpong::EnumType::ENUM_TYPE_1);
-	TEST_CHECK(output.valMapKeyEnum[pingpong::KeyType("key_2")] == pingpong::EnumType::ENUM_TYPE_2);
-	TEST_CHECK(output.valByteArray.size() == input.valByteArray.size());
+		pingpong::TestPayload output;
+		auto err = deserialize(output, reader);
+		TEST_CHECK(!err);
+
+		TEST_CHECK(output.valUint8 == input.valUint8);
+		TEST_CHECK(output.valUint16 == input.valUint16);
+		TEST_CHECK(output.valUint32 == input.valUint32);
+		TEST_CHECK(output.valUint64 == input.valUint64);
+		TEST_CHECK(output.valInt8 == input.valInt8);
+		TEST_CHECK(output.valInt16 == input.valInt16);
+		TEST_CHECK(output.valInt32 == input.valInt32);
+		TEST_CHECK(output.valInt64 == input.valInt64);
+		TEST_CHECK(output.valFloat == input.valFloat);
+		TEST_CHECK(output.valDouble == input.valDouble);
+		TEST_CHECK(output.valString == input.valString);
+		TEST_CHECK(output.valBool == input.valBool);
+		TEST_CHECK(output.valEnum == input.valEnum);
+		TEST_CHECK(output.valUUID == input.valUUID);
+		TEST_CHECK(output.valListPayload.size() == 2);
+		TEST_CHECK(output.valListPayload[0].valString == nested1.valString);
+		TEST_CHECK(output.valListPayload[0].valDouble == nested1.valDouble);
+		TEST_CHECK(output.valListPayload[1].valString == nested2.valString);
+		TEST_CHECK(output.valListPayload[1].valDouble == nested2.valDouble);
+		TEST_CHECK(output.valMapKeyEnum.size() == 2);
+		TEST_CHECK(output.valMapKeyEnum[pingpong::KeyType("key_1")] == pingpong::EnumType::ENUM_TYPE_1);
+		TEST_CHECK(output.valMapKeyEnum[pingpong::KeyType("key_2")] == pingpong::EnumType::ENUM_TYPE_2);
+		TEST_CHECK(output.valByteArray.size() == input.valByteArray.size());
+
+		ifs.close();
+	}
+
+	// Test 2: Writer -> StreamReader (verify stream can read what Writer wrote)
+	{
+		scg::serialize::Writer writer;
+		serialize(writer, input);
+
+		// Write buffer to file
+		std::ofstream ofs(filename, std::ios::out | std::ios::binary);
+		const auto& bytes = writer.bytes();
+		ofs.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+		ofs.close();
+
+		// Read with StreamReader
+		std::ifstream ifs(filename, std::ios::in | std::ios::binary);
+		TEST_CHECK(ifs.is_open() && ifs.good());
+
+		scg::serialize::StreamReader reader(ifs);
+
+		pingpong::TestPayload output;
+		auto err = deserialize(output, reader);
+		TEST_CHECK(!err);
+
+		TEST_CHECK(output.valUint8 == input.valUint8);
+		TEST_CHECK(output.valUint16 == input.valUint16);
+		TEST_CHECK(output.valUint32 == input.valUint32);
+		TEST_CHECK(output.valString == input.valString);
+		TEST_CHECK(output.valUUID == input.valUUID);
+
+		ifs.close();
+	}
+
+	// Test 3: StreamWriter -> Reader (verify Reader can read what StreamWriter wrote)
+	{
+		std::ofstream ofs(filename, std::ios::out | std::ios::binary);
+		scg::serialize::StreamWriter writer(ofs);
+
+		serialize(writer, input);
+
+		ofs.close();
+
+		// Read file into buffer
+		std::ifstream ifs(filename, std::ios::in | std::ios::binary);
+		TEST_CHECK(ifs.is_open() && ifs.good());
+
+		ifs.seekg(0, std::ios::end);
+		size_t fileSize = ifs.tellg();
+		ifs.seekg(0, std::ios::beg);
+
+		std::vector<uint8_t> buffer(fileSize);
+		ifs.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+		ifs.close();
+
+		// Read with Reader
+		scg::serialize::Reader reader(buffer);
+
+		pingpong::TestPayload output;
+		auto err = deserialize(output, reader);
+		TEST_CHECK(!err);
+
+		TEST_CHECK(output.valUint8 == input.valUint8);
+		TEST_CHECK(output.valUint16 == input.valUint16);
+		TEST_CHECK(output.valUint32 == input.valUint32);
+		TEST_CHECK(output.valString == input.valString);
+		TEST_CHECK(output.valUUID == input.valUUID);
+	}
 }
 
 struct TestStructA {
