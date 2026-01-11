@@ -1,0 +1,83 @@
+package basic;
+
+typedef BasicString = string;
+
+typedef BasicUInt8 = uint8;
+
+typedef BasicFloat32 = float32;
+
+typedef AnotherID = uint32;
+
+typedef SomeID = uuid;
+
+const string TestStringConst = "This string has an \"escaped quoted portion\", holy moly!";
+
+const SomeID MySomeIDConst = "123e4567-e89b-12d3-a456-426614174000";
+
+const BasicFloat32 FloatConstID = 123.456;
+
+enum SomeEnum {
+	ValueA "value_a" = 0;
+	ValueB "VALUE_B" = 1;
+	ValueC "valueC" = 2;
+}
+
+message EmptyStruct {}
+
+message NestedEmpty {
+	EmptyStruct empty = 0;
+}
+
+message Tricky {
+	SomeID id = 0;
+}
+
+message BasicStruct {
+	uint8 val_uint_8 = 0;
+	int8 val_int_8 = 1;
+	uint16 val_uint_16  = 2;
+	int16 val_int_16  = 3;
+	uint32 val_uint_32  = 4;
+	int32 val_int_32  = 5;
+	uint64 val_uint_64  = 6;
+	int64 val_int_64  = 7;
+	string val_string = 8;
+	list<string> val_array_string = 9;
+	map<string, float32> val_map_string_float_32 = 10;
+	timestamp val_timestamp = 11;
+	SomeEnum val_enum = 12;
+	uuid val_uuid = 19;
+	list<SomeEnum> val_list_enum = 13;
+	map<SomeEnum, string> val_map_enum_string = 14;
+	map<string, SomeEnum> val_map_string_enum = 15;
+	EmptyStruct val_empty = 16;
+	NestedEmpty val_nested_empty = 17;
+	list<byte> val_byte_array = 18;
+}
+
+message StructA {
+	int8 val_int_8 = 0;
+	float32 val_float_32 = 1;
+	bool val_bool = 2;
+	map<uint8,string> val_map_uint8_string = 3;
+	list<timestamp> val_timestamp = 4;
+	map<string, timestamp> val_map_string_timestamp = 5;
+}
+
+message StructB {
+	list<int32> val_array_int = 0;
+	map<string, int32> val_map_string_int = 1;
+	map<int8, map<int16, string>> val_map_uint8_map_uint16_string = 2;
+}
+
+message StructC {
+	BasicString str = 0;
+	list<BasicString> strs = 1;
+	map<BasicString, BasicString> str_map = 2;
+}
+
+message ComplicatedStruct {
+	map<string, StructA> struct_a_map = 0;
+	list<StructB> struct_b_array = 1;
+	StructC struct_c = 2;
+}

@@ -16,18 +16,24 @@ type FileArgs struct {
 	Typedefs   string
 	Consts     string
 	Messages   string
-	// Servers  string
-	Clients string
+	Servers    string
+	Clients    string
 }
 
 const fileTemplateStr = `
 {{.Header}}
 {{.Imports}}{{ range .Namespaces }}
 namespace {{.}} { {{end}}
+
+// Import float type aliases from scg::serialize namespace
+using scg::serialize::float32_t;
+using scg::serialize::float64_t;
+
 {{.Enums}}
 {{.Typedefs}}
 {{.Consts}}
 {{.Messages}}
+{{.Servers}}
 {{.Clients}}{{ range .Namespaces }}
 } {{end}}
 `
@@ -86,14 +92,14 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 		messageCode = append(messageCode, message)
 	}
 
-	// var serverCode []string
-	// for _, svc := range file.ServicesSortedByKey() {
-	// 	service, err := generateServerGoCode(pkg, svc)
-	// 	if err != nil {
-	// 		return "", err
-	// 	}
-	// 	serverCode = append(serverCode, service)
-	// }
+	var serverCode []string
+	for _, svc := range file.ServiceDefinitions {
+		service, err := generateServerCppCode(pkg, svc)
+		if err != nil {
+			return "", err
+		}
+		serverCode = append(serverCode, service)
+	}
 
 	var clientCode []string
 	for _, svc := range file.ServiceDefinitions {
@@ -112,8 +118,8 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 		Typedefs:   strings.Join(typedefCode, "\n"),
 		Consts:     strings.Join(constsCode, "\n"),
 		Messages:   strings.Join(messageCode, "\n"),
-		// Servers:    strings.Join(serverCode, "\n"),
-		Clients: strings.Join(clientCode, "\n"),
+		Servers:    strings.Join(serverCode, "\n"),
+		Clients:    strings.Join(clientCode, "\n"),
 	}
 
 	buf := &bytes.Buffer{}
@@ -122,5 +128,5 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 		return "", err
 	}
 
-	return string(buf.Bytes()), nil
+	return buf.String(), nil
 }

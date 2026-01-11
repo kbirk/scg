@@ -4,8 +4,11 @@
 .vscode-cpp-build
 
 third_party/include
-.build
 
 test/*.crt
 test/*.key
-test/files/output
+test/scg/generated
+test/cpp/build
+benchmark/scg/generated
+benchmark/cpp/build
+benchmark/reports/

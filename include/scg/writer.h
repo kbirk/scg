@@ -6,8 +6,9 @@
 #include <vector>
 #include <cassert>
 #include <type_traits>
+#include <cstring>
+#include <algorithm>
 
-#include "scg/serialize.h"
 #include "scg/pack.h"
 #include "scg/error.h"
 #include "scg/serialize.h"
@@ -15,11 +16,17 @@
 namespace scg {
 namespace serialize {
 
-class IWriter {
+class Writer {
 public:
-	virtual ~IWriter() = default;
 
-	virtual const std::vector<uint8_t>& bytes() const = 0;
+	inline Writer() = default;
+
+	inline explicit Writer(uint32_t size)
+	{
+		assert(size > 0 && "Writer must be created with non-zero size");
+
+		bytes_.resize(size, 0);
+	}
 
 	template <typename T>
 	inline void write(const T& data)
@@ -27,53 +34,68 @@ public:
 		serialize(*this, data);
 	}
 
-	inline void writeBits(uint8_t val, uint32_t num_bits_to_write)
+	void clear()
 	{
-		uint32_t total_bits_to_write = num_bits_to_write;
+		numBitsWritten_ = 0;
+		std::memset(bytes_.data(), 0, bytes_.size());
+	}
 
-		while (num_bits_to_write > 0) {
-			uint32_t dst_byte_index = get_byte_offset(numBitsWritten_);
-			uint8_t dst_bit_index =  get_bit_offset(numBitsWritten_);
-			uint8_t src_bit_index = get_bit_offset(total_bits_to_write - num_bits_to_write);
+	void writeBits(uint8_t val, uint32_t num_bits_to_write)
+	{
+		if (num_bits_to_write == 0) {
+			return;
+		}
 
-			assert((src_bit_index <= 7) && "Invalid bit index");
-			assert((dst_bit_index <= 7) && "Invalid bit index");
+		// Mask val to ensure we only write numBitsToWrite bits
+		val &= (1 << num_bits_to_write) - 1;
 
-			uint8_t src_mask = 1 << src_bit_index;
-			uint8_t dst_mask = 1 << dst_bit_index;
+		uint32_t dstByteIndex = numBitsWritten_ >> 3;
+		uint8_t dstBitOffset = numBitsWritten_ & 7;
 
-			if (val & src_mask) {
-				writeBit(dst_byte_index, dst_mask);
-			} else {
-				writeBit(dst_byte_index, 0x00); // in case it needs to grow
-			}
+		// Ensure capacity
+		ensureCapacity((numBitsWritten_ + num_bits_to_write + 7) / 8);
 
-			numBitsWritten_++;
-			num_bits_to_write--;
+		// Calculate how many bits fit in the current byte
+		uint8_t bitsInFirstByte = 8 - dstBitOffset;
+
+		// Write first part
+		bytes_[dstByteIndex] |= val << dstBitOffset;
+
+		if (num_bits_to_write > bitsInFirstByte) {
+			// Spans two bytes, write second part
+			bytes_[dstByteIndex + 1] |= val >> bitsInFirstByte;
+		}
+
+		numBitsWritten_ += num_bits_to_write;
+	}
+
+	void writeByte(uint8_t val)
+	{
+		if ((numBitsWritten_ & 7) == 0) {
+			uint32_t byteIndex = numBitsWritten_ >> 3;
+			ensureCapacity(byteIndex + 1);
+			bytes_[byteIndex] = val;
+			numBitsWritten_ += 8;
+		} else {
+			writeBits(val, 8);
 		}
 	}
 
-protected:
-
-	virtual void writeBit(uint32_t destByteIndex, uint8_t bitMask) = 0;
-
-	uint32_t numBitsWritten_ = 0;
-};
-
-
-class Writer : public IWriter {
-public:
-
-	using IWriter::write;
-
-	inline Writer()
+	void writeBytes(const uint8_t* data, uint32_t size)
 	{
-		bytes_.reserve(1024);
-	}
-
-	inline explicit Writer(uint32_t size)
-	{
-		bytes_.reserve(size);
+		if (size == 0) {
+			return;
+		}
+		if ((numBitsWritten_ & 7) == 0) {
+			ensureCapacity((numBitsWritten_ >> 3) + size);
+			uint32_t startByte = numBitsWritten_ >> 3;
+			std::copy(data, data + size, bytes_.begin() + startByte);
+			numBitsWritten_ += size * 8;
+		} else {
+			ensureCapacity((numBitsWritten_ + size * 8 + 7) / 8);
+			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
+			numBitsWritten_ += size * 8;
+		}
 	}
 
 	inline const std::vector<uint8_t>& bytes() const
@@ -81,30 +103,123 @@ public:
 		return bytes_;
 	}
 
-protected:
-
-	inline void writeBit(uint32_t byteIndex, uint8_t mask)
-	{
-		if (byteIndex >= bytes_.size()) {
-			bytes_.push_back(0);
-		}
-		bytes_[byteIndex] |= mask;
-	}
-
 private:
 
+	inline void ensureCapacity(uint32_t neededBytes)
+	{
+		if (neededBytes > bytes_.size()) {
+			auto newSize = neededBytes > bytes_.size() * 2 ? neededBytes : bytes_.size() * 2;
+			bytes_.resize(newSize, 0);
+		}
+	}
+
+	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
+	{
+		uint32_t byteIndex = numBitsWritten_ >> 3;
+		uint8_t shift = bitOffset;
+		uint8_t invShift = 64 - shift;
+
+		uint32_t i = 0;
+		if (size >= 8) {
+			for (; i <= size - 8; i += 8) {
+				uint64_t val;
+				std::memcpy(&val, data + i, 8);
+
+				uint64_t low = val << shift;
+				uint64_t high = val >> invShift;
+
+				uint64_t dst_val;
+				std::memcpy(&dst_val, bytes_.data() + byteIndex + i, 8);
+				dst_val |= low;
+				std::memcpy(bytes_.data() + byteIndex + i, &dst_val, 8);
+
+				bytes_[byteIndex + i + 8] |= (uint8_t)high;
+			}
+		}
+
+		uint8_t byteShift = bitOffset;
+		uint8_t byteInvShift = 8 - byteShift;
+		for (; i < size; ++i) {
+			bytes_[byteIndex + i] |= data[i] << byteShift;
+			bytes_[byteIndex + i + 1] |= data[i] >> byteInvShift;
+		}
+	}
+
 	std::vector<uint8_t> bytes_;
+	uint32_t numBitsWritten_ = 0;
 };
 
-class WriterView : public IWriter {
+class WriterView {
 public:
-
-	using IWriter::write;
-	using scg::serialize::IWriter::writeBits;
 
 	inline explicit WriterView(std::vector<uint8_t>& data)
 		: bytes_(data)
 	{
+		assert(!data.empty() && "WriterView must be created with non-zero size");
+	}
+
+	template <typename T>
+	inline void write(const T& data)
+	{
+		serialize(*this, data);
+	}
+
+	void writeBits(uint8_t val, uint32_t num_bits_to_write)
+	{
+		if (num_bits_to_write == 0) {
+			return;
+		}
+
+		// Mask val to ensure we only write numBitsToWrite bits
+		val &= (1 << num_bits_to_write) - 1;
+
+		uint32_t dstByteIndex = numBitsWritten_ >> 3;
+		uint8_t dstBitOffset = numBitsWritten_ & 7;
+
+		// Ensure capacity
+		ensureCapacity((numBitsWritten_ + num_bits_to_write + 7) / 8);
+
+		// Calculate how many bits fit in the current byte
+		uint8_t bitsInFirstByte = 8 - dstBitOffset;
+
+		// Write first part
+		bytes_[dstByteIndex] |= val << dstBitOffset;
+
+		if (num_bits_to_write > bitsInFirstByte) {
+			// Spans two bytes, write second part
+			bytes_[dstByteIndex + 1] |= val >> bitsInFirstByte;
+		}
+
+		numBitsWritten_ += num_bits_to_write;
+	}
+
+	void writeByte(uint8_t val)
+	{
+		if ((numBitsWritten_ & 7) == 0) {
+			uint32_t byteIndex = numBitsWritten_ >> 3;
+			ensureCapacity(byteIndex + 1);
+			bytes_[byteIndex] = val;
+			numBitsWritten_ += 8;
+		} else {
+			writeBits(val, 8);
+		}
+	}
+
+	void writeBytes(const uint8_t* data, uint32_t size)
+	{
+		if (size == 0) {
+			return;
+		}
+		if ((numBitsWritten_ & 7) == 0) {
+			ensureCapacity((numBitsWritten_ >> 3) + size);
+			uint32_t startByte = numBitsWritten_ >> 3;
+			std::copy(data, data + size, bytes_.begin() + startByte);
+			numBitsWritten_ += size * 8;
+		} else {
+			ensureCapacity((numBitsWritten_ + size * 8 + 7) / 8);
+			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
+			numBitsWritten_ += size * 8;
+		}
 	}
 
 	inline const std::vector<uint8_t>& bytes() const
@@ -112,44 +227,127 @@ public:
 		return bytes_;
 	}
 
-protected:
-
-	inline void writeBit(uint32_t byteIndex, uint8_t mask)
-	{
-		if (byteIndex >= bytes_.size()) {
-			bytes_.push_back(0);
-		}
-		bytes_[byteIndex] |= mask;
-	}
-
 private:
 
+	inline void ensureCapacity(uint32_t bytes) const
+	{
+		if (bytes > bytes_.size()) {
+			bytes_.resize(bytes * 2, 0);
+		}
+	}
+
+	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
+	{
+		uint32_t byteIndex = numBitsWritten_ >> 3;
+		uint8_t shift = bitOffset;
+		uint8_t invShift = 64 - shift;
+
+		uint32_t i = 0;
+		if (size >= 8) {
+			for (; i <= size - 8; i += 8) {
+				uint64_t val;
+				std::memcpy(&val, data + i, 8);
+
+				uint64_t low = val << shift;
+				uint64_t high = val >> invShift;
+
+				uint64_t dst_val;
+				std::memcpy(&dst_val, bytes_.data() + byteIndex + i, 8);
+				dst_val |= low;
+				std::memcpy(bytes_.data() + byteIndex + i, &dst_val, 8);
+
+				bytes_[byteIndex + i + 8] |= (uint8_t)high;
+			}
+		}
+
+		uint8_t byteShift = bitOffset;
+		uint8_t byteInvShift = 8 - byteShift;
+		for (; i < size; ++i) {
+			bytes_[byteIndex + i] |= data[i] << byteShift;
+			bytes_[byteIndex + i + 1] |= data[i] >> byteInvShift;
+		}
+	}
+
 	std::vector<uint8_t>& bytes_;
+	uint32_t numBitsWritten_ = 0;
 };
 
-class StreamWriter : scg::serialize::IWriter {
+class StreamWriter {
 public:
 
-	using scg::serialize::IWriter::write;
-	using scg::serialize::IWriter::writeBits;
-
-	StreamWriter(std::ostream& stream)
+	inline explicit StreamWriter(std::ostream& stream)
 		: stream_(stream)
-	{}
-
-	inline const std::vector<uint8_t>& bytes() const
 	{
-		assert(false && "StreamWriter::bytes() called on a StreamWriter");
+	}
+
+	template <typename T>
+	inline void write(const T& data)
+	{
+		serialize(*this, data);
+	}
+
+	void writeBits(uint8_t val, uint32_t num_bits_to_write)
+	{
+		if (num_bits_to_write == 0) {
+			return;
+		}
+
+		// Mask val to ensure we only write numBitsToWrite bits
+		val &= (1 << num_bits_to_write) - 1;
+
+		uint32_t dstByteIndex = numBitsWritten_ >> 3;
+		uint8_t dstBitOffset = numBitsWritten_ & 7;
+
+		// Calculate how many bits fit in the current byte
+		uint8_t bitsInFirstByte = 8 - dstBitOffset;
+
+		if (num_bits_to_write <= bitsInFirstByte) {
+			// Fits in one byte
+			orByte(dstByteIndex, val << dstBitOffset);
+		} else {
+			// Spans two bytes
+			// Write first part
+			orByte(dstByteIndex, val << dstBitOffset);
+
+			// Write second part
+			orByte(dstByteIndex + 1, val >> bitsInFirstByte);
+		}
+
+		numBitsWritten_ += num_bits_to_write;
+	}
+
+	void writeByte(uint8_t val)
+	{
+		if ((numBitsWritten_ & 7) == 0) {
+			orByte(numBitsWritten_ >> 3, val);
+			numBitsWritten_ += 8;
+		} else {
+			writeBits(val, 8);
+		}
+	}
+
+	void writeBytes(const uint8_t* data, uint32_t size)
+	{
+		if (size == 0) {
+			return;
+		}
+		if ((numBitsWritten_ & 7) == 0) {
+			writeBytesAligned(data, size);
+			numBitsWritten_ += size * 8;
+		} else {
+			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
+			numBitsWritten_ += size * 8;
+		}
 	}
 
 protected:
 
-	inline void writeBit(uint32_t byteIndex, uint8_t mask)
+	void orByte(uint32_t index, uint8_t mask)
 	{
-		if (byteIndex > currentByteIndex_) {
-			assert((byteIndex == currentByteIndex_ + 1) && "StreamWriter::writeBit() called with a byte index that is not the next byte in the stream");
+		if (index > currentByteIndex_) {
+			assert((index == currentByteIndex_ + 1) && "StreamWriter::orByte() called with a byte index that is not the next byte in the stream");
 			currentByte_ = 0;
-			currentByteIndex_ = byteIndex;
+			currentByteIndex_ = index;
 		}
 
 		currentByte_ |= mask;
@@ -158,51 +356,31 @@ protected:
 		stream_.write(reinterpret_cast<const char*>(&currentByte_), 1);
 	}
 
+	void writeBytesAligned(const uint8_t* data, uint32_t size)
+	{
+		stream_.write(reinterpret_cast<const char*>(data), size);
+		currentByteIndex_ += size;
+		currentByte_ = 0;
+	}
+
+	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
+	{
+		uint32_t byteIndex = numBitsWritten_ >> 3;
+		uint8_t shift = bitOffset;
+		uint8_t invShift = 8 - shift;
+		for (uint32_t i = 0; i < size; ++i) {
+			orByte(byteIndex, data[i] << shift);
+			orByte(byteIndex + 1, data[i] >> invShift);
+			byteIndex++;
+		}
+	}
+
 private:
 
 	uint8_t currentByte_ = 0;
 	int64_t currentByteIndex_ = -1;
 	std::ostream& stream_;
-};
-
-class FixedSizeWriter : public IWriter {
-public:
-
-	using IWriter::write;
-	using scg::serialize::IWriter::writeBits;
-
-	inline explicit FixedSizeWriter(uint32_t size)
-		: bytes_(size, 0)
-	{
-	}
-
-	inline const std::vector<uint8_t>& bytes() const
-	{
-		assert(bytes_.size() == bytes_.capacity() && std::string("FixedSizeWriter::bytes() called before all data was written" + (std::to_string(bytes_.size()) + " != " + std::to_string(bytes_.capacity()))).c_str());
-
-		return bytes_;
-	}
-
-	inline uint8_t* getDestinationByte(uint32_t byteIndex)
-	{
-		assert(byteIndex < bytes_.size() && "FixedSizeWriter::getDestinationByte() called with an index greater than the capacity");
-
-		return &bytes_[byteIndex];
-	}
-
-protected:
-
-	inline void writeBit(uint32_t byteIndex, uint8_t mask)
-	{
-		assert(byteIndex < bytes_.size() && "FixedSizeWriter::getDestinationByte() called with an index greater than the capacity");
-
-		bytes_[byteIndex] |= mask;
-	}
-
-
-private:
-
-	std::vector<uint8_t> bytes_;
+	uint32_t numBitsWritten_ = 0;
 };
 
 }

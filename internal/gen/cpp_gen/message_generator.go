@@ -40,7 +40,7 @@ struct {{.MessageNamePascalCase}} : scg::type::Message { {{- range .MessageField
 };{{if gt (len .MessageFields) 0}}
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE({{.MessageNamePascalCase}}, {{.MessageFieldsCommaSeparated}}){{else}}
 inline void to_json(nlohmann::json& j, const {{.MessageNamePascalCase}}& m) {
-    j = nlohmann::json::object();
+	j = nlohmann::json::object();
 }
 
 inline void from_json(const nlohmann::json& j, {{.MessageNamePascalCase}}& m) {
@@ -92,8 +92,9 @@ void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& data)
 
 std::vector<uint8_t> {{.MessageNamePascalCase}}::toBytes() const
 {
+	// Use view for copy elision
 	std::vector<uint8_t> data;
-	data.reserve(scg::serialize::bits_to_bytes(bit_size(*this)));
+	data.resize(scg::serialize::bits_to_bytes(bit_size(*this)), 0);
 	scg::serialize::WriterView writer(data);
 	serialize(writer, *this);
 	return data;

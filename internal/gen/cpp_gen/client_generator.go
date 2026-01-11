@@ -46,18 +46,18 @@ public:
 
 	inline scg::error::Error {{.MethodNameCamelCase}}({{.MethodResponseStructName}}* resp, scg::context::Context& c, const {{.MethodRequestStructName}}& req) const
 	{
-		auto handler = [this, req, resp](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<scg::type::Message*, scg::error::Error> {
+		auto handler = [this, req, resp](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
 			auto [reader, err] = client_->call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req);
 			if (err) {
-				return std::pair(nullptr, err);
+				return std::make_pair(nullptr, err);
 			}
 
 			err = reader.read(*resp);
 			if (err) {
-				return std::pair(nullptr, err);
+				return std::make_pair(nullptr, err);
 			}
 
-			return std::pair(resp, nullptr);
+			return std::make_pair(std::shared_ptr<scg::type::Message>(resp, [](scg::type::Message*){}), nullptr);
 		};
 
 		auto& middleware = client_->middleware();
@@ -80,10 +80,6 @@ func serviceIDVarName(serviceName string) string {
 
 func methodIDVarName(serviceName string, methodName string) string {
 	return fmt.Sprintf("%s_%sID", util.EnsureCamelCase(serviceName), util.EnsurePascalCase(methodName))
-}
-
-func getServerStubStructName(serviceName string) string {
-	return fmt.Sprintf("%s_Stub", util.EnsureCamelCase(serviceName))
 }
 
 func generateServiceMethodParams(method *parse.ServiceMethodDefinition) (string, string, error) {
@@ -125,7 +121,7 @@ func generateClientCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		}
 		args.ClientMethods = append(args.ClientMethods, ClientMethodArgs{
 			MethodNameCamelCase:      util.EnsureCamelCase(name),
-			MethodIDVarName:          methodIDVarName(util.EnsureCamelCase(name), util.EnsurePascalCase(name)),
+			MethodIDVarName:          methodIDVarName(svc.Name, name),
 			MethodID:                 methodID,
 			MethodRequestStructName:  methodArgType,
 			MethodResponseStructName: methodRetType,

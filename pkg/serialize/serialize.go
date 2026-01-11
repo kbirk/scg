@@ -1,7 +1,9 @@
 package serialize
 
 import (
+	"fmt"
 	"time"
+	"unsafe"
 
 	"github.com/google/uuid"
 )
@@ -10,21 +12,12 @@ func BitSizeUUID(data uuid.UUID) int {
 	return BytesToBits(16)
 }
 
-func SerializeUUID(writer *FixedSizeWriter, data uuid.UUID) {
-	for _, b := range data {
-		writer.WriteBits(b, 8)
-	}
+func SerializeUUID(writer *Writer, data uuid.UUID) {
+	writer.WriteBytes(data[:])
 }
 
 func DeserializeUUID(data *uuid.UUID, reader *Reader) error {
-	for i := 0; i < 16; i++ {
-		var b byte
-		if err := reader.ReadBits(&b, 8); err != nil {
-			return err
-		}
-		data[i] = b
-	}
-	return nil
+	return reader.ReadBytes(data[:])
 }
 
 func BitSizeTime(data time.Time) int {
@@ -35,7 +28,7 @@ func BitSizeTime(data time.Time) int {
 	return BitSizeUInt64(uint64(seconds)) + BitSizeUInt64(uint64(nanoseconds))
 }
 
-func SerializeTime(writer *FixedSizeWriter, data time.Time) {
+func SerializeTime(writer *Writer, data time.Time) {
 	timeUTC := data.UTC()
 	seconds := timeUTC.Unix()                                      // number of seconds since Unix epoch
 	nanoseconds := timeUTC.UnixNano() - seconds*int64(time.Second) // remaining nanoseconds
@@ -65,31 +58,41 @@ func BitSizeString(data string) int {
 	return BitSizeUInt32(uint32(ln)) + BytesToBits(ln)
 }
 
-func SerializeString(writer *FixedSizeWriter, data string) {
+func SerializeString(writer *Writer, data string) {
 	SerializeUInt32(writer, uint32(len(data)))
-	for i := 0; i < len(data); i++ {
-		writer.WriteBits(data[i], 8)
-	}
+	writer.WriteBytes([]byte(data))
 }
 
 func DeserializeString(data *string, reader *Reader) error {
 	var length uint32
-	err := DeserializeUInt32(&length, reader)
-	if err != nil {
+	if err := DeserializeUInt32(&length, reader); err != nil {
 		return err
 	}
 
-	// two allocations...
-	bs := make([]byte, length)
-	for i := uint32(0); i < length; i++ {
-		var b byte
-		err := reader.ReadBits(&b, 8)
-		if err != nil {
-			return err
-		}
-		bs[i] = b
+	if length == 0 {
+		*data = ""
+		return nil
 	}
-	*data = string(bs)
+
+	// Fast path for byte-aligned reads
+	if reader.numBitsRead&7 == 0 {
+		byteIndex := reader.numBitsRead >> 3
+		if int(byteIndex)+int(length) > len(reader.bytes) {
+			return fmt.Errorf("Reader does not contain enough data to fill the argument")
+		}
+		*data = string(reader.bytes[byteIndex : byteIndex+uint32(length)])
+		reader.numBitsRead += length * 8
+		return nil
+	}
+
+	// Use ReadBytes for optimized unaligned reading
+	buf := make([]byte, length)
+	if err := reader.ReadBytes(buf); err != nil {
+		return err
+	}
+	// NOTE: buf is uniquely allocated and never mutated after this point
+	// Safe zero-copy conversion
+	*data = unsafe.String(&buf[0], len(buf))
 	return nil
 }
 
@@ -97,7 +100,7 @@ func BitSizeBool(bool) int {
 	return 1
 }
 
-func SerializeBool(writer *FixedSizeWriter, data bool) {
+func SerializeBool(writer *Writer, data bool) {
 	ui := uint8(0)
 	if data {
 		ui = 1
@@ -123,19 +126,19 @@ func BitSizeUInt8(data uint8) int {
 	return 8
 }
 
-func SerializeUInt8(writer *FixedSizeWriter, data uint8) {
-	writer.WriteBits(data, 8)
+func SerializeUInt8(writer *Writer, data uint8) {
+	writer.WriteByte(data)
 }
 
 func DeserializeUInt8(data *uint8, reader *Reader) error {
-	return reader.ReadBits(data, 8)
+	return reader.ReadByte(data)
 }
 
 func BitSizeUInt16(data uint16) int {
 	return int(varUintBitSize(uint64(data), 2))
 }
 
-func SerializeUInt16(writer *FixedSizeWriter, data uint16) {
+func SerializeUInt16(writer *Writer, data uint16) {
 	varEncodeUint(writer, uint64(data), 2)
 }
 
@@ -153,7 +156,7 @@ func BitSizeUInt32(data uint32) int {
 	return int(varUintBitSize(uint64(data), 4))
 }
 
-func SerializeUInt32(writer *FixedSizeWriter, data uint32) {
+func SerializeUInt32(writer *Writer, data uint32) {
 	varEncodeUint(writer, uint64(data), 4)
 }
 
@@ -171,7 +174,7 @@ func BitSizeUInt64(data uint64) int {
 	return int(varUintBitSize(data, 8))
 }
 
-func SerializeUInt64(writer *FixedSizeWriter, data uint64) {
+func SerializeUInt64(writer *Writer, data uint64) {
 	varEncodeUint(writer, uint64(data), 8)
 }
 
@@ -183,7 +186,7 @@ func BitSizeInt8(data int8) int {
 	return BitSizeUInt8(uint8(data))
 }
 
-func SerializeInt8(writer *FixedSizeWriter, data int8) {
+func SerializeInt8(writer *Writer, data int8) {
 	SerializeUInt8(writer, uint8(data))
 }
 
@@ -201,7 +204,7 @@ func BitSizeInt16(data int16) int {
 	return int(varIntBitSize(int64(data), 2))
 }
 
-func SerializeInt16(writer *FixedSizeWriter, data int16) {
+func SerializeInt16(writer *Writer, data int16) {
 	varEncodeInt(writer, int64(data), 2)
 }
 
@@ -219,7 +222,7 @@ func BitSizeInt32(data int32) int {
 	return int(varIntBitSize(int64(data), 4))
 }
 
-func SerializeInt32(writer *FixedSizeWriter, data int32) {
+func SerializeInt32(writer *Writer, data int32) {
 	varEncodeInt(writer, int64(data), 4)
 }
 
@@ -237,7 +240,7 @@ func BitSizeInt64(data int64) int {
 	return int(varIntBitSize(data, 8))
 }
 
-func SerializeInt64(writer *FixedSizeWriter, data int64) {
+func SerializeInt64(writer *Writer, data int64) {
 	varEncodeInt(writer, data, 8)
 }
 
@@ -249,28 +252,17 @@ func BitSizeFloat32(data float32) int {
 	return BytesToBits(4)
 }
 
-func SerializeFloat32(writer *FixedSizeWriter, data float32) {
-	packed := Pack754_32(data)
-	writer.WriteBits(uint8(packed>>24), 8)
-	writer.WriteBits(uint8(packed>>16), 8)
-	writer.WriteBits(uint8(packed>>8), 8)
-	writer.WriteBits(uint8(packed), 8)
+func SerializeFloat32(writer *Writer, data float32) {
+	writer.WriteBytes(PackFloat32(data))
 }
 
 func DeserializeFloat32(data *float32, reader *Reader) error {
-
-	var a, b, c, d uint8
-	reader.ReadBits(&a, 8)
-	reader.ReadBits(&b, 8)
-	reader.ReadBits(&c, 8)
-	reader.ReadBits(&d, 8)
-
-	packed :=
-		(uint32(a) << 24) |
-			(uint32(b) << 16) |
-			(uint32(c) << 8) |
-			uint32(d)
-	*data = Unpack754_32(packed)
+	b := []byte{0, 0, 0, 0}
+	err := reader.ReadBytes(b)
+	if err != nil {
+		return err
+	}
+	*data = UnpackFloat32(b)
 	return nil
 }
 
@@ -278,39 +270,16 @@ func BitSizeFloat64(data float64) int {
 	return BytesToBits(8)
 }
 
-func SerializeFloat64(writer *FixedSizeWriter, data float64) {
-	packed := Pack754_64(data)
-	writer.WriteBits(uint8(packed>>56), 8)
-	writer.WriteBits(uint8(packed>>48), 8)
-	writer.WriteBits(uint8(packed>>40), 8)
-	writer.WriteBits(uint8(packed>>32), 8)
-	writer.WriteBits(uint8(packed>>24), 8)
-	writer.WriteBits(uint8(packed>>16), 8)
-	writer.WriteBits(uint8(packed>>8), 8)
-	writer.WriteBits(uint8(packed), 8)
+func SerializeFloat64(writer *Writer, data float64) {
+	writer.WriteBytes(PackFloat64(data))
 }
 
 func DeserializeFloat64(data *float64, reader *Reader) error {
-
-	var a, b, c, d, e, f, g, h uint8
-	reader.ReadBits(&a, 8)
-	reader.ReadBits(&b, 8)
-	reader.ReadBits(&c, 8)
-	reader.ReadBits(&d, 8)
-	reader.ReadBits(&e, 8)
-	reader.ReadBits(&f, 8)
-	reader.ReadBits(&g, 8)
-	reader.ReadBits(&h, 8)
-
-	packed :=
-		(uint64(a) << 56) |
-			(uint64(b) << 48) |
-			(uint64(c) << 40) |
-			(uint64(d) << 32) |
-			(uint64(e) << 24) |
-			(uint64(f) << 16) |
-			(uint64(g) << 8) |
-			uint64(h)
-	*data = Unpack754_64(packed)
+	b := []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	err := reader.ReadBytes(b)
+	if err != nil {
+		return err
+	}
+	*data = UnpackFloat64(b)
 	return nil
 }

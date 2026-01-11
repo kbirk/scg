@@ -54,7 +54,7 @@ func getConstValue(typ *parse.DataTypeComparableDefinition, underlyingType *pars
 		}
 		// override std::string since it is not constexpr
 		if typeName == "std::string" {
-			typeName = "char*"
+			typeName = "const char*"
 		}
 
 		underlyingValue, err := getConstValue(underlyingType, nil, value)
@@ -74,7 +74,7 @@ func generateConstCppCode(constDelc *parse.ConstDeclaration) (string, error) {
 	}
 	// override std::string since it is not constexpr
 	if typeName == "std::string" {
-		typeName = "char*"
+		typeName = "const char*"
 	}
 
 	value, err := getConstValue(constDelc.DataTypeDefinition, constDelc.UnderlyingDataTypeDefinition, constDelc.Value)

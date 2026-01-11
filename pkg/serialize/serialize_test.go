@@ -38,7 +38,7 @@ func TestSerializeUUID(t *testing.T) {
 
 	size := BitSizeUUID(input)
 
-	writer := NewFixedSizeWriter(BitsToBytes(size))
+	writer := NewWriter(BitsToBytes(size))
 	SerializeUUID(writer, input)
 
 	bs := writer.Bytes()
@@ -57,7 +57,7 @@ func TestSerializeTime(t *testing.T) {
 
 	size := BitSizeTime(input)
 
-	writer := NewFixedSizeWriter(BitsToBytes(size))
+	writer := NewWriter(BitsToBytes(size))
 	SerializeTime(writer, input)
 
 	bs := writer.Bytes()
@@ -76,7 +76,7 @@ func TestSerializeString(t *testing.T) {
 
 	size := BitSizeString(input)
 
-	writer := NewFixedSizeWriter(BitsToBytes(size))
+	writer := NewWriter(BitsToBytes(size))
 	SerializeString(writer, input)
 
 	bs := writer.Bytes()
@@ -95,7 +95,7 @@ func TestSerializeBool(t *testing.T) {
 
 	size := BitSizeBool(input)
 
-	writer := NewFixedSizeWriter(BitsToBytes(size))
+	writer := NewWriter(BitsToBytes(size))
 	SerializeBool(writer, input)
 
 	bs := writer.Bytes()
@@ -111,7 +111,7 @@ func TestSerializeBool(t *testing.T) {
 
 	size = BitSizeBool(input)
 
-	writer = NewFixedSizeWriter(BitsToBytes(size))
+	writer = NewWriter(BitsToBytes(size))
 	SerializeBool(writer, input)
 
 	bs = writer.Bytes()
@@ -131,7 +131,7 @@ func TestSerializeUInt8(t *testing.T) {
 
 		size := BitSizeUInt8(input)
 
-		writer := NewFixedSizeWriter(BitsToBytes(size))
+		writer := NewWriter(BitsToBytes(size))
 		SerializeUInt8(writer, input)
 
 		bs := writer.Bytes()
@@ -153,7 +153,7 @@ func TestSerializeInt8(t *testing.T) {
 
 		size := BitSizeInt8(input)
 
-		writer := NewFixedSizeWriter(BitsToBytes(size))
+		writer := NewWriter(BitsToBytes(size))
 		SerializeInt8(writer, input)
 
 		bs := writer.Bytes()
@@ -173,7 +173,7 @@ func TestSerializeUInt16(t *testing.T) {
 
 		size := BitSizeUInt16(input)
 
-		writer := NewFixedSizeWriter(BitsToBytes(size))
+		writer := NewWriter(BitsToBytes(size))
 		SerializeUInt16(writer, input)
 
 		bs := writer.Bytes()
@@ -193,7 +193,7 @@ func TestSerializeInt16(t *testing.T) {
 
 		size := BitSizeInt16(input)
 
-		writer := NewFixedSizeWriter(BitsToBytes(size))
+		writer := NewWriter(BitsToBytes(size))
 		SerializeInt16(writer, input)
 
 		bs := writer.Bytes()
@@ -216,7 +216,7 @@ func TestSerializeUInt32(t *testing.T) {
 
 		size := BitSizeUInt32(input)
 
-		writer := NewFixedSizeWriter(BitsToBytes(size))
+		writer := NewWriter(BitsToBytes(size))
 		SerializeUInt32(writer, input)
 
 		bs := writer.Bytes()
@@ -238,7 +238,7 @@ func TestSerializeInt32(t *testing.T) {
 
 		size := BitSizeInt32(input)
 
-		writer := NewFixedSizeWriter(BitsToBytes(size))
+		writer := NewWriter(BitsToBytes(size))
 		SerializeInt32(writer, input)
 
 		bs := writer.Bytes()
@@ -261,7 +261,7 @@ func TestSerializeUInt64(t *testing.T) {
 
 		size := BitSizeUInt64(input)
 
-		writer := NewFixedSizeWriter(BitsToBytes(size))
+		writer := NewWriter(BitsToBytes(size))
 		SerializeUInt64(writer, input)
 
 		bs := writer.Bytes()
@@ -284,7 +284,7 @@ func TestSerializeInt64(t *testing.T) {
 
 		size := BitSizeInt64(input)
 
-		writer := NewFixedSizeWriter(BitsToBytes(size))
+		writer := NewWriter(BitsToBytes(size))
 		SerializeInt64(writer, input)
 
 		bs := writer.Bytes()
@@ -295,5 +295,199 @@ func TestSerializeInt64(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, input, output)
+	}
+}
+
+func TestSerializeMultipleTypesInSequence(t *testing.T) {
+	// Create test data of different types
+	strValue := "Hello, World! 世界"
+	uuidValue := uuid.New()
+	timeValue := time.Now()
+	boolValue := true
+	uint8Value := uint8(42)
+	uint32Value := uint32(12345678)
+	int64Value := int64(-9876543210)
+	float64Value := float64(3.14159)
+
+	// Calculate total size
+	totalSize := BitSizeString(strValue) +
+		BitSizeUUID(uuidValue) +
+		BitSizeTime(timeValue) +
+		BitSizeBool(boolValue) +
+		BitSizeUInt8(uint8Value) +
+		BitSizeUInt32(uint32Value) +
+		BitSizeInt64(int64Value) +
+		BitSizeFloat64(float64Value)
+
+	// Serialize all types into a single buffer
+	writer := NewWriter(BitsToBytes(totalSize))
+	SerializeString(writer, strValue)
+	SerializeUUID(writer, uuidValue)
+	SerializeTime(writer, timeValue)
+	SerializeBool(writer, boolValue)
+	SerializeUInt8(writer, uint8Value)
+	SerializeUInt32(writer, uint32Value)
+	SerializeInt64(writer, int64Value)
+	SerializeFloat64(writer, float64Value)
+
+	// Deserialize all types from the buffer in the same order
+	bs := writer.Bytes()
+	reader := NewReader(bs)
+
+	var strOut string
+	err := DeserializeString(&strOut, reader)
+	require.NoError(t, err)
+	assert.Equal(t, strValue, strOut)
+
+	var uuidOut uuid.UUID
+	err = DeserializeUUID(&uuidOut, reader)
+	require.NoError(t, err)
+	assert.Equal(t, uuidValue, uuidOut)
+
+	var timeOut time.Time
+	err = DeserializeTime(&timeOut, reader)
+	require.NoError(t, err)
+	assert.True(t, timeValue.Equal(timeOut))
+
+	var boolOut bool
+	err = DeserializeBool(&boolOut, reader)
+	require.NoError(t, err)
+	assert.Equal(t, boolValue, boolOut)
+
+	var uint8Out uint8
+	err = DeserializeUInt8(&uint8Out, reader)
+	require.NoError(t, err)
+	assert.Equal(t, uint8Value, uint8Out)
+
+	var uint32Out uint32
+	err = DeserializeUInt32(&uint32Out, reader)
+	require.NoError(t, err)
+	assert.Equal(t, uint32Value, uint32Out)
+
+	var int64Out int64
+	err = DeserializeInt64(&int64Out, reader)
+	require.NoError(t, err)
+	assert.Equal(t, int64Value, int64Out)
+
+	var float64Out float64
+	err = DeserializeFloat64(&float64Out, reader)
+	require.NoError(t, err)
+	assert.Equal(t, float64Value, float64Out)
+}
+
+func TestSerializeMultipleStringsInSequence(t *testing.T) {
+	// Test multiple strings back-to-back to ensure boundaries are preserved
+	strings := []string{
+		"",      // empty string
+		"short", // short string
+		"Hello, World! This is a longer string with unicode 世界", // long string with unicode
+		"another one", // another string
+		"final string with special chars \n\t@#$%", // special chars
+	}
+
+	// Calculate total size
+	totalSize := 0
+	for _, s := range strings {
+		totalSize += BitSizeString(s)
+	}
+
+	// Serialize all strings
+	writer := NewWriter(BitsToBytes(totalSize))
+	for _, s := range strings {
+		SerializeString(writer, s)
+	}
+
+	// Deserialize all strings
+	bs := writer.Bytes()
+	reader := NewReader(bs)
+
+	for i, expected := range strings {
+		var actual string
+		err := DeserializeString(&actual, reader)
+		require.NoError(t, err, "Failed to deserialize string %d", i)
+		assert.Equal(t, expected, actual, "String %d mismatch", i)
+	}
+}
+
+func TestWriterResizeBehavior(t *testing.T) {
+	// Test that writer correctly resizes when required space is more than double current capacity
+	// Start with a small writer (8 bytes)
+	writer := NewWriter(8)
+
+	// Create data that requires more than 2x the current size (> 16 bytes)
+	// Using a 100-byte array to ensure we exceed 2x the initial capacity
+	largeData := make([]byte, 100)
+	for i := range largeData {
+		largeData[i] = byte(i % 256)
+	}
+
+	// Write the large data - this should trigger resize to at least 100 bytes (not just 16)
+	writer.WriteBytes(largeData)
+
+	// Verify the data was written correctly
+	bs := writer.Bytes()
+	require.Equal(t, 100, len(bs), "Writer should have written all 100 bytes")
+
+	// Verify the data matches
+	for i := 0; i < 100; i++ {
+		assert.Equal(t, byte(i%256), bs[i], "Byte mismatch at index %d", i)
+	}
+
+	// Test with WriteBits as well - start fresh with a small writer
+	writer2 := NewWriter(4)
+
+	// Write small amount first
+	writer2.WriteByte(0xFF)
+
+	// Now write data that requires > 2x current capacity
+	// Writer should have ~4 bytes, we'll write enough bits to require > 8 bytes
+	for i := 0; i < 80; i++ { // 80 bytes = 640 bits
+		writer2.WriteByte(byte(i % 256))
+	}
+
+	bs2 := writer2.Bytes()
+	require.Equal(t, 81, len(bs2), "Writer should have written 81 bytes")
+
+	// Verify first byte
+	assert.Equal(t, uint8(0xFF), bs2[0])
+
+	// Verify remaining bytes
+	for i := 1; i < 81; i++ {
+		assert.Equal(t, byte((i-1)%256), bs2[i], "Byte mismatch at index %d", i)
+	}
+}
+
+func TestWriterResizeUnalignedWrite(t *testing.T) {
+	// Test resize behavior with unaligned writes (when numBitsWritten is not byte-aligned)
+	writer := NewWriter(4)
+
+	// Write 3 bits to make it unaligned
+	writer.WriteBits(0b101, 3)
+
+	// Now write a large amount of data that requires > 2x capacity
+	largeData := make([]byte, 50)
+	for i := range largeData {
+		largeData[i] = byte(i)
+	}
+
+	writer.WriteBytes(largeData)
+
+	// Deserialize and verify
+	bs := writer.Bytes()
+	reader := NewReader(bs)
+
+	// Read the 3 bits back
+	var bits uint8
+	err := reader.ReadBits(&bits, 3)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(0b101), bits)
+
+	// Read the bytes back
+	result := make([]byte, 50)
+	err = reader.ReadBytes(result)
+	require.NoError(t, err)
+
+	for i := 0; i < 50; i++ {
+		assert.Equal(t, byte(i), result[i], "Byte mismatch at index %d", i)
 	}
 }

@@ -3,26 +3,21 @@ package rpc
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
-
-	"github.com/gorilla/websocket"
 
 	"github.com/kbirk/scg/pkg/log"
 	"github.com/kbirk/scg/pkg/serialize"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
-
 type Server struct {
 	conf             ServerConfig
-	server           *http.Server
+	transport        ServerTransport
 	rootGroup        *ServerGroup
 	groupByServiceID map[uint64]*ServerGroup
 	activeGroup      *ServerGroup
+	running          bool
+	mu               *sync.Mutex
+	middlewareCache  map[uint64][]Middleware
 }
 
 type ServerGroup struct {
@@ -33,7 +28,7 @@ type ServerGroup struct {
 }
 
 type ServerConfig struct {
-	Port       int
+	Transport  ServerTransport
 	ErrHandler func(error)
 	Logger     log.Logger
 }
@@ -43,33 +38,47 @@ type serverStub interface {
 }
 
 func RespondWithError(requestID uint64, err error) []byte {
-	writer := serialize.NewFixedSizeWriter(
-		serialize.BitsToBytes(
-			BitSizePrefix() +
-				serialize.BitSizeUInt64(requestID) +
-				serialize.BitSizeUInt8(ErrorResponse) +
-				serialize.BitSizeString(err.Error())))
+	size := serialize.BitsToBytes(
+		BitSizePrefix() +
+			serialize.BitSizeUInt64(requestID) +
+			serialize.BitSizeUInt8(ErrorResponse) +
+			serialize.BitSizeString(err.Error()))
+
+	writer := getWriter(size)
+	defer putWriter(writer)
 
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
 	serialize.SerializeUInt8(writer, ErrorResponse)
 	serialize.SerializeString(writer, err.Error())
-	return writer.Bytes()
+
+	// Copy bytes since we're returning the writer to the pool
+	bs := writer.Bytes()
+	result := make([]byte, len(bs))
+	copy(result, bs)
+	return result
 }
 
 func RespondWithMessage(requestID uint64, msg Message) []byte {
-	writer := serialize.NewFixedSizeWriter(
-		serialize.BitsToBytes(
-			BitSizePrefix() +
-				serialize.BitSizeUInt64(requestID) +
-				serialize.BitSizeUInt8(MessageResponse) +
-				msg.BitSize()))
+	size := serialize.BitsToBytes(
+		BitSizePrefix() +
+			serialize.BitSizeUInt64(requestID) +
+			serialize.BitSizeUInt8(MessageResponse) +
+			msg.BitSize())
+
+	writer := getWriter(size)
+	defer putWriter(writer)
 
 	SerializePrefix(writer, ResponsePrefix)
 	serialize.SerializeUInt64(writer, requestID)
 	serialize.SerializeUInt8(writer, MessageResponse)
 	msg.Serialize(writer)
-	return writer.Bytes()
+
+	// Copy bytes since we're returning the writer to the pool
+	bs := writer.Bytes()
+	result := make([]byte, len(bs))
+	copy(result, bs)
+	return result
 }
 
 func newServerGroup() *ServerGroup {
@@ -83,18 +92,14 @@ func NewServer(conf ServerConfig) *Server {
 	rootGroup := newServerGroup()
 
 	s := &Server{
-		conf: conf,
-		server: &http.Server{
-			Addr: fmt.Sprintf(":%d", conf.Port),
-		},
+		conf:             conf,
+		transport:        conf.Transport,
 		rootGroup:        rootGroup,
 		activeGroup:      rootGroup,
 		groupByServiceID: make(map[uint64]*ServerGroup),
+		middlewareCache:  make(map[uint64][]Middleware),
+		mu:               &sync.Mutex{},
 	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/rpc", s.getHandler())
-	s.server.Handler = mux
 
 	return s
 }
@@ -109,8 +114,9 @@ func (s *Server) Group(fn func(*Server)) {
 }
 
 func (s *Server) handleError(err error) {
-	if cErr, ok := err.(*websocket.CloseError); ok {
-		s.logInfo("Client disconnected: " + cErr.Text)
+	// Check if this is a normal connection close
+	if err.Error() == "connection closed" {
+		s.logInfo("Client disconnected")
 		return
 	}
 	s.logError("Encountered error: " + err.Error())
@@ -143,13 +149,23 @@ func (s *Server) logError(msg string) {
 	}
 }
 
-func (s *Server) RegisterServer(id uint64, service serverStub) {
+func (s *Server) RegisterServer(id uint64, serviceName string, service serverStub) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	_, ok := s.groupByServiceID[id]
 	if ok {
 		panic(fmt.Sprintf("service with id %d already registered", id))
 	}
 	s.activeGroup.registerServer(id, service)
 	s.groupByServiceID[id] = s.activeGroup
+
+	// If the transport is service-aware, notify it about the service
+	if sat, ok := s.transport.(ServiceAwareTransport); ok {
+		if err := sat.RegisterService(id, serviceName); err != nil {
+			panic(fmt.Sprintf("failed to register service %s with transport: %v", serviceName, err))
+		}
+	}
 }
 
 func (g *ServerGroup) registerServer(id uint64, service serverStub) {
@@ -163,11 +179,14 @@ func (s *Server) Middleware(m Middleware) {
 	s.activeGroup.middleware = append(s.activeGroup.middleware, m)
 }
 
-func (g *ServerGroup) registerMiddleware(m Middleware) {
-	g.middleware = append(g.middleware, m)
-}
-
 func (s *Server) getMiddlewareStackForServiceID(serviceID uint64) ([]Middleware, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if stack, ok := s.middlewareCache[serviceID]; ok {
+		return stack, nil
+	}
+
 	group, ok := s.groupByServiceID[serviceID]
 	if !ok {
 		return nil, fmt.Errorf("service with id %d not found", serviceID)
@@ -186,10 +205,14 @@ func (s *Server) getMiddlewareStackForServiceID(serviceID uint64) ([]Middleware,
 		middleware = append(middleware, groups[i].middleware...)
 	}
 
+	s.middlewareCache[serviceID] = middleware
 	return middleware, nil
 }
 
 func (s *Server) getServiceByID(id uint64) (serverStub, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	group, ok := s.groupByServiceID[id]
 	if !ok {
 		return nil, fmt.Errorf("service with id %d not found", id)
@@ -205,106 +228,135 @@ func (g *ServerGroup) getServiceByID(id uint64) (serverStub, error) {
 	return service, nil
 }
 
-func (s *Server) getHandler() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+func (s *Server) handleConnection(conn Connection) {
+	defer conn.Close()
+
+	for {
+		// read message
+		bs, err := conn.Receive()
 		if err != nil {
-			s.conf.ErrHandler(err)
-			return
-		}
-		defer conn.Close()
-
-		mu := &sync.Mutex{}
-
-		for {
-			// read message
-			_, bs, err := conn.ReadMessage()
-			if err != nil {
-				s.handleError(err)
+			// Don't treat normal connection closures as errors
+			if err.Error() == "connection closed" {
 				break
 			}
-
-			go func() {
-				reader := serialize.NewReader(bs)
-
-				var prefix [16]byte
-				err = DeserializePrefix(&prefix, reader)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				if prefix != RequestPrefix {
-					s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
-					return
-				}
-
-				// get the context
-				ctx := context.Background()
-				err = DeserializeContext(&ctx, reader)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// get the request id
-				var requestID uint64
-				err = serialize.DeserializeUInt64(&requestID, reader)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// get the service id
-				var serviceID uint64
-				err = serialize.DeserializeUInt64(&serviceID, reader)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// acquire the service
-				service, err := s.getServiceByID(serviceID)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// gather middleware for the call
-				middleware, err := s.getMiddlewareStackForServiceID(serviceID)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-
-				// handle the request
-				bs = service.HandleWrapper(ctx, middleware, requestID, reader)
-
-				// need to lock when writing
-				mu.Lock()
-				defer mu.Unlock()
-
-				// send response
-				err = conn.WriteMessage(websocket.BinaryMessage, bs)
-				if err != nil {
-					s.handleError(err)
-					return
-				}
-			}()
+			s.handleError(err)
+			break
 		}
+
+		go func() {
+			reader := serialize.NewReader(bs)
+
+			var prefix [16]byte
+			err = DeserializePrefix(&prefix, reader)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			if prefix != RequestPrefix {
+				s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
+				return
+			}
+
+			// get the context
+			ctx := context.Background()
+			err = DeserializeContext(&ctx, reader)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// get the request id
+			var requestID uint64
+			err = serialize.DeserializeUInt64(&requestID, reader)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// get the service id
+			var serviceID uint64
+			err = serialize.DeserializeUInt64(&serviceID, reader)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// acquire the service
+			service, err := s.getServiceByID(serviceID)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// gather middleware for the call
+			middleware, err := s.getMiddlewareStackForServiceID(serviceID)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+
+			// handle the request
+			bs = service.HandleWrapper(ctx, middleware, requestID, reader)
+
+			// send response
+			err = conn.Send(bs, serviceID)
+			if err != nil {
+				s.handleError(err)
+				return
+			}
+		}()
 	}
 }
 
 func (s *Server) ListenAndServe() error {
-	s.logInfo(fmt.Sprintf("Listening on port %d", s.conf.Port))
-	return s.server.ListenAndServe()
-}
+	s.mu.Lock()
+	if s.running {
+		s.mu.Unlock()
+		return fmt.Errorf("server is already running")
+	}
+	s.running = true
+	s.mu.Unlock()
 
-func (s *Server) ListenAndServeTLS(certFile string, keyFile string) error {
-	s.logInfo(fmt.Sprintf("Listening on port %d", s.conf.Port))
-	return s.server.ListenAndServeTLS(certFile, keyFile)
+	s.logInfo("Starting server")
+
+	err := s.transport.Listen()
+	if err != nil {
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
+
+	for {
+		s.mu.Lock()
+		running := s.running
+		s.mu.Unlock()
+
+		if !running {
+			break
+		}
+
+		conn, err := s.transport.Accept()
+		if err != nil {
+			// If the transport is closed (during shutdown), don't treat it as an error
+			if err.Error() == "transport is closed" {
+				break
+			}
+			s.handleError(err)
+			continue
+		}
+
+		go s.handleConnection(conn)
+	}
+
+	return nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.server.Shutdown(ctx)
+	s.mu.Lock()
+	s.running = false
+	s.mu.Unlock()
+
+	return s.transport.Close()
 }

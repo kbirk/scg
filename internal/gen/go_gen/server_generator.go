@@ -21,6 +21,7 @@ type ServiceMethodArgs struct {
 type ServerArgs struct {
 	ServerNamePascalCase string
 	ServerNameCamelCase  string
+	ServiceName          string
 	ServiceIDVarName     string
 	ServerStubStructName string
 	ServiceID            uint64
@@ -38,7 +39,7 @@ type {{.ServerNamePascalCase}} interface { {{- range .ServiceMethods}}
 }
 
 func Register{{.ServerNamePascalCase}}(server *rpc.Server, {{.ServerNameCamelCase}} {{.ServerNamePascalCase}}) {
-	server.RegisterServer({{.ServiceIDVarName}}, &{{.ServerStubStructName}}{ server, {{.ServerNameCamelCase}} })
+	server.RegisterServer({{.ServiceIDVarName}}, "{{.ServiceName}}", &{{.ServerStubStructName}}{ server, {{.ServerNameCamelCase}} })
 }
 
 type {{.ServerStubStructName}} struct {
@@ -132,6 +133,7 @@ func generateServerGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 	args := ServerArgs{
 		ServerNamePascalCase: getServerNamePascalCase(svc.Name),
 		ServerNameCamelCase:  getServerNameCamelCase(svc.Name),
+		ServiceName:          svc.Name,
 		ServiceIDVarName:     serviceIDVarName(svc.Name),
 		ServiceID:            serverID,
 		ServiceMethods:       []ServiceMethodArgs{},

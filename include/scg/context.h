@@ -2,9 +2,11 @@
 
 #include <string>
 #include <map>
+#include <chrono>
 
 #include "scg/serialize.h"
 #include "scg/error.h"
+#include "scg/writer.h"
 
 namespace scg {
 namespace context {
@@ -13,12 +15,26 @@ class Context {
 public:
 
 	Context()
+		: hasDeadline_(false)
 	{
 	}
 
 	static Context background()
 	{
 		return Context();
+	}
+
+	void setDeadline(std::chrono::system_clock::time_point deadline) {
+		deadline_ = deadline;
+		hasDeadline_ = true;
+	}
+
+	bool hasDeadline() const {
+		return hasDeadline_;
+	}
+
+	std::chrono::system_clock::time_point getDeadline() const {
+		return deadline_;
 	}
 
 	inline void put(const std::string& key, const std::vector<uint8_t>& val)
@@ -36,11 +52,11 @@ public:
 		auto size = bit_size(str);
 
 		std::vector<uint8_t> data;
-		data.reserve(scg::serialize::bits_to_bytes(size));
+		data.resize(scg::serialize::bits_to_bytes(size), 0);
 		scg::serialize::WriterView writer(data);
 		serialize(writer, str);
 
-		put(key, data);
+		values_[key] = std::move(data);
 	}
 
 	template <typename T>
@@ -52,34 +68,36 @@ public:
 		auto size = bit_size(val);
 
 		std::vector<uint8_t> data;
-		data.reserve(scg::serialize::bits_to_bytes(size));
+		data.resize(scg::serialize::bits_to_bytes(size), 0);
 		scg::serialize::WriterView writer(data);
 		serialize(writer, val);
 
-		put(key, data);
+		values_[key] = std::move(data);
 	}
 
-	inline scg::error::Error get(std::string& t, const std::string& key)
+	inline scg::error::Error get(std::string& t, const std::string& key) const
 	{
 		using scg::serialize::deserialize;
 
-		if (values_.find(key) == values_.end()) {
+		auto it = values_.find(key);
+		if (it == values_.end()) {
 			return scg::error::Error("Key `" + key + "` not found");
 		}
-		auto& bs = values_[key];
+		const auto& bs = it->second;
 		scg::serialize::ReaderView reader(bs);
 		return deserialize(t, reader);
 	}
 
 	template <typename T>
-	inline scg::error::Error get(T& t, const std::string& key)
+	inline scg::error::Error get(T& t, const std::string& key) const
 	{
 		using scg::serialize::deserialize;
 
-		if (values_.find(key) == values_.end()) {
+		auto it = values_.find(key);
+		if (it == values_.end()) {
 			return scg::error::Error("Key `" + key + "` not found");
 		}
-		auto& bs = values_[key];
+		const auto& bs = it->second;
 		scg::serialize::ReaderView reader(bs);
 		return deserialize(t, reader);
 	}
@@ -110,6 +128,8 @@ public:
 private:
 
 	std::map<std::string, std::vector<uint8_t>> values_;
+	std::chrono::system_clock::time_point deadline_;
+	bool hasDeadline_;
 };
 
 }

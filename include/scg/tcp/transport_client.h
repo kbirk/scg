@@ -1,0 +1,241 @@
+#pragma once
+
+#define ASIO_STANDALONE
+#include <asio.hpp>
+
+#include "scg/transport.h"
+#include "scg/error.h"
+#include "scg/logger.h"
+#include <memory>
+#include <string>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <vector>
+#include <deque>
+#include <iostream>
+
+namespace scg {
+namespace tcp {
+
+struct ClientTransportConfig {
+	std::string host;
+	int port;
+	uint32_t maxSendMessageSize = 0; // 0 for no limit
+	uint32_t maxRecvMessageSize = 0; // 0 for no limit
+};
+
+class ConnectionTCP : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionTCP> {
+public:
+	ConnectionTCP(asio::ip::tcp::socket socket, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0)
+		: socket_(std::move(socket))
+		, closed_(false)
+		, maxSendMessageSize_(maxSendMessageSize)
+		, maxRecvMessageSize_(maxRecvMessageSize)
+	{
+		if (socket_.is_open()) {
+			socket_.set_option(asio::ip::tcp::no_delay(true));
+		}
+		SCG_LOG_INFO("TCP connection established");
+	}
+
+	error::Error send(const std::vector<uint8_t>& data) override
+	{
+		if (closed_) {
+			return error::Error("Connection closed");
+		}
+
+		uint32_t len = static_cast<uint32_t>(data.size());
+
+		if (maxSendMessageSize_ > 0 && len > maxSendMessageSize_) {
+			return error::Error("Message size exceeds send limit");
+		}
+
+		std::vector<uint8_t> buffer;
+		buffer.reserve(4 + len);
+		// Big endian length prefix
+		buffer.push_back((len >> 24) & 0xFF);
+		buffer.push_back((len >> 16) & 0xFF);
+		buffer.push_back((len >> 8) & 0xFF);
+		buffer.push_back(len & 0xFF);
+		buffer.insert(buffer.end(), data.begin(), data.end());
+
+		auto self = shared_from_this();
+		asio::post(socket_.get_executor(), [self, buffer = std::move(buffer)]() {
+			bool write_in_progress = !self->write_queue_.empty();
+			self->write_queue_.push_back(std::move(buffer));
+			if (!write_in_progress) {
+				self->do_write();
+			}
+		});
+
+		return nullptr;
+	}
+
+	void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override
+	{
+		messageHandler_ = handler;
+		read_header();
+	}
+
+	void setFailHandler(std::function<void(const error::Error&)> handler) override
+	{
+		failHandler_ = handler;
+	}
+
+	void setCloseHandler(std::function<void()> handler) override
+	{
+		closeHandler_ = handler;
+	}
+
+	error::Error close() override
+	{
+		// Atomically set closed_ to true if it was false
+		bool expected = false;
+		if (closed_.compare_exchange_strong(expected, true)) {
+			SCG_LOG_INFO("TCP connection clsing");
+
+			auto self = shared_from_this();
+			asio::post(socket_.get_executor(), [self]() {
+				if (self->socket_.is_open()) {
+					self->socket_.close();
+				}
+			});
+		}
+		return nullptr;
+	}
+
+private:
+	void do_write()
+	{
+		auto self = shared_from_this();
+		asio::async_write(socket_, asio::buffer(write_queue_.front()),
+			[self](std::error_code ec, std::size_t /*length*/) {
+				if (!ec) {
+					self->write_queue_.pop_front();
+					if (!self->write_queue_.empty()) {
+						self->do_write();
+					}
+				} else {
+					SCG_LOG_ERROR("TCP write error: " + ec.message());
+					if (self->failHandler_) {
+						self->failHandler_(error::Error(ec.message()));
+					}
+					self->close();
+				}
+			});
+	}
+
+	void read_header()
+	{
+		auto self = shared_from_this();
+		asio::async_read(socket_, asio::buffer(read_buffer_, 4),
+			[self](std::error_code ec, std::size_t /*length*/) {
+				if (!ec) {
+					uint32_t len = (self->read_buffer_[0] << 24) | (self->read_buffer_[1] << 16) | (self->read_buffer_[2] << 8) | self->read_buffer_[3];
+					if (self->maxRecvMessageSize_ > 0 && len > self->maxRecvMessageSize_) {
+						SCG_LOG_ERROR("TCP message size exceeds receive limit");
+						if (self->failHandler_) {
+							self->failHandler_(error::Error("Message size exceeds receive limit"));
+						}
+						self->close();
+						return;
+					}
+					self->read_body(len);
+				} else {
+					if (ec != asio::error::eof) {
+						SCG_LOG_ERROR("TCP read header error: " + ec.message());
+						if (self->failHandler_) {
+							self->failHandler_(error::Error(ec.message()));
+						}
+					}
+					self->close();
+				}
+			});
+	}
+
+	void read_body(uint32_t length)
+	{
+		auto self = shared_from_this();
+		body_buffer_.resize(length);
+		asio::async_read(socket_, asio::buffer(body_buffer_),
+			[self](std::error_code ec, std::size_t /*length*/) {
+				if (!ec) {
+					if (self->messageHandler_) {
+						self->messageHandler_(self->body_buffer_);
+					}
+					self->read_header();
+				} else {
+					if (ec != asio::error::eof) {
+						SCG_LOG_ERROR("TCP TLS read body error: " + ec.message());
+						if (self->failHandler_) {
+							self->failHandler_(error::Error(ec.message()));
+						}
+					}
+					self->close();
+				}
+			});
+	}
+
+	asio::ip::tcp::socket socket_;
+	std::function<void(const std::vector<uint8_t>&)> messageHandler_;
+	std::function<void(const error::Error&)> failHandler_;
+	std::function<void()> closeHandler_;
+	std::atomic<bool> closed_;
+	std::deque<std::vector<uint8_t>> write_queue_;
+	uint8_t read_buffer_[4];
+	std::vector<uint8_t> body_buffer_;
+	uint32_t maxSendMessageSize_;
+	uint32_t maxRecvMessageSize_;
+};
+
+class ClientTransportTCP : public scg::rpc::ClientTransport
+{
+public:
+	ClientTransportTCP(const ClientTransportConfig& config)
+		: config_(config)
+		, work_guard_(asio::make_work_guard(io_context_))
+	{
+		thread_ = std::thread([this]() {
+			io_context_.run();
+		});
+	}
+
+	~ClientTransportTCP()
+	{
+		shutdown();
+	}
+
+	std::pair<std::shared_ptr<scg::rpc::Connection>, error::Error> connect() override
+	{
+		try {
+			SCG_LOG_INFO("Connecting to TCP server at " + config_.host + ":" + std::to_string(config_.port));
+			asio::ip::tcp::resolver resolver(io_context_);
+			auto endpoints = resolver.resolve(config_.host, std::to_string(config_.port));
+			asio::ip::tcp::socket socket(io_context_);
+			asio::connect(socket, endpoints);
+			return {std::make_shared<ConnectionTCP>(std::move(socket), config_.maxSendMessageSize, config_.maxRecvMessageSize), nullptr};
+		} catch (const std::exception& e) {
+			SCG_LOG_ERROR("TCP connection failed: " + std::string(e.what()));
+			return {nullptr, error::Error(e.what())};
+		}
+	}
+
+	void shutdown() override
+	{
+		SCG_LOG_INFO("Shutting down TCP client transport");
+		io_context_.stop();
+		if (thread_.joinable()) {
+			thread_.join();
+		}
+	}
+
+private:
+	ClientTransportConfig config_;
+	asio::io_context io_context_;
+	asio::executor_work_guard<asio::io_context::executor_type> work_guard_;
+	std::thread thread_;
+};
+
+} // namespace tcp
+} // namespace scg

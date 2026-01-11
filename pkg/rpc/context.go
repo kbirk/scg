@@ -28,7 +28,7 @@ func (m *Metadata) PutBytes(key string, value []byte) {
 
 func (m *Metadata) PutString(key string, value string) {
 	size := serialize.BitSizeString(value)
-	writer := serialize.NewFixedSizeWriter(serialize.BitsToBytes(size))
+	writer := serialize.NewWriter(serialize.BitsToBytes(size))
 	serialize.SerializeString(writer, value)
 	m.vals[key] = writer.Bytes()
 }
@@ -111,7 +111,7 @@ func BitSizeContext(ctx context.Context) int {
 	return size
 }
 
-func SerializeContext(writer *serialize.FixedSizeWriter, ctx context.Context) {
+func SerializeContext(writer *serialize.Writer, ctx context.Context) {
 	md := GetMetadataFromContext(ctx)
 	if md == nil {
 		serialize.SerializeUInt32(writer, 0)
