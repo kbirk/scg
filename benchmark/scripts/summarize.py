@@ -9,8 +9,6 @@ def parse_benchmarks(content):
     go_results = {}
     cpp_results = {}
 
-    # Split content into Go and C++ sections
-    # This logic depends on the output format of run-benchmarks.sh
     go_section = ""
     cpp_section = ""
 
@@ -38,9 +36,7 @@ def parse_benchmarks(content):
         if line.startswith('Benchmark'):
             parts = re.split(r'\s+', line.strip())
             if len(parts) >= 3:
-                # Format: BenchmarkName-8 1000000 12.3 ns/op
                 name = parts[0].replace('Benchmark', '').replace('-20', '').replace('-8', '').replace('-16', '').replace('-32', '')
-                # Remove trailing numbers like -8 if they exist (GOMAXPROCS)
                 name = re.sub(r'-\d+$', '', name)
 
                 try:
@@ -51,8 +47,6 @@ def parse_benchmarks(content):
                 except (ValueError, IndexError):
                     pass
 
-    # Parse C++ results
-    # Format: BenchmarkName 1000000 12.3 ns/op
     for line in cpp_section.split('\n'):
         line = line.strip()
         if line.startswith('Benchmark') and 'Iterations' not in line:
@@ -60,11 +54,6 @@ def parse_benchmarks(content):
             if len(parts) >= 3:
                 name = parts[0].replace('Benchmark', '')
                 try:
-                    # Assuming format: Name Iterations Time ns/op
-                    # or: Name Time ns/op
-                    # The previous script assumed index 2. Let's be more flexible.
-                    # C++ output from previous turn: "BenchmarkVarDecodeUint64 100000000 9.45 ns/op"
-                    # parts: ['BenchmarkVarDecodeUint64', '100000000', '9.45', 'ns/op']
                     if 'ns/op' in parts:
                         ns_idx = parts.index('ns/op')
                         ns_per_op = float(parts[ns_idx - 1])
@@ -75,67 +64,20 @@ def parse_benchmarks(content):
     return go_results, cpp_results
 
 def generate_report(go_results, cpp_results, timestamp):
-    # Define comparison groups (Go name -> C++ name)
-    # This mapping needs to be maintained as benchmarks are added
-    comparisons = [
-        # Varint
-        ('VarEncodeUint64', 'VarEncodeUint64'),
-        ('VarDecodeUint64', 'VarDecodeUint64'),
-        ('VarEncodeInt64', 'VarEncodeInt64'),
-        ('VarDecodeInt64', 'VarDecodeInt64'),
+    all_benchmarks = set(go_results.keys()) | set(cpp_results.keys())
 
-        # Basic types
-        ('SerializeUInt8', 'SerializeUInt8'),
-        ('SerializeUInt8Reuse', 'SerializeUInt8Reuse'),
-        ('DeserializeUInt8', 'DeserializeUInt8'),
-        ('SerializeFloat32', 'SerializeFloat32'),
-        ('SerializeFloat32Reuse', 'SerializeFloat32Reuse'),
-        ('DeserializeFloat32', 'DeserializeFloat32'),
-
-        # UInt32 variants
-        ('SerializeUInt32/Large', 'SerializeUInt32/Large'),
-        ('SerializeUInt32/LargeReuse', 'SerializeUInt32Reuse/Large'),
-        ('DeserializeUInt32/Large', 'DeserializeUInt32/Large'),
-
-        # Strings
-        ('SerializeString/Short', 'SerializeString/Short'),
-        ('SerializeString/Medium', 'SerializeString/Medium'),
-        ('DeserializeString/Short', 'DeserializeString/Short'),
-        ('DeserializeString/Medium', 'DeserializeString/Medium'),
-        ('DeserializeString/Long', 'DeserializeString/Long'),
-
-        # UUID and Time
-        ('SerializeUUID', 'SerializeUUID'),
-        ('DeserializeUUID', 'DeserializeUUID'),
-        ('SerializeTime', 'SerializeTimestamp'),
-        ('DeserializeTime', 'DeserializeTimestamp'),
-
-        # Byte arrays
-        ('WriteBytesAligned', 'WriteBytesAligned'),
-        ('WriteBytesAlignedReuse', 'WriteBytesAlignedReuse'),
-        ('WriteBytesUnaligned', 'WriteBytesUnaligned'),
-        ('WriteBytesUnalignedReuse', 'WriteBytesUnalignedReuse'),
-        ('ReadBytesAligned', 'ReadBytesAligned'),
-        ('ReadBytesUnaligned', 'ReadBytesUnaligned'),
-
-        # Messages
-        ('GeneratedMessageSmall/Serialize', 'GeneratedMessageSmall/Serialize'),
-        ('GeneratedMessageSmall/Deserialize', 'GeneratedMessageSmall/Deserialize'),
-        ('GeneratedMessageEcho/Request/Serialize', 'GeneratedMessageEcho/Request/Serialize'),
-        ('GeneratedMessageEcho/Request/Deserialize', 'GeneratedMessageEcho/Request/Deserialize'),
-        ('GeneratedMessageEcho/Response/Serialize', 'GeneratedMessageEcho/Response/Serialize'),
-        ('GeneratedMessageEcho/Response/Deserialize', 'GeneratedMessageEcho/Response/Deserialize'),
-        ('GeneratedMessageProcess/Request/Serialize', 'GeneratedMessageProcess/Request/Serialize'),
-        ('GeneratedMessageProcess/Request/Deserialize', 'GeneratedMessageProcess/Request/Deserialize'),
-        ('GeneratedMessageProcess/Response/Serialize', 'GeneratedMessageProcess/Response/Serialize'),
-        ('GeneratedMessageProcess/Response/Deserialize', 'GeneratedMessageProcess/Response/Deserialize'),
-        ('GeneratedMessageNested/Serialize', 'GeneratedMessageNested/Serialize'),
-        ('GeneratedMessageNested/Deserialize', 'GeneratedMessageNested/Deserialize'),
-        ('GeneratedMessageLargePayload/1KB/Serialize', 'GeneratedMessageLargePayload/1KB/Serialize'),
-        ('GeneratedMessageLargePayload/1KB/Deserialize', 'GeneratedMessageLargePayload/1KB/Deserialize'),
-        ('GeneratedMessageLargePayload/10KB/Serialize', 'GeneratedMessageLargePayload/10KB/Serialize'),
-        ('GeneratedMessageLargePayload/10KB/Deserialize', 'GeneratedMessageLargePayload/10KB/Deserialize'),
-    ]
+    comparisons = []
+    for name in sorted(all_benchmarks):
+        if name in go_results and name in cpp_results:
+            comparisons.append((name, name))
+        elif name in go_results:
+            cpp_candidate = name.replace('Time', 'Timestamp')
+            if cpp_candidate in cpp_results:
+                comparisons.append((name, cpp_candidate))
+        elif name in cpp_results:
+            go_candidate = name.replace('Timestamp', 'Time')
+            if go_candidate in go_results:
+                comparisons.append((go_candidate, name))
 
     report_lines = []
     report_lines.append(f"# Benchmark Report - {timestamp}")

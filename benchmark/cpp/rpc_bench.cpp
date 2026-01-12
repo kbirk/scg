@@ -448,7 +448,7 @@ int main(int argc, char** argv) {
 			  << std::setw(15) << "ns/op" << std::endl;
 	std::cout << std::string(67, '-') << std::endl;
 
-	int iterations = profile ? 10000 : 1000;
+	int iterations = 10000;
 	RunBenchmark("BenchmarkRPC_TCP/Echo/Simple", BenchmarkRPC_TCP_Echo_Simple, iterations);
 	RunBenchmark("BenchmarkRPC_TCP/Echo/LongMessage", BenchmarkRPC_TCP_Echo_LongMessage, iterations);
 	RunBenchmark("BenchmarkRPC_TCP/Process/SingleItem", BenchmarkRPC_TCP_Process_SingleItem, iterations);

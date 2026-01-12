@@ -27,7 +27,8 @@ go install github.com/kbirk/scg/cmd/scg-cpp@latest
 ### C++:
 
 -   JSON serialization: [nlohmann/json](https://github.com/nlohmann/json)
--   Websockets: [websocketpp](https://github.com/zaphoyd/websocketpp) and [Asio](https://think-async.com/Asio/AsioStandalone)
+-   Websockets: [websocketpp](https://github.com/zaphoyd/websocketpp) and [asio](https://think-async.com/Asio/AsioStandalone)
+-   TCP: [asio](https://think-async.com/Asio/AsioStandalone)
 -   SSL: [openssl](https://github.com/openssl/openssl)
 
 ## Syntax:
