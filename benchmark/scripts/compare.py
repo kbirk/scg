@@ -19,9 +19,6 @@ def compare_benchmarks(prev_data, curr_data):
     lines.append("| Benchmark | Previous C++ (ns) | Current C++ (ns) | Delta | Status |")
     lines.append("|-----------|-------------------|------------------|-------|--------|")
 
-    # We primarily care about C++ improvements, but we can track Go stability too if needed.
-    # For now, let's focus on C++ performance changes.
-
     all_keys = set(prev_results.keys()) | set(curr_results.keys())
 
     for key in sorted(all_keys):
@@ -73,12 +70,6 @@ def main():
 
     comparison_md = compare_benchmarks(prev_data, curr_data)
 
-    # Append comparison to the current markdown report?
-    # Or create a new comparison file?
-    # The user asked: "create a report comparing the latest to that as well"
-
-    # Let's append it to the current markdown report for convenience.
-    # The current markdown report should have the same timestamp as curr_file.
     curr_md_file = curr_file.replace(".json", ".md")
 
     if os.path.exists(curr_md_file):
