@@ -228,7 +228,7 @@ static_assert(true, "")
 template <typename WriterType> \
 void serialize(WriterType& writer, const DerivedName& arg) \
 {\
-	writer.write(static_cast<BaseName>(arg)); \
+	writer.write(static_cast<const BaseName&>(arg)); \
 }\
 template <typename ReaderType> \
 scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
@@ -244,7 +244,7 @@ static_assert(true, "")
 template <typename WriterType> \
 void serialize(WriterType& writer, const DerivedName& arg) \
 {\
-	writer.write(static_cast<BaseName>(arg)); \
+	writer.write(static_cast<const BaseName&>(arg)); \
 	SCG_MAP_MEMBER(SCG_SERIALIZE_MEMBER, __VA_ARGS__)\
 }\
 template <typename ReaderType> \
@@ -267,7 +267,7 @@ static_assert(true, "")
 template <typename WriterType> \
 friend void serialize(WriterType& writer, const DerivedName& arg)\
 {\
-	writer.write(static_cast<BaseName>(arg)); \
+	writer.write(static_cast<const BaseName&>(arg)); \
 }\
 template <typename ReaderType> \
 friend scg::error::Error deserialize(DerivedName& arg, ReaderType& reader)\
@@ -283,7 +283,7 @@ static_assert(true, "")
 template <typename WriterType> \
 friend void serialize(WriterType& writer, const DerivedName& arg)\
 {\
-	writer.write(static_cast<BaseName>(arg)); \
+	writer.write(static_cast<const BaseName&>(arg)); \
 	SCG_MAP_MEMBER(SCG_SERIALIZE_MEMBER, __VA_ARGS__)\
 }\
 template <typename ReaderType> \
