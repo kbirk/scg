@@ -545,6 +545,42 @@ struct TestStructDerivedA : TestStructA {
 };
 SCG_SERIALIZABLE_DERIVED_PUBLIC(TestStructDerivedA, TestStructA, c);
 
+// Multi-level public inheritance: GrandchildPublic -> ChildPublic -> GrandparentPublic
+struct GrandparentPublic {
+	uint32_t gp_val = 0;
+};
+SCG_SERIALIZABLE_PUBLIC(GrandparentPublic, gp_val);
+
+struct ChildPublic : GrandparentPublic {
+	float64_t child_val = 0;
+};
+SCG_SERIALIZABLE_DERIVED_PUBLIC(ChildPublic, GrandparentPublic, child_val);
+
+struct GrandchildPublic : ChildPublic {
+	std::string gc_val;
+};
+SCG_SERIALIZABLE_DERIVED_PUBLIC(GrandchildPublic, ChildPublic, gc_val);
+
+// Multi-level public inheritance with abstract base
+struct AbstractBase {
+	uint32_t ab_val = 0;
+	virtual ~AbstractBase() = default;
+	virtual std::string name() const = 0;
+};
+SCG_SERIALIZABLE_PUBLIC(AbstractBase, ab_val);
+
+struct ConcreteMiddle : AbstractBase {
+	float64_t cm_val = 0;
+	std::string name() const override { return "ConcreteMiddle"; }
+};
+SCG_SERIALIZABLE_DERIVED_PUBLIC(ConcreteMiddle, AbstractBase, cm_val);
+
+struct ConcreteLeaf : ConcreteMiddle {
+	std::string cl_val;
+	std::string name() const override { return "ConcreteLeaf"; }
+};
+SCG_SERIALIZABLE_DERIVED_PUBLIC(ConcreteLeaf, ConcreteMiddle, cl_val);
+
 class TestClassPrivate {
 public:
 	TestClassPrivate(uint32_t a, float64_t b) : a_(a), b_(b) {}
@@ -569,6 +605,43 @@ SCG_SERIALIZABLE_DERIVED_PRIVATE(TestDerivedPrivate, TestClassPrivate, c_);
 
 private:
 	std::string c_;
+};
+
+// Multi-level private inheritance: GrandchildPrivate -> ChildPrivate -> GrandparentPrivate
+class GrandparentPrivate {
+public:
+	GrandparentPrivate() = default;
+	GrandparentPrivate(uint32_t v) : gp_val_(v) {}
+	uint32_t gp_val() const { return gp_val_; }
+
+SCG_SERIALIZABLE_PRIVATE(GrandparentPrivate, gp_val_);
+
+private:
+	uint32_t gp_val_ = 0;
+};
+
+class ChildPrivate : public GrandparentPrivate {
+public:
+	ChildPrivate() = default;
+	ChildPrivate(uint32_t gp, float64_t c) : GrandparentPrivate(gp), child_val_(c) {}
+	float64_t child_val() const { return child_val_; }
+
+SCG_SERIALIZABLE_DERIVED_PRIVATE(ChildPrivate, GrandparentPrivate, child_val_);
+
+private:
+	float64_t child_val_ = 0;
+};
+
+class GrandchildPrivate : public ChildPrivate {
+public:
+	GrandchildPrivate() = default;
+	GrandchildPrivate(uint32_t gp, float64_t c, std::string gc) : ChildPrivate(gp, c), gc_val_(gc) {}
+	std::string gc_val() const { return gc_val_; }
+
+SCG_SERIALIZABLE_DERIVED_PRIVATE(GrandchildPrivate, ChildPrivate, gc_val_);
+
+private:
+	std::string gc_val_;
 };
 
 void test_serialize_macros()
@@ -638,6 +711,67 @@ void test_serialize_macros()
 	TEST_CHECK(inputDerivedPrivate.a() == outputDerivedPrivate.a());
 	TEST_CHECK(inputDerivedPrivate.b() == outputDerivedPrivate.b());
 	TEST_CHECK(inputDerivedPrivate.c() == outputDerivedPrivate.c());
+}
+
+void test_serialize_multi_level_inheritance()
+{
+	// Public multi-level: GrandchildPublic -> ChildPublic -> GrandparentPublic
+	{
+		GrandchildPublic input;
+		input.gp_val = 42;
+		input.child_val = 3.14;
+		input.gc_val = "hello";
+
+		scg::serialize::Writer writer;
+		serialize(writer, input);
+
+		scg::serialize::Reader reader(writer.bytes());
+		GrandchildPublic output;
+		auto err = deserialize(output, reader);
+		TEST_CHECK(!err);
+
+		TEST_CHECK(input.gp_val == output.gp_val);
+		TEST_CHECK(input.child_val == output.child_val);
+		TEST_CHECK(input.gc_val == output.gc_val);
+	}
+
+	// Public multi-level with abstract base: ConcreteLeaf -> ConcreteMiddle -> AbstractBase
+	{
+		ConcreteLeaf input;
+		input.ab_val = 99;
+		input.cm_val = 2.71;
+		input.cl_val = "world";
+
+		scg::serialize::Writer writer;
+		serialize(writer, input);
+
+		scg::serialize::Reader reader(writer.bytes());
+		ConcreteLeaf output;
+		auto err = deserialize(output, reader);
+		TEST_CHECK(!err);
+
+		TEST_CHECK(input.ab_val == output.ab_val);
+		TEST_CHECK(input.cm_val == output.cm_val);
+		TEST_CHECK(input.cl_val == output.cl_val);
+		TEST_CHECK(output.name() == "ConcreteLeaf");
+	}
+
+	// Private multi-level: GrandchildPrivate -> ChildPrivate -> GrandparentPrivate
+	{
+		GrandchildPrivate input(77, 1.41, "goodbye");
+
+		scg::serialize::Writer writer;
+		serialize(writer, input);
+
+		scg::serialize::Reader reader(writer.bytes());
+		GrandchildPrivate output;
+		auto err = deserialize(output, reader);
+		TEST_CHECK(!err);
+
+		TEST_CHECK(input.gp_val() == output.gp_val());
+		TEST_CHECK(input.child_val() == output.child_val());
+		TEST_CHECK(input.gc_val() == output.gc_val());
+	}
 }
 
 void test_serialize_multiple_types_in_sequence()
@@ -845,6 +979,7 @@ TEST_LIST = {
 	TEST(test_serialize_multiple_strings_in_sequence),
 	TEST(test_writer_resize_behavior),
 	TEST(test_writer_resize_unaligned_write),
+	TEST(test_serialize_multi_level_inheritance),
 
 	{ NULL, NULL }
 };
