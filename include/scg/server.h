@@ -374,12 +374,18 @@ private:
 		return nullptr;
 	}
 
-	// Get middleware stack for a service
-	std::vector<middleware::Middleware> getMiddlewareStack(uint64_t serviceID) const
+	// Get middleware stack for a service (cached)
+	const std::vector<middleware::Middleware>& getMiddlewareStack(uint64_t serviceID)
 	{
+		auto cacheIt = middlewareCache_.find(serviceID);
+		if (cacheIt != middlewareCache_.end()) {
+			return cacheIt->second;
+		}
+
 		auto it = groupByServiceID_.find(serviceID);
 		if (it == groupByServiceID_.end()) {
-			return {};
+			static const std::vector<middleware::Middleware> empty;
+			return empty;
 		}
 
 		// Build middleware stack from root to leaf
@@ -397,7 +403,8 @@ private:
 			stack.insert(stack.end(), mw.begin(), mw.end());
 		}
 
-		return stack;
+		middlewareCache_[serviceID] = std::move(stack);
+		return middlewareCache_[serviceID];
 	}
 
 	// Create an error response
@@ -441,6 +448,7 @@ private:
 	std::shared_ptr<ServerGroup> rootGroup_;
 	std::shared_ptr<ServerGroup> activeGroup_;
 	std::unordered_map<uint64_t, std::shared_ptr<ServerGroup>> groupByServiceID_;
+	std::unordered_map<uint64_t, std::vector<middleware::Middleware>> middlewareCache_;
 	std::vector<std::shared_ptr<ServerGroup>> ownedGroups_;
 
 	std::atomic<bool> running_;
