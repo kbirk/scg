@@ -160,8 +160,9 @@ func (c *Client) connectUnsafe() error {
 			c.mu.Unlock()
 
 			if !ok {
-				c.handleError(fmt.Errorf("unrecognized request id: %d", requestID))
-				return
+				// This can happen when a context cancellation cleaned up the request
+				// before the response arrived. Just discard the response.
+				continue
 			}
 
 			ch <- reader
@@ -171,7 +172,7 @@ func (c *Client) connectUnsafe() error {
 	return nil
 }
 
-func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uint64, msg Message) (chan *serialize.Reader, error) {
+func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uint64, msg Message) (uint64, chan *serialize.Reader, error) {
 	// Get next request ID
 	c.mu.Lock()
 	requestID := c.requestID
@@ -203,7 +204,7 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 	err := c.connectUnsafe()
 	if err != nil {
 		c.mu.Unlock()
-		return nil, err
+		return 0, nil, err
 	}
 
 	ch := make(chan *serialize.Reader)
@@ -214,14 +215,14 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 	if err != nil {
 		delete(c.requests, requestID)
 		c.mu.Unlock()
-		return nil, c.handleError(err)
+		return 0, nil, c.handleError(err)
 	}
 
 	c.mu.Unlock()
-	return ch, nil
+	return requestID, ch, nil
 }
 
-func (c *Client) receiveMessage(ctx context.Context, ch chan *serialize.Reader) (*serialize.Reader, error) {
+func (c *Client) receiveMessage(ctx context.Context, requestID uint64, ch chan *serialize.Reader) (*serialize.Reader, error) {
 	select {
 	case reader := <-ch:
 		if reader == nil {
@@ -239,16 +240,20 @@ func (c *Client) receiveMessage(ctx context.Context, ch chan *serialize.Reader) 
 		serialize.DeserializeString(&errMsg, reader)
 		return nil, errors.New(errMsg)
 	case <-ctx.Done():
-		// Context cancelled or timed out
+		// Context cancelled or timed out — clean up the request entry so the
+		// receive goroutine doesn't block trying to send on the orphaned channel.
+		c.mu.Lock()
+		delete(c.requests, requestID)
+		c.mu.Unlock()
 		return nil, ctx.Err()
 	}
 }
 
 func (c *Client) Call(ctx context.Context, serviceID uint64, methodID uint64, msg Message) (*serialize.Reader, error) {
-	ch, err := c.sendMessage(ctx, serviceID, methodID, msg)
+	requestID, ch, err := c.sendMessage(ctx, serviceID, methodID, msg)
 	if err != nil {
 		return nil, err
 	}
 
-	return c.receiveMessage(ctx, ch)
+	return c.receiveMessage(ctx, requestID, ch)
 }

@@ -1072,6 +1072,60 @@ inline void runContextTimeoutTest(TestContext& ctx) {
 	printf("Context Timeout test passed\n");
 }
 
+// Test that after a context timeout, the client can still make successful calls.
+// This catches bugs where a timed-out request leaves orphaned state that causes
+// the client to disconnect or deadlock when the late response arrives.
+inline void runContextTimeoutRecoveryTest(TestContext& ctx) {
+	printf("Running Context Timeout Recovery test...\n");
+
+	ctx.startServer();
+	auto client = ctx.createClient();
+
+	pingpong::PingPongClient pingPongClient(client);
+
+	// Call 1: Force a timeout. Server sleeps 500ms, client deadline is 100ms.
+	{
+		scg::context::Context context;
+		context.setDeadline(std::chrono::system_clock::now() + std::chrono::milliseconds(100));
+		context.put("sleep", "500");
+
+		pingpong::PingRequest req;
+		req.ping.count = 1;
+
+		auto [res, err] = pingPongClient.ping(context, req);
+		TEST_CHECK(err != nullptr);
+		if (err) {
+			printf("Call 1 timed out as expected: %s\n", err.message().c_str());
+		}
+	}
+
+	// Wait for the server to finish processing and send the late response.
+	std::this_thread::sleep_for(std::chrono::milliseconds(600));
+
+	// Call 2: Should succeed. If the client disconnected or deadlocked from the
+	// orphaned response, this will fail.
+	{
+		scg::context::Context context;
+		context.setDeadline(std::chrono::system_clock::now() + std::chrono::milliseconds(3000));
+
+		pingpong::PingRequest req;
+		req.ping.count = 42;
+
+		auto [res, err] = pingPongClient.ping(context, req);
+		TEST_CHECK(err == nullptr);
+		if (err) {
+			printf("ERROR: Call 2 failed after timeout — client is broken: %s\n", err.message().c_str());
+		} else {
+			TEST_CHECK(res.pong.count == 43);
+			printf("Call 2 succeeded after timeout recovery\n");
+		}
+	}
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Context Timeout Recovery test passed\n");
+}
+
 // Test multiple clients
 inline void runMultipleClientsTest(TestContext& ctx) {
 	printf("Running Multiple Clients test...\n");
@@ -1259,6 +1313,12 @@ inline void runTestSuite(const TestSuiteConfig& config) {
 				printf("\n=== Running Context Timeout Test ===\n");
 				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
 				runContextTimeoutTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Context Timeout Recovery Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runContextTimeoutRecoveryTest(ctx);
 			}
 
 			{
