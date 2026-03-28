@@ -17,7 +17,7 @@ public:
 	virtual error::Error send(const std::vector<uint8_t>& data) = 0;
 
 	// Set callback for when messages are received
-	virtual void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) = 0;
+	virtual void setMessageHandler(std::function<void(std::vector<uint8_t>)> handler) = 0;
 
 	// Set callback for when connection fails
 	virtual void setFailHandler(std::function<void(const error::Error&)> handler) = 0;

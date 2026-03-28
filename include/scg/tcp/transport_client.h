@@ -72,7 +72,7 @@ public:
 		return nullptr;
 	}
 
-	void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override
+	void setMessageHandler(std::function<void(std::vector<uint8_t>)> handler) override
 	{
 		messageHandler_ = handler;
 		read_header();
@@ -162,7 +162,7 @@ private:
 			[self](std::error_code ec, std::size_t /*length*/) {
 				if (!ec) {
 					if (self->messageHandler_) {
-						self->messageHandler_(self->body_buffer_);
+						self->messageHandler_(std::move(self->body_buffer_));
 					}
 					self->read_header();
 				} else {
@@ -178,7 +178,7 @@ private:
 	}
 
 	asio::ip::tcp::socket socket_;
-	std::function<void(const std::vector<uint8_t>&)> messageHandler_;
+	std::function<void(std::vector<uint8_t>)> messageHandler_;
 	std::function<void(const error::Error&)> failHandler_;
 	std::function<void()> closeHandler_;
 	std::atomic<bool> closed_;

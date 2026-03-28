@@ -67,7 +67,7 @@ public:
 		return nullptr;
 	}
 
-	void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override
+	void setMessageHandler(std::function<void(std::vector<uint8_t>)> handler) override
 	{
 		messageHandler_ = handler;
 
@@ -82,7 +82,7 @@ public:
 			if (self->messageHandler_) {
 				auto& payload = msg->get_payload();
 				std::vector<uint8_t> data(payload.begin(), payload.end());
-				self->messageHandler_(data);
+				self->messageHandler_(std::move(data));
 			}
 		});
 	}
@@ -154,7 +154,7 @@ public:
 private:
 	client_tls* client_;
 	websocketpp::connection_hdl hdl_;
-	std::function<void(const std::vector<uint8_t>&)> messageHandler_;
+	std::function<void(std::vector<uint8_t>)> messageHandler_;
 	std::function<void(const error::Error&)> failHandler_;
 	std::function<void()> closeHandler_;
 	std::atomic<bool> closed_;

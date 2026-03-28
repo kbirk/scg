@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <map>
+#include <unordered_map>
 #include <vector>
 #include <array>
 #include <thread>
@@ -89,7 +89,7 @@ public:
 	}
 
 private:
-	std::map<uint64_t, ServiceHandler> services_;
+	std::unordered_map<uint64_t, ServiceHandler> services_;
 	std::vector<middleware::Middleware> middleware_;
 	std::weak_ptr<ServerGroup> parent_;
 	std::vector<std::shared_ptr<ServerGroup>> children_;
@@ -259,12 +259,12 @@ private:
 		}
 
 		// Process messages using thread pool to avoid blocking io_context
-		conn->setMessageHandler([this, connID](const std::vector<uint8_t>& data) {
+		conn->setMessageHandler([this, connID](std::vector<uint8_t> data) {
 			if (!running_) {
 				return;
 			}
 			// Submit to thread pool to avoid blocking event loop
-			asio::post(threadPool_, [this, connID, data]() {
+			asio::post(threadPool_, [this, connID, data = std::move(data)]() {
 				handleMessage(connID, data);
 			});
 		});
@@ -440,11 +440,11 @@ private:
 
 	std::shared_ptr<ServerGroup> rootGroup_;
 	std::shared_ptr<ServerGroup> activeGroup_;
-	std::map<uint64_t, std::shared_ptr<ServerGroup>> groupByServiceID_;
+	std::unordered_map<uint64_t, std::shared_ptr<ServerGroup>> groupByServiceID_;
 	std::vector<std::shared_ptr<ServerGroup>> ownedGroups_;
 
 	std::atomic<bool> running_;
-	std::map<uint64_t, std::shared_ptr<Connection>> connections_;
+	std::unordered_map<uint64_t, std::shared_ptr<Connection>> connections_;
 	std::atomic<uint64_t> nextConnectionID_;
 
 	asio::thread_pool threadPool_;

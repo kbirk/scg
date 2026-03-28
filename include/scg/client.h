@@ -8,7 +8,7 @@
 #include <random>
 #include <thread>
 #include <mutex>
-#include <map>
+#include <unordered_map>
 #include <iostream>
 
 #include "scg/error.h"
@@ -147,7 +147,7 @@ protected:
 			failPendingRequestsUnsafe("Connection closed");
 		});
 
-		connection_->setMessageHandler([this](const std::vector<uint8_t>& data) {
+		connection_->setMessageHandler([this](std::vector<uint8_t> data) {
 			onMessage(data);
 		});
 
@@ -303,7 +303,7 @@ private:
 	std::vector<scg::middleware::Middleware> middleware_;
 
 	uint64_t requestID_;
-	std::map<uint64_t, std::shared_ptr<std::promise<serialize::Reader>>> requests_;
+	std::unordered_map<uint64_t, std::shared_ptr<std::promise<serialize::Reader>>> requests_;
 
 };
 
