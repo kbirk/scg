@@ -220,7 +220,9 @@ protected:
 		if (iter != requests_.end()) {
 			iter->second->set_value(reader);
 		} else {
-			disconnectUnsafe();  // Already holding lock, use unsafe version
+			// Response for an unknown request ID — this can happen when a context
+			// timeout cleaned up the request before the server's response arrived.
+			// Just discard the response.
 			return;
 		}
 

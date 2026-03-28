@@ -144,6 +144,10 @@ func RunTestSuite(t *testing.T, config TestSuiteConfig) {
 				runContextTimeoutTest(t, config.Factory, port)
 			})
 
+			t.Run("ContextTimeoutRecovery", func(t *testing.T) {
+				runContextTimeoutRecoveryTest(t, config.Factory, port)
+			})
+
 			t.Run("ContextMetadata", func(t *testing.T) {
 				runContextMetadataTest(t, config.Factory, port)
 			})
@@ -1237,6 +1241,67 @@ func runContextTimeoutTest(t *testing.T, factory TransportFactory, port int) {
 	_, err = svc.Ping(ctx2, req2)
 	require.Error(t, err, "Call should timeout")
 	assert.Contains(t, err.Error(), "context deadline exceeded", "Error should be context deadline exceeded")
+}
+
+// runContextTimeoutRecoveryTest verifies that after a context timeout, the client
+// can still make successful calls. This catches bugs where a timed-out request
+// leaves orphaned state that deadlocks the receive goroutine or disconnects on
+// the late response.
+func runContextTimeoutRecoveryTest(t *testing.T, factory TransportFactory, port int) {
+	serverTransport := factory.CreateServerTransport(port)
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: serverTransport,
+	})
+
+	pingPongSvc := &pingpongServer{}
+	pingpong.RegisterPingPongServer(server, pingPongSvc)
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			if err.Error() != "transport is closed" {
+				t.Logf("Server error: %v", err)
+			}
+		}
+	}()
+	defer server.Shutdown(context.Background())
+
+	time.Sleep(100 * time.Millisecond)
+
+	clientTransport := factory.CreateClientTransport(port)
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: clientTransport,
+	})
+	defer client.Close()
+
+	svc := pingpong.NewPingPongClient(client)
+
+	// Call 1: Force a timeout. Server sleeps 500ms, client deadline is 100ms.
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel1()
+
+	md := rpc.NewMetadata()
+	md.PutString("sleep", "500")
+	ctx1 = rpc.NewContextWithMetadata(ctx1, md)
+
+	_, err := svc.Ping(ctx1, &pingpong.PingRequest{
+		Ping: pingpong.Ping{Count: 1},
+	})
+	require.Error(t, err, "Call 1 should timeout")
+	assert.Contains(t, err.Error(), "context deadline exceeded")
+
+	// Wait for the server to finish processing and send the late response.
+	time.Sleep(600 * time.Millisecond)
+
+	// Call 2: Should succeed. If the client is broken by the orphaned response,
+	// this will timeout or error.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+
+	resp, err := svc.Ping(ctx2, &pingpong.PingRequest{
+		Ping: pingpong.Ping{Count: 42},
+	})
+	require.NoError(t, err, "Call 2 should succeed after timeout recovery")
+	assert.Equal(t, int32(43), resp.Pong.Count)
 }
 
 func runContextMetadataTest(t *testing.T, factory TransportFactory, port int) {
