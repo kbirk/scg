@@ -3,11 +3,12 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
-#include <future>
 #include <memory>
+#include <optional>
 #include <random>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <map>
 #include <iostream>
 
@@ -28,6 +29,47 @@ enum class ConnectionStatus {
 	NOT_CONNECTED,
 	CONNECTED,
 	FAILED
+};
+
+// Lightweight replacement for std::promise/std::future using mutex + condition_variable.
+// Avoids the overhead of shared state allocation and exception handling in std::future.
+template <typename T>
+class ResponseFuture {
+public:
+	ResponseFuture() = default;
+
+	// Non-copyable, non-movable (used via shared_ptr)
+	ResponseFuture(const ResponseFuture&) = delete;
+	ResponseFuture& operator=(const ResponseFuture&) = delete;
+
+	void set_value(T value)
+	{
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			value_ = std::move(value);
+		}
+		cv_.notify_one();
+	}
+
+	T get()
+	{
+		std::unique_lock<std::mutex> lock(mu_);
+		cv_.wait(lock, [this] { return value_.has_value(); });
+		return std::move(*value_);
+	}
+
+	// Returns true if ready before deadline, false if timed out
+	template <typename Clock, typename Duration>
+	bool wait_until(const std::chrono::time_point<Clock, Duration>& deadline)
+	{
+		std::unique_lock<std::mutex> lock(mu_);
+		return cv_.wait_until(lock, deadline, [this] { return value_.has_value(); });
+	}
+
+private:
+	std::mutex mu_;
+	std::condition_variable cv_;
+	std::optional<T> value_;
 };
 
 struct ClientConfig {
@@ -75,14 +117,14 @@ public:
 	template <typename T>
 	std::pair<serialize::Reader, error::Error> call(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
 	{
-		auto [future, requestID, err] = sendMessage(ctx, serviceID, methodID, msg);
+		auto [responseFuture, requestID, err] = sendMessage(ctx, serviceID, methodID, msg);
 		if (err) {
 			return std::make_pair(serialize::Reader({}), err);
 		}
 
 		if (ctx.hasDeadline()) {
-			auto status = future.wait_until(ctx.getDeadline());
-			if (status == std::future_status::timeout) {
+			bool ready = responseFuture->wait_until(ctx.getDeadline());
+			if (!ready) {
 				// Remove request from map
 				std::lock_guard<std::mutex> lock(mu_);
 				requests_.erase(requestID);
@@ -90,7 +132,7 @@ public:
 			}
 		}
 
-		return receiveMessage(future);
+		return receiveMessage(responseFuture);
 	}
 
 	const std::vector<scg::middleware::Middleware>& middleware()
@@ -229,7 +271,7 @@ protected:
 
 
 	template <typename T>
-	std::tuple<std::future<serialize::Reader>, uint64_t, error::Error> sendMessage(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
+	std::tuple<std::shared_ptr<ResponseFuture<serialize::Reader>>, uint64_t, error::Error> sendMessage(const context::Context& ctx, uint64_t serviceID, uint64_t methodID, const T& msg)
 	{
 		// Get request ID first (single lock for ID + promise registration)
 		uint64_t requestID = 0;
@@ -256,24 +298,24 @@ protected:
 		writer.write(methodID);
 		writer.write(msg);
 
-		auto promise = std::make_shared<std::promise<serialize::Reader>>();
+		auto responseFuture = std::make_shared<ResponseFuture<serialize::Reader>>();
 
 		std::lock_guard<std::mutex> lock(mu_);
 
-		requests_[requestID] = promise;
+		requests_[requestID] = responseFuture;
 
 		auto err = sendBytesUnsafe(writer.bytes());
 		if (err) {
 			requests_.erase(requestID);
-			return std::make_tuple(std::future<serialize::Reader>(), 0, err);
+			return std::make_tuple(nullptr, 0, err);
 		}
 
-		return std::make_tuple(promise->get_future(), requestID, nullptr);
+		return std::make_tuple(responseFuture, requestID, nullptr);
 	}
 
-	std::pair<serialize::Reader, error::Error> receiveMessage(std::future<serialize::Reader>& future)
+	std::pair<serialize::Reader, error::Error> receiveMessage(std::shared_ptr<ResponseFuture<serialize::Reader>>& responseFuture)
 	{
-		auto reader = future.get();
+		auto reader = responseFuture->get();
 
 		uint8_t responseType = 0;
 		serialize::deserialize(responseType, reader);
@@ -301,7 +343,7 @@ private:
 	std::vector<scg::middleware::Middleware> middleware_;
 
 	uint64_t requestID_;
-	std::map<uint64_t, std::shared_ptr<std::promise<serialize::Reader>>> requests_;
+	std::map<uint64_t, std::shared_ptr<ResponseFuture<serialize::Reader>>> requests_;
 
 };
 
