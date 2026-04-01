@@ -324,7 +324,7 @@ public:
 
 		if (num_bits_to_read <= bitsInFirstByte) {
 			// Fits in one byte
-			uint8_t v;
+			uint8_t v = 0;
 			auto err = readByte(v, srcByteIndex);
 			if (err) {
 				return err;
@@ -335,7 +335,7 @@ public:
 		} else {
 			// Spans two bytes
 			// Read first part
-			uint8_t val1;
+			uint8_t val1 = 0;
 			auto err = readByte(val1, srcByteIndex);
 			if (err) {
 				return err;
@@ -343,7 +343,7 @@ public:
 			val1 >>= srcBitOffset;
 
 			// Read second part
-			uint8_t val2;
+			uint8_t val2 = 0;
 			err = readByte(val2, srcByteIndex + 1);
 			if (err) {
 				return err;
