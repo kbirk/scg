@@ -11,7 +11,7 @@ import (
 
 func TestGenerateTypedefsCpp(t *testing.T) {
 
-	parse, err := parse.NewParse("../../../test/files/input/sample/sample2")
+	parse, err := parse.NewParse("../../../test/scg/sample/sample2")
 	require.Nil(t, err)
 
 	for _, pkg := range parse.Packages {

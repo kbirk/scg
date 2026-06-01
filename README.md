@@ -446,6 +446,74 @@ if (err) {
 }
 ```
 
+### Streaming RPCs
+
+Mark a request and/or response type with the `stream` qualifier to make an RPC a
+stream. A stream is opened once and both sides read from and write to it until
+either side closes it (à la gRPC). Unary RPCs are unaffected and share the same
+connection and wire format.
+
+```
+service Chat {
+	# bidirectional: client sends events, server pushes events, until either side closes
+	rpc Connect (stream ChatMessage) returns (stream ChatMessage);
+}
+
+message ChatMessage {
+	string text = 0;
+	int32 seq = 1;
+}
+```
+
+**Go — client:**
+
+```go
+chat := pingpong.NewChatClient(client)
+
+stream, err := chat.Connect(context.Background()) // opens the stream; no message sent yet
+_ = stream.Send(&pingpong.ChatMessage{Text: "hello"})
+msg, err := stream.Recv()                          // blocks; err == io.EOF on clean close
+_ = stream.CloseSend()                             // half-close: done sending, still receiving
+```
+
+**Go — server:**
+
+```go
+func (s *chatServer) Connect(stream *pingpong.Chat_ConnectStreamServer) error {
+	for {
+		msg, err := stream.Recv()        // io.EOF when the client half-closes
+		if err == io.EOF { return nil }
+		if err != nil { return err }
+		_ = stream.Send(&pingpong.ChatMessage{Text: "echo:" + msg.Text})
+	}
+}
+```
+
+**C++ — client (no exceptions; non-blocking drain suited to a game loop):**
+
+```cpp
+pingpong::ChatClient chat(client);
+
+auto [stream, err] = chat.connect(scg::context::background());
+err = stream->send(ev);                  // non-blocking
+
+// Per-frame, drain without blocking (recommended for a single-threaded game loop):
+for (;;) {
+	auto r = stream->tryRecv();          // never blocks
+	if (r.state == scg::rpc::StreamRecvState::Empty)  break;   // nothing this frame
+	if (r.state == scg::rpc::StreamRecvState::Closed) break;   // r.error is nil on clean close
+	handle(r.message);
+}
+
+err = stream->closeSend();
+// auto blocking = stream->recv();       // also available for non-frame-locked consumers
+```
+
+The C++ client receives on the transport's existing background I/O thread and
+delivers into a bounded per-stream queue; `tryRecv()`/`send()` never block, so
+all stream handling stays on the caller's thread. See `streaming.md` for the
+full threading-model rationale and wire protocol.
+
 ## SCG C++ Serialization Macros
 
 The C++ `include/scg/macro.h` provides some macros for building serialization overrides for types that are _not_ generated with scg.
@@ -554,4 +622,3 @@ Run the tests:
 ## TODO:
 
 -   Opentracing hooks and context serialization
--   Add stream support

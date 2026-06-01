@@ -17,18 +17,117 @@ type ClientMethodArgs struct {
 	MethodResponseStructName string
 }
 
+type ClientStreamMethodArgs struct {
+	MethodNameCamelCase string
+	MethodIDVarName     string
+	MethodID            uint64
+	Kind                string // "bidi" | "server" | "client"
+	StreamTypeName      string
+	ReqStructName       string // request (argument) message
+	RespStructName      string // response (return) message
+}
+
 type ClientArgs struct {
 	ClientNamePascalCase string
 	ClientNameCamelCase  string
 	ServiceIDVarName     string
 	ServiceID            uint64
 	ClientMethods        []ClientMethodArgs
+	ClientStreamMethods  []ClientStreamMethodArgs
 }
 
 const clientTemplateStr = `
-static constexpr uint64_t {{.ServiceIDVarName}} = {{.ServiceID}}UL;{{- range .ClientMethods}}
-static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}
+{{- define "cppClientRecv"}}
+	inline scg::rpc::StreamRecv<{{.RespStructName}}> tryRecv()
+	{
+		scg::rpc::StreamRecv<{{.RespStructName}}> res;
+		scg::serialize::Reader reader({});
+		res.state = stream_->tryRecv(reader, res.error);
+		if (res.state == scg::rpc::StreamRecvState::Message) {
+			auto err = reader.read(res.message);
+			if (err) {
+				res.state = scg::rpc::StreamRecvState::Closed;
+				res.error = err;
+			}
+		}
+		return res;
+	}
 
+	inline scg::rpc::StreamRecv<{{.RespStructName}}> recv()
+	{
+		scg::rpc::StreamRecv<{{.RespStructName}}> res;
+		scg::serialize::Reader reader({});
+		res.state = stream_->recv(reader, res.error);
+		if (res.state == scg::rpc::StreamRecvState::Message) {
+			auto err = reader.read(res.message);
+			if (err) {
+				res.state = scg::rpc::StreamRecvState::Closed;
+				res.error = err;
+			}
+		}
+		return res;
+	}
+{{- end}}
+static constexpr uint64_t {{.ServiceIDVarName}} = {{.ServiceID}}UL;{{- range .ClientMethods}}
+static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}{{range .ClientStreamMethods}}
+static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}
+{{range .ClientStreamMethods}}
+// {{.StreamTypeName}} is the client handle for the {{.MethodNameCamelCase}} stream.
+// Receiving is non-blocking via tryRecv() (drain from a game loop); a blocking
+// recv() is also provided. Sending is non-blocking.
+class {{.StreamTypeName}} {
+public:
+	explicit {{.StreamTypeName}}(std::shared_ptr<scg::rpc::ClientStream> stream) : stream_(stream) {}
+{{if eq .Kind "bidi"}}
+	inline scg::error::Error send(const {{.ReqStructName}}& msg)
+	{
+		return stream_->send(msg);
+	}
+{{template "cppClientRecv" .}}
+	inline scg::error::Error closeSend()
+	{
+		return stream_->closeSend();
+	}
+{{else if eq .Kind "server"}}
+{{template "cppClientRecv" .}}{{else}}
+	inline scg::error::Error send(const {{.ReqStructName}}& msg)
+	{
+		return stream_->send(msg);
+	}
+
+	// closeAndRecv half-closes the send direction and blocks for the single response.
+	inline std::pair<{{.RespStructName}}, scg::error::Error> closeAndRecv()
+	{
+		auto err = stream_->closeSend();
+		if (err) {
+			return std::make_pair({{.RespStructName}}{}, err);
+		}
+		scg::serialize::Reader reader({});
+		scg::error::Error recvErr;
+		auto state = stream_->recv(reader, recvErr);
+		if (state != scg::rpc::StreamRecvState::Message) {
+			if (recvErr) {
+				return std::make_pair({{.RespStructName}}{}, recvErr);
+			}
+			return std::make_pair({{.RespStructName}}{}, scg::error::Error("stream closed before response"));
+		}
+		{{.RespStructName}} resp;
+		auto derr = reader.read(resp);
+		if (derr) {
+			return std::make_pair({{.RespStructName}}{}, derr);
+		}
+		return std::make_pair(resp, nullptr);
+	}
+{{end}}
+	inline const scg::context::Context& context() const
+	{
+		return stream_->context();
+	}
+
+private:
+	std::shared_ptr<scg::rpc::ClientStream> stream_;
+};
+{{end}}
 class {{.ClientNamePascalCase}}Client {
 public:
 	inline explicit
@@ -63,6 +162,31 @@ public:
 		auto& middleware = client_->middleware();
 		return scg::middleware::applyHandlerChain(c, req, middleware, handler).second;
 	}
+	{{end}}{{range .ClientStreamMethods}}
+	{{if eq .Kind "server"}}inline std::pair<std::shared_ptr<{{.StreamTypeName}}>, scg::error::Error> {{.MethodNameCamelCase}}(const scg::context::Context& ctx, const {{.ReqStructName}}& req) const
+	{
+		auto [stream, err] = client_->openStream(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}});
+		if (err) {
+			return std::make_pair(nullptr, err);
+		}
+		auto handle = std::make_shared<{{.StreamTypeName}}>(stream);
+		err = stream->send(req);
+		if (err) {
+			return std::make_pair(nullptr, err);
+		}
+		err = stream->closeSend();
+		if (err) {
+			return std::make_pair(nullptr, err);
+		}
+		return std::make_pair(handle, nullptr);
+	}{{else}}inline std::pair<std::shared_ptr<{{.StreamTypeName}}>, scg::error::Error> {{.MethodNameCamelCase}}(const scg::context::Context& ctx) const
+	{
+		auto [stream, err] = client_->openStream(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}});
+		if (err) {
+			return std::make_pair(nullptr, err);
+		}
+		return std::make_pair(std::make_shared<{{.StreamTypeName}}>(stream), nullptr);
+	}{{end}}
 	{{end}}
 
 private:
@@ -80,6 +204,25 @@ func serviceIDVarName(serviceName string) string {
 
 func methodIDVarName(serviceName string, methodName string) string {
 	return fmt.Sprintf("%s_%sID", util.EnsureCamelCase(serviceName), util.EnsurePascalCase(methodName))
+}
+
+func streamClientTypeName(serviceName string, methodName string) string {
+	return fmt.Sprintf("%s_%sStreamClient", util.EnsurePascalCase(serviceName), util.EnsurePascalCase(methodName))
+}
+
+func streamServerTypeName(serviceName string, methodName string) string {
+	return fmt.Sprintf("%s_%sStreamServer", util.EnsurePascalCase(serviceName), util.EnsurePascalCase(methodName))
+}
+
+// streamKind classifies a streaming method by which sides stream.
+func streamKind(method *parse.ServiceMethodDefinition) string {
+	if method.ArgumentStream && method.ReturnStream {
+		return "bidi"
+	}
+	if method.ReturnStream {
+		return "server"
+	}
+	return "client"
 }
 
 func generateServiceMethodParams(method *parse.ServiceMethodDefinition) (string, string, error) {
@@ -108,6 +251,7 @@ func generateClientCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		ServiceIDVarName:     serviceIDVarName(svc.Name),
 		ServiceID:            serviceID,
 		ClientMethods:        []ClientMethodArgs{},
+		ClientStreamMethods:  []ClientStreamMethodArgs{},
 	}
 
 	for name, method := range svc.Methods {
@@ -119,6 +263,20 @@ func generateClientCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		if err != nil {
 			return "", err
 		}
+
+		if method.IsStreaming() {
+			args.ClientStreamMethods = append(args.ClientStreamMethods, ClientStreamMethodArgs{
+				MethodNameCamelCase: util.EnsureCamelCase(name),
+				MethodIDVarName:     methodIDVarName(svc.Name, name),
+				MethodID:            methodID,
+				Kind:                streamKind(method),
+				StreamTypeName:      streamClientTypeName(svc.Name, name),
+				ReqStructName:       methodArgType,
+				RespStructName:      methodRetType,
+			})
+			continue
+		}
+
 		args.ClientMethods = append(args.ClientMethods, ClientMethodArgs{
 			MethodNameCamelCase:      util.EnsureCamelCase(name),
 			MethodIDVarName:          methodIDVarName(svc.Name, name),

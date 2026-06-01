@@ -43,6 +43,7 @@ var (
 	serviceIncludes = []string{
 		"scg/client.h",
 		"scg/server.h",
+		"scg/stream.h",
 		"scg/serialize.h",
 	}
 )

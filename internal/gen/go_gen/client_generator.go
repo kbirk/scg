@@ -17,12 +17,22 @@ type ClientMethodArgs struct {
 	MethodResponseStructName string
 }
 
+type ClientStreamMethodArgs struct {
+	MethodNamePascalCase string
+	MethodIDVarName      string
+	Kind                 string // "bidi" | "server" | "client"
+	StreamTypeName       string
+	ReqStructName        string // request (argument) message
+	RespStructName       string // response (return) message
+}
+
 type ClientArgs struct {
 	ClientNamePascalCase string
 	ClientNameCamelCase  string
 	ServiceIDVarName     string
 	ServiceID            uint64
 	ClientMethods        []ClientMethodArgs
+	ClientStreamMethods  []ClientStreamMethodArgs
 }
 
 const clientTemplateStr = `
@@ -65,6 +75,97 @@ func (c *{{$.ClientNamePascalCase}}Client) {{.MethodNamePascalCase}}(ctx context
 	return r, nil
 }
 {{end}}
+{{range .ClientStreamMethods}}
+// {{.StreamTypeName}} is the client handle for the {{.MethodNamePascalCase}} stream.
+type {{.StreamTypeName}} struct {
+	stream *rpc.ClientStream
+}
+{{if eq .Kind "bidi"}}
+// Send writes a message to the server. It does not block on the peer.
+func (s *{{.StreamTypeName}}) Send(req *{{.ReqStructName}}) error {
+	return s.stream.Send(req)
+}
+
+// Recv blocks for the next server message; returns io.EOF on a clean close.
+func (s *{{.StreamTypeName}}) Recv() (*{{.RespStructName}}, error) {
+	reader, err := s.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	resp := &{{.RespStructName}}{}
+	if err := resp.Deserialize(reader); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// CloseSend signals that the client is done sending; it may still receive.
+func (s *{{.StreamTypeName}}) CloseSend() error {
+	return s.stream.CloseSend()
+}
+{{else if eq .Kind "server"}}
+// Recv blocks for the next server message; returns io.EOF on a clean close.
+func (s *{{.StreamTypeName}}) Recv() (*{{.RespStructName}}, error) {
+	reader, err := s.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	resp := &{{.RespStructName}}{}
+	if err := resp.Deserialize(reader); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+{{else}}
+// Send writes a message to the server. It does not block on the peer.
+func (s *{{.StreamTypeName}}) Send(req *{{.ReqStructName}}) error {
+	return s.stream.Send(req)
+}
+
+// CloseAndRecv half-closes the send direction and blocks for the single response.
+func (s *{{.StreamTypeName}}) CloseAndRecv() (*{{.RespStructName}}, error) {
+	if err := s.stream.CloseSend(); err != nil {
+		return nil, err
+	}
+	reader, err := s.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	resp := &{{.RespStructName}}{}
+	if err := resp.Deserialize(reader); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+{{end}}
+// Context returns the context the stream was opened with.
+func (s *{{.StreamTypeName}}) Context() context.Context {
+	return s.stream.Context()
+}
+{{if eq .Kind "server"}}
+func (c *{{$.ClientNamePascalCase}}Client) {{.MethodNamePascalCase}}(ctx context.Context, req *{{.ReqStructName}}) (*{{.StreamTypeName}}, error) {
+	stream, err := c.client.OpenStream(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}})
+	if err != nil {
+		return nil, err
+	}
+	if err := stream.Send(req); err != nil {
+		return nil, err
+	}
+	if err := stream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return &{{.StreamTypeName}}{stream: stream}, nil
+}
+{{else}}
+func (c *{{$.ClientNamePascalCase}}Client) {{.MethodNamePascalCase}}(ctx context.Context) (*{{.StreamTypeName}}, error) {
+	stream, err := c.client.OpenStream(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}})
+	if err != nil {
+		return nil, err
+	}
+	return &{{.StreamTypeName}}{stream: stream}, nil
+}
+{{end}}
+{{end}}
 `
 
 var (
@@ -84,6 +185,7 @@ func generateClientGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		ServiceIDVarName:     serviceIDVarName(svc.Name),
 		ServiceID:            serviceID,
 		ClientMethods:        []ClientMethodArgs{},
+		ClientStreamMethods:  []ClientStreamMethodArgs{},
 	}
 
 	for name, method := range svc.Methods {
@@ -95,6 +197,19 @@ func generateClientGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		if err != nil {
 			return "", err
 		}
+
+		if method.IsStreaming() {
+			args.ClientStreamMethods = append(args.ClientStreamMethods, ClientStreamMethodArgs{
+				MethodNamePascalCase: util.EnsurePascalCase(name),
+				MethodIDVarName:      methodIDVarName(svc.Name, name),
+				Kind:                 streamKind(method),
+				StreamTypeName:       streamClientTypeName(svc.Name, name),
+				ReqStructName:        methodArgType,
+				RespStructName:       methodRetType,
+			})
+			continue
+		}
+
 		args.ClientMethods = append(args.ClientMethods, ClientMethodArgs{
 			MethodNamePascalCase:     util.EnsurePascalCase(name),
 			MethodNameCamelCase:      util.EnsureCamelCase(name),

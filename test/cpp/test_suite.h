@@ -116,6 +116,93 @@ public:
 	}
 };
 
+// Chat (streaming) server implementation. On open it pushes a "welcome"
+// message, then echoes each client message; a "fail" message terminates the
+// stream with an error. When the client half-closes it sends a "summary" with
+// the echo count and returns (clean close).
+class ChatServerImpl : public pingpong::ChatServer {
+public:
+	scg::error::Error connect(std::shared_ptr<pingpong::Chat_ConnectStreamServer> stream) override {
+		pingpong::ChatMessage welcome;
+		welcome.text = "welcome";
+		welcome.seq = 0;
+		auto err = stream->send(welcome);
+		if (err) {
+			return err;
+		}
+
+		int32_t count = 0;
+		for (;;) {
+			auto r = stream->recv();
+			if (r.state == scg::rpc::StreamRecvState::Closed) {
+				if (r.error) {
+					return r.error; // client cancelled / connection dropped
+				}
+				// client half-closed: send a final summary and close cleanly
+				pingpong::ChatMessage summary;
+				summary.text = "summary";
+				summary.seq = count;
+				return stream->send(summary);
+			}
+			if (r.message.text == "fail") {
+				return scg::error::Error("requested failure");
+			}
+			if (r.message.text == "flood") {
+				// Push many messages rapidly to overflow a slow client's bounded buffer.
+				for (int i = 0; i < 100; i++) {
+					pingpong::ChatMessage f;
+					f.text = "flood-" + std::to_string(i);
+					f.seq = i;
+					auto e = stream->send(f);
+					if (e) {
+						return e;
+					}
+				}
+				continue;
+			}
+			count++;
+			pingpong::ChatMessage echo;
+			echo.text = "echo:" + r.message.text;
+			echo.seq = r.message.seq + 1;
+			err = stream->send(echo);
+			if (err) {
+				return err;
+			}
+		}
+	}
+
+	// Subscribe is a server-streaming handler: push req.count events and return.
+	scg::error::Error subscribe(const pingpong::SubscribeRequest& req, std::shared_ptr<pingpong::Chat_SubscribeStreamServer> stream) override {
+		for (int32_t i = 0; i < req.count; i++) {
+			pingpong::ChatMessage m;
+			m.text = "event-" + std::to_string(i);
+			m.seq = i;
+			auto err = stream->send(m);
+			if (err) {
+				return err;
+			}
+		}
+		return nullptr;
+	}
+
+	// Upload is a client-streaming handler: sum the seqs and return a summary.
+	std::pair<pingpong::UploadSummary, scg::error::Error> upload(std::shared_ptr<pingpong::Chat_UploadStreamServer> stream) override {
+		int32_t total = 0;
+		for (;;) {
+			auto r = stream->recv();
+			if (r.state == scg::rpc::StreamRecvState::Closed) {
+				if (r.error) {
+					return std::make_pair(pingpong::UploadSummary{}, r.error);
+				}
+				pingpong::UploadSummary summary;
+				summary.total = total;
+				return std::make_pair(summary, nullptr);
+			}
+			total += r.message.seq;
+		}
+	}
+};
+
 // ============================================================================
 // Middleware
 // ============================================================================
@@ -1225,6 +1312,584 @@ inline void runRapidConnectionChurnTest(TestContext& ctx) {
 }
 
 // ============================================================================
+// Streaming tests
+// ============================================================================
+
+inline void registerStreamingServices(scg::rpc::Server* server) {
+	auto pp = std::make_shared<PingPongServerImpl>();
+	pingpong::registerPingPongServer(server, pp);
+	auto chat = std::make_shared<ChatServerImpl>();
+	pingpong::registerChatServer(server, chat);
+}
+
+// Full bidi lifecycle: server push on open, client send + server echo,
+// half-close, final summary, then a clean close.
+inline void runStreamBidiTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Bidi test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	auto [stream, err] = chatClient.connect(context);
+	TEST_CHECK(err == nullptr);
+	if (err) { ctx.stopServer(); return; }
+
+	auto welcome = stream->recv();
+	TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(welcome.message.text == "welcome");
+
+	const int N = 10;
+	for (int i = 0; i < N; i++) {
+		pingpong::ChatMessage m;
+		m.text = "m" + std::to_string(i);
+		m.seq = i;
+		TEST_CHECK(stream->send(m) == nullptr);
+
+		auto echo = stream->recv();
+		TEST_CHECK(echo.state == scg::rpc::StreamRecvState::Message);
+		TEST_CHECK(echo.message.text == "echo:m" + std::to_string(i));
+		TEST_CHECK(echo.message.seq == i + 1);
+	}
+
+	TEST_CHECK(stream->closeSend() == nullptr);
+
+	auto summary = stream->recv();
+	TEST_CHECK(summary.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(summary.message.text == "summary");
+	TEST_CHECK(summary.message.seq == N);
+
+	auto end = stream->recv();
+	TEST_CHECK(end.state == scg::rpc::StreamRecvState::Closed);
+	TEST_CHECK(end.error == nullptr); // clean EOF
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Bidi test passed\n");
+}
+
+// A server-side handler error surfaces on the client's next recv().
+inline void runStreamServerErrorTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Server Error test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	auto [stream, err] = chatClient.connect(context);
+	TEST_CHECK(err == nullptr);
+	if (err) { ctx.stopServer(); return; }
+
+	auto welcome = stream->recv();
+	TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+
+	pingpong::ChatMessage m;
+	m.text = "fail";
+	m.seq = 1;
+	TEST_CHECK(stream->send(m) == nullptr);
+
+	auto r = stream->recv();
+	TEST_CHECK(r.state == scg::rpc::StreamRecvState::Closed);
+	TEST_CHECK(r.error != nullptr);
+	if (r.error) {
+		TEST_CHECK(r.error.message() == "requested failure");
+	}
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Server Error test passed\n");
+}
+
+// Non-blocking poll/drain — the recommended game-loop consumer model.
+inline void runStreamPollTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Poll test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	auto [stream, err] = chatClient.connect(context);
+	TEST_CHECK(err == nullptr);
+	if (err) { ctx.stopServer(); return; }
+
+	const int N = 5;
+	for (int i = 0; i < N; i++) {
+		pingpong::ChatMessage m;
+		m.text = "p" + std::to_string(i);
+		m.seq = i;
+		TEST_CHECK(stream->send(m) == nullptr);
+	}
+
+	// Drain non-blocking until we've collected the welcome + N echoes.
+	std::vector<std::string> got;
+	const int expected = N + 1;
+	for (int iter = 0; iter < 400 && (int)got.size() < expected; iter++) {
+		bool closed = false;
+		for (;;) {
+			auto r = stream->tryRecv();
+			if (r.state == scg::rpc::StreamRecvState::Empty) {
+				break;
+			}
+			if (r.state == scg::rpc::StreamRecvState::Closed) {
+				closed = true;
+				break;
+			}
+			got.push_back(r.message.text);
+		}
+		if (closed) break;
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+
+	TEST_CHECK((int)got.size() == expected);
+	if (!got.empty()) {
+		TEST_CHECK(got[0] == "welcome");
+	}
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Poll test passed\n");
+}
+
+// Multiple independent streams multiplexed on one connection.
+inline void runStreamConcurrentTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Concurrent test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	const int NUM_STREAMS = 8;
+	const int MSGS = 20;
+	std::atomic<int> errorCount{0};
+	std::vector<std::thread> threads;
+
+	for (int s = 0; s < NUM_STREAMS; s++) {
+		threads.emplace_back([&, s]() {
+			scg::context::Context context;
+			auto [stream, err] = chatClient.connect(context);
+			if (err) { errorCount++; return; }
+
+			auto welcome = stream->recv();
+			if (welcome.state != scg::rpc::StreamRecvState::Message || welcome.message.text != "welcome") {
+				errorCount++;
+				return;
+			}
+
+			for (int i = 0; i < MSGS; i++) {
+				std::string text = "s" + std::to_string(s) + "-m" + std::to_string(i);
+				pingpong::ChatMessage m;
+				m.text = text;
+				m.seq = i;
+				if (stream->send(m)) { errorCount++; return; }
+
+				auto echo = stream->recv();
+				if (echo.state != scg::rpc::StreamRecvState::Message || echo.message.text != "echo:" + text || echo.message.seq != i + 1) {
+					errorCount++;
+					return;
+				}
+			}
+
+			if (stream->closeSend()) { errorCount++; return; }
+			auto summary = stream->recv();
+			if (summary.state != scg::rpc::StreamRecvState::Message) { errorCount++; return; }
+			auto end = stream->recv();
+			if (end.state != scg::rpc::StreamRecvState::Closed || end.error != nullptr) { errorCount++; return; }
+		});
+	}
+
+	for (auto& t : threads) {
+		t.join();
+	}
+
+	TEST_CHECK(errorCount.load() == 0);
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Concurrent test passed\n");
+}
+
+// Dropping the connection fails in-flight streams with an error.
+inline void runStreamConnectionDropTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Connection Drop test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	auto [stream, err] = chatClient.connect(context);
+	TEST_CHECK(err == nullptr);
+	if (err) { ctx.stopServer(); return; }
+
+	auto welcome = stream->recv();
+	TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+
+	// Drop the connection out from under the live stream.
+	client->disconnect();
+
+	auto r = stream->recv();
+	TEST_CHECK(r.state == scg::rpc::StreamRecvState::Closed);
+	TEST_CHECK(r.error != nullptr);
+
+	ctx.stopServer();
+	printf("Stream Connection Drop test passed\n");
+}
+
+// Stream OPEN is gated by server middleware (auth validated once on open).
+inline void runStreamAuthFailTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Auth Fail test...\n");
+
+	ctx.startServerWithSetup([](scg::rpc::Server* server) {
+		server->addMiddleware(authMiddleware);
+		registerStreamingServices(server);
+	});
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	// No token -> auth middleware rejects on OPEN.
+	{
+		scg::context::Context context;
+		auto [stream, err] = chatClient.connect(context);
+		TEST_CHECK(err == nullptr);
+		if (!err) {
+			auto r = stream->recv();
+			TEST_CHECK(r.state == scg::rpc::StreamRecvState::Closed);
+			TEST_CHECK(r.error != nullptr);
+			if (r.error) {
+				TEST_CHECK(r.error.message() == "no metadata");
+			}
+		}
+	}
+
+	// With a valid token the stream opens and the welcome push arrives.
+	{
+		scg::context::Context context;
+		context.put("token", VALID_TOKEN);
+		auto [stream, err] = chatClient.connect(context);
+		TEST_CHECK(err == nullptr);
+		if (!err) {
+			auto welcome = stream->recv();
+			TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+			TEST_CHECK(welcome.message.text == "welcome");
+		}
+	}
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Auth Fail test passed\n");
+}
+
+// Send from one thread while receiving on another on the same stream.
+inline void runStreamConcurrentSendRecvTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Concurrent Send/Recv test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	auto connectResult = chatClient.connect(context);
+	auto stream = connectResult.first;
+	TEST_CHECK(connectResult.second == nullptr);
+	if (connectResult.second) { ctx.stopServer(); return; }
+
+	const int N = 200;
+	std::thread sender([&]() {
+		for (int i = 0; i < N; i++) {
+			pingpong::ChatMessage m;
+			m.text = "m" + std::to_string(i);
+			m.seq = i;
+			stream->send(m);
+		}
+		stream->closeSend();
+	});
+
+	int echoes = 0;
+	for (;;) {
+		auto r = stream->recv();
+		if (r.state == scg::rpc::StreamRecvState::Closed) {
+			break;
+		}
+		if (r.message.text != "welcome" && r.message.text != "summary") {
+			echoes++;
+		}
+	}
+	sender.join();
+
+	TEST_CHECK(echoes == N);
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Concurrent Send/Recv test passed\n");
+}
+
+// send() after closeSend() returns an error.
+inline void runStreamSendAfterCloseSendTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Send-After-CloseSend test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	auto [stream, err] = chatClient.connect(context);
+	TEST_CHECK(err == nullptr);
+	if (err) { ctx.stopServer(); return; }
+
+	auto welcome = stream->recv();
+	TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+
+	TEST_CHECK(stream->closeSend() == nullptr);
+
+	pingpong::ChatMessage late;
+	late.text = "late";
+	TEST_CHECK(stream->send(late) != nullptr);
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Send-After-CloseSend test passed\n");
+}
+
+// A large payload round-trips over a stream.
+inline void runStreamLargeMessageTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Large Message test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	auto [stream, err] = chatClient.connect(context);
+	TEST_CHECK(err == nullptr);
+	if (err) { ctx.stopServer(); return; }
+
+	auto welcome = stream->recv();
+	TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+
+	std::string big(256 * 1024, 'x');
+	pingpong::ChatMessage m;
+	m.text = big;
+	m.seq = 1;
+	TEST_CHECK(stream->send(m) == nullptr);
+
+	auto echo = stream->recv();
+	TEST_CHECK(echo.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(echo.message.text == "echo:" + big);
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Large Message test passed\n");
+}
+
+// A slow reader whose bounded buffer overflows has its stream terminated with
+// an overflow error (the connection and other streams are unaffected).
+inline void runStreamBackpressureTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Backpressure test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+
+	// Tiny receive buffer so a flood overflows quickly.
+	scg::rpc::ClientConfig clientConfig;
+	clientConfig.transport = ctx.factory().createClientTransport(ctx.id());
+	clientConfig.streamRecvBufferSize = 4;
+	auto client = std::make_shared<scg::rpc::Client>(clientConfig);
+	TEST_CHECK(connectWithRetries(client, ctx.maxRetries()));
+
+	pingpong::ChatClient chatClient(client);
+	scg::context::Context context;
+	auto connectResult = chatClient.connect(context);
+	auto stream = connectResult.first;
+	TEST_CHECK(connectResult.second == nullptr);
+	if (connectResult.second) { ctx.stopServer(); return; }
+
+	pingpong::ChatMessage flood;
+	flood.text = "flood";
+	TEST_CHECK(stream->send(flood) == nullptr);
+
+	// Deliberately don't read for a moment so the bounded buffer overflows.
+	std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+	bool gotOverflow = false;
+	for (int i = 0; i < 200; i++) {
+		auto r = stream->recv();
+		if (r.state == scg::rpc::StreamRecvState::Closed) {
+			gotOverflow = (r.error && r.error.message().find("overflow") != std::string::npos);
+			break;
+		}
+	}
+	TEST_CHECK(gotOverflow);
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Backpressure test passed\n");
+}
+
+// The per-connection stream cap rejects streams beyond the limit.
+inline void runStreamMaxConcurrentTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Max Concurrent test...\n");
+
+	scg::rpc::ServerConfig serverConfig;
+	serverConfig.transport = ctx.factory().createServerTransport(ctx.id());
+	serverConfig.maxConcurrentStreams = 2;
+	auto server = std::make_shared<scg::rpc::Server>(serverConfig);
+	registerStreamingServices(server.get());
+	auto serr = server->start();
+	TEST_CHECK(!serr);
+	if (serr) return;
+
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+	scg::context::Context context;
+
+	auto r1 = chatClient.connect(context);
+	TEST_CHECK(r1.second == nullptr);
+	auto w1 = r1.first->recv();
+	TEST_CHECK(w1.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(w1.message.text == "welcome");
+
+	auto r2 = chatClient.connect(context);
+	TEST_CHECK(r2.second == nullptr);
+	auto w2 = r2.first->recv();
+	TEST_CHECK(w2.state == scg::rpc::StreamRecvState::Message);
+
+	// Third exceeds the cap and is rejected on open.
+	auto r3 = chatClient.connect(context);
+	TEST_CHECK(r3.second == nullptr);
+	auto e3 = r3.first->recv();
+	TEST_CHECK(e3.state == scg::rpc::StreamRecvState::Closed);
+	TEST_CHECK(e3.error != nullptr);
+	if (e3.error) {
+		TEST_CHECK(e3.error.message().find("max concurrent streams") != std::string::npos);
+	}
+
+	client->disconnect();
+	server->shutdown();
+	printf("Stream Max Concurrent test passed\n");
+}
+
+// Server-streaming form: the client sends a single request and reads a stream.
+inline void runStreamServerStreamingTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Server-Streaming test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	pingpong::SubscribeRequest req;
+	req.count = 5;
+	auto cr = chatClient.subscribe(context, req);
+	TEST_CHECK(cr.second == nullptr);
+	if (cr.second) { ctx.stopServer(); return; }
+	auto stream = cr.first;
+
+	int32_t count = 0;
+	for (;;) {
+		auto r = stream->recv();
+		if (r.state == scg::rpc::StreamRecvState::Closed) {
+			TEST_CHECK(r.error == nullptr); // clean EOF
+			break;
+		}
+		TEST_CHECK(r.message.seq == count);
+		count++;
+	}
+	TEST_CHECK(count == 5);
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Server-Streaming test passed\n");
+}
+
+// Client-streaming form: the client sends a stream and reads a single response.
+inline void runStreamClientStreamingTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Client-Streaming test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+	auto client = ctx.createClient();
+	pingpong::ChatClient chatClient(client);
+
+	scg::context::Context context;
+	auto cr = chatClient.upload(context);
+	TEST_CHECK(cr.second == nullptr);
+	if (cr.second) { ctx.stopServer(); return; }
+	auto stream = cr.first;
+
+	int32_t sum = 0;
+	for (int32_t i = 1; i <= 5; i++) {
+		pingpong::ChatMessage m;
+		m.seq = i;
+		TEST_CHECK(stream->send(m) == nullptr);
+		sum += i;
+	}
+
+	auto result = stream->closeAndRecv();
+	TEST_CHECK(result.second == nullptr);
+	TEST_CHECK(result.first.total == sum);
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Client-Streaming test passed\n");
+}
+
+// Connection-level keepalive keeps an idle stream healthy (PING/PONG flow
+// without disrupting the stream).
+inline void runStreamKeepaliveTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Keepalive test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+
+	scg::rpc::ClientConfig clientConfig;
+	clientConfig.transport = ctx.factory().createClientTransport(ctx.id());
+	clientConfig.keepaliveInterval = std::chrono::milliseconds(40);
+	clientConfig.keepaliveTimeout = std::chrono::milliseconds(500);
+	auto client = std::make_shared<scg::rpc::Client>(clientConfig);
+	TEST_CHECK(connectWithRetries(client, ctx.maxRetries()));
+
+	pingpong::ChatClient chatClient(client);
+	scg::context::Context context;
+	auto cr = chatClient.connect(context);
+	TEST_CHECK(cr.second == nullptr);
+	if (cr.second) { ctx.stopServer(); return; }
+	auto stream = cr.first;
+
+	auto welcome = stream->recv();
+	TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(welcome.message.text == "welcome");
+
+	// Idle well beyond the keepalive interval; pings keep the connection alive.
+	std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+	pingpong::ChatMessage m;
+	m.text = "after-idle";
+	m.seq = 1;
+	TEST_CHECK(stream->send(m) == nullptr);
+	auto echo = stream->recv();
+	TEST_CHECK(echo.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(echo.message.text == "echo:after-idle");
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Keepalive test passed\n");
+}
+
+// ============================================================================
 // Main Test Suite Runner (like Go's RunTestSuite)
 // ============================================================================
 
@@ -1331,6 +1996,90 @@ inline void runTestSuite(const TestSuiteConfig& config) {
 				printf("\n=== Running Rapid Connection Churn Test ===\n");
 				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
 				runRapidConnectionChurnTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Bidi Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamBidiTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Server Error Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamServerErrorTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Poll Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamPollTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Concurrent Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamConcurrentTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Connection Drop Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamConnectionDropTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Auth Fail Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamAuthFailTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Concurrent Send/Recv Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamConcurrentSendRecvTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Send-After-CloseSend Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamSendAfterCloseSendTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Large Message Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamLargeMessageTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Backpressure Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamBackpressureTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Max Concurrent Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamMaxConcurrentTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Server-Streaming Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamServerStreamingTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Client-Streaming Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamClientStreamingTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Keepalive Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamKeepaliveTest(ctx);
 			}
 		}
 	}

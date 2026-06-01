@@ -31,6 +31,10 @@ type ServerConfig struct {
 	Transport  ServerTransport
 	ErrHandler func(error)
 	Logger     log.Logger
+	// StreamRecvBufferSize bounds each stream's inbound queue (0 = default).
+	StreamRecvBufferSize int
+	// MaxConcurrentStreams caps live streams per connection (0 = unlimited).
+	MaxConcurrentStreams int
 }
 
 type serverStub interface {
@@ -123,6 +127,7 @@ func (s *Server) handleError(err error) {
 	if s.conf.ErrHandler != nil {
 		s.conf.ErrHandler(err)
 	}
+	// TODO: respond with an error?!
 }
 
 func (s *Server) logDebug(msg string) {
@@ -231,6 +236,11 @@ func (g *ServerGroup) getServiceByID(id uint64) (serverStub, error) {
 func (s *Server) handleConnection(conn Connection) {
 	defer conn.Close()
 
+	// Per-connection registry of live streams. Failed on disconnect so handler
+	// goroutines blocked in Recv observe the terminal error and return.
+	cs := newConnStreams()
+	defer cs.terminateAll(fmt.Errorf("connection closed"))
+
 	for {
 		// read message
 		bs, err := conn.Receive()
@@ -243,70 +253,208 @@ func (s *Server) handleConnection(conn Connection) {
 			break
 		}
 
-		go func() {
-			reader := serialize.NewReader(bs)
+		reader := serialize.NewReader(bs)
 
-			var prefix [16]byte
-			err = DeserializePrefix(&prefix, reader)
-			if err != nil {
-				s.handleError(err)
-				return
-			}
+		var prefix [16]byte
+		if err := DeserializePrefix(&prefix, reader); err != nil {
+			s.handleError(err)
+			continue
+		}
 
-			if prefix != RequestPrefix {
-				s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
-				return
-			}
+		switch prefix {
+		case RequestPrefix:
+			// Unary calls run concurrently, one goroutine per request.
+			r := reader
+			go s.handleUnaryRequest(conn, r)
 
-			// get the context
-			ctx := context.Background()
-			err = DeserializeContext(&ctx, reader)
-			if err != nil {
-				s.handleError(err)
-				return
-			}
+		case StreamPrefix:
+			// Stream frames are routed inline on the read loop to preserve
+			// per-stream ordering; only the handler body runs concurrently.
+			s.handleStreamFrame(conn, cs, reader)
 
-			// get the request id
-			var requestID uint64
-			err = serialize.DeserializeUInt64(&requestID, reader)
-			if err != nil {
-				s.handleError(err)
-				return
-			}
-
-			// get the service id
-			var serviceID uint64
-			err = serialize.DeserializeUInt64(&serviceID, reader)
-			if err != nil {
-				s.handleError(err)
-				return
-			}
-
-			// acquire the service
-			service, err := s.getServiceByID(serviceID)
-			if err != nil {
-				s.handleError(err)
-				return
-			}
-
-			// gather middleware for the call
-			middleware, err := s.getMiddlewareStackForServiceID(serviceID)
-			if err != nil {
-				s.handleError(err)
-				return
-			}
-
-			// handle the request
-			bs = service.HandleWrapper(ctx, middleware, requestID, reader)
-
-			// send response
-			err = conn.Send(bs, serviceID)
-			if err != nil {
-				s.handleError(err)
-				return
-			}
-		}()
+		default:
+			s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
+		}
 	}
+}
+
+// handleUnaryRequest processes a single unary request frame (prefix already
+// consumed) and writes the response.
+func (s *Server) handleUnaryRequest(conn Connection, reader *serialize.Reader) {
+	// get the context
+	ctx := context.Background()
+	err := DeserializeContext(&ctx, reader)
+	if err != nil {
+		s.handleError(err)
+		return
+	}
+
+	// get the request id
+	var requestID uint64
+	err = serialize.DeserializeUInt64(&requestID, reader)
+	if err != nil {
+		s.handleError(err)
+		return
+	}
+
+	// get the service id
+	var serviceID uint64
+	err = serialize.DeserializeUInt64(&serviceID, reader)
+	if err != nil {
+		s.handleError(err)
+		return
+	}
+
+	// acquire the service
+	service, err := s.getServiceByID(serviceID)
+	if err != nil {
+		s.handleError(err)
+		return
+	}
+
+	// gather middleware for the call
+	middleware, err := s.getMiddlewareStackForServiceID(serviceID)
+	if err != nil {
+		s.handleError(err)
+		return
+	}
+
+	// handle the request
+	bs := service.HandleWrapper(ctx, middleware, requestID, reader)
+
+	// send response
+	err = conn.Send(bs, serviceID)
+	if err != nil {
+		s.handleError(err)
+		return
+	}
+}
+
+// handleStreamFrame routes one inbound stream frame. OPEN spawns a handler
+// goroutine; MSG/HALF_CLOSE/CLOSE are delivered to the existing stream.
+func (s *Server) handleStreamFrame(conn Connection, cs *connStreams, reader *serialize.Reader) {
+	var streamID uint64
+	if err := serialize.DeserializeUInt64(&streamID, reader); err != nil {
+		s.handleError(err)
+		return
+	}
+
+	var frameKind uint8
+	if err := serialize.DeserializeUInt8(&frameKind, reader); err != nil {
+		s.handleError(err)
+		return
+	}
+
+	// Connection-level keepalive frames are not associated with a stream.
+	if frameKind == StreamFramePing {
+		_ = conn.Send(serializeStreamControl(StreamFramePong), 0)
+		return
+	}
+	if frameKind == StreamFramePong {
+		return
+	}
+
+	switch frameKind {
+	case StreamFrameOpen:
+		ctx := context.Background()
+		if err := DeserializeContext(&ctx, reader); err != nil {
+			s.handleError(err)
+			return
+		}
+		var serviceID uint64
+		if err := serialize.DeserializeUInt64(&serviceID, reader); err != nil {
+			s.handleError(err)
+			return
+		}
+		var methodID uint64
+		if err := serialize.DeserializeUInt64(&methodID, reader); err != nil {
+			s.handleError(err)
+			return
+		}
+
+		// Reject a duplicate stream id rather than orphaning the existing stream.
+		if cs.get(streamID) != nil {
+			_ = conn.Send(serializeStreamClose(streamID, StreamStatusError, "duplicate stream id"), serviceID)
+			return
+		}
+		// Enforce the per-connection concurrent-stream cap.
+		if max := s.conf.MaxConcurrentStreams; max > 0 && cs.count() >= max {
+			_ = conn.Send(serializeStreamClose(streamID, StreamStatusError, "max concurrent streams exceeded"), serviceID)
+			return
+		}
+
+		stream := newServerStream(conn, ctx, streamID, serviceID, s.conf.StreamRecvBufferSize)
+		cs.add(streamID, stream)
+		go s.runStreamHandler(conn, cs, stream, methodID)
+
+	case StreamFrameMessage:
+		if st := cs.get(streamID); st != nil {
+			if st.deliver(reader) {
+				// Bounded buffer overflowed: notify the client and drop the stream.
+				_ = conn.Send(serializeStreamClose(streamID, StreamStatusError, errStreamOverflow.Error()), st.serviceID)
+				cs.remove(streamID)
+			}
+		}
+
+	case StreamFrameHalfClose:
+		if st := cs.get(streamID); st != nil {
+			st.halfClose()
+		}
+
+	case StreamFrameClose:
+		// Client cancelled the stream; surface an error to the handler.
+		if st := cs.get(streamID); st != nil {
+			st.die(fmt.Errorf("stream cancelled by client"))
+			cs.remove(streamID)
+		}
+
+	default:
+		s.handleError(fmt.Errorf("unknown stream frame kind: %d", frameKind))
+	}
+}
+
+// runStreamHandler validates/authorizes the stream and runs its handler to
+// completion, then sends the terminal CLOSE frame.
+func (s *Server) runStreamHandler(conn Connection, cs *connStreams, stream *ServerStream, methodID uint64) {
+	serviceID := stream.serviceID
+	defer cs.remove(stream.streamID)
+
+	closeWithError := func(err error) {
+		_ = conn.Send(serializeStreamClose(stream.streamID, StreamStatusError, err.Error()), serviceID)
+	}
+
+	service, err := s.getServiceByID(serviceID)
+	if err != nil {
+		closeWithError(err)
+		return
+	}
+
+	streamStub, ok := service.(streamServerStub)
+	if !ok {
+		closeWithError(fmt.Errorf("service with id %d does not support streaming", serviceID))
+		return
+	}
+
+	middleware, err := s.getMiddlewareStackForServiceID(serviceID)
+	if err != nil {
+		closeWithError(err)
+		return
+	}
+
+	// Validate/authorize once on OPEN by running the middleware chain with a
+	// sentinel request. Message-oriented middleware (e.g. auth) gates the stream.
+	if _, mwErr := ApplyHandlerChain(stream.ctx, &emptyStreamMessage{}, middleware,
+		func(ctx context.Context, req Message) (Message, error) { return req, nil }); mwErr != nil {
+		closeWithError(mwErr)
+		return
+	}
+
+	if herr := streamStub.HandleStreamWrapper(stream.ctx, stream, methodID); herr != nil {
+		closeWithError(herr)
+		return
+	}
+
+	_ = conn.Send(serializeStreamClose(stream.streamID, StreamStatusOK, ""), serviceID)
 }
 
 func (s *Server) ListenAndServe() error {
