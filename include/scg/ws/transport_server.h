@@ -45,14 +45,15 @@ public:
 			return error::Error("Message size exceeds send limit");
 		}
 
-		auto self = shared_from_this();
-		server_->get_io_service().post([self, data]() {
-			websocketpp::lib::error_code ec;
-			self->server_->send(self->hdl_, data.data(), data.size(), websocketpp::frame::opcode::binary, ec);
-			if (ec) {
-				SCG_LOG_ERROR("WebSocket send error: " + ec.message());
-			}
-		});
+		// websocketpp's endpoint::send is thread-safe (it locks and queues the
+		// frame, dispatching the write on the connection's strand), so call it
+		// directly instead of posting another task with a copy of the buffer.
+		websocketpp::lib::error_code ec;
+		server_->send(hdl_, data.data(), data.size(), websocketpp::frame::opcode::binary, ec);
+		if (ec) {
+			SCG_LOG_ERROR("WebSocket send error: " + ec.message());
+			return error::Error(ec.message());
+		}
 		return nullptr;
 	}
 
@@ -187,15 +188,24 @@ public:
 
 	void runEventLoop() override
 	{
+		// websocketpp is run on a single io thread. Unlike raw asio (where a
+		// per-connection strand makes multi-threaded io safe), running
+		// websocketpp's endpoint on multiple threads surfaced real faults (lost
+		// responses and crashes) under load, so the WS server stays single-io-
+		// threaded. Unary handlers still run inline (no thread-pool hop); stream
+		// handlers run on their own threads.
 		server_.run();
 	}
 
 	void stop() override
 	{
+		// server_.stop() is io_service::stop() (thread-safe); it halts the io loop
+		// and the accept. We deliberately do not call is_listening()/stop_listening()
+		// here: those touch websocketpp's unsynchronized internal state and would
+		// race the running accept loop on the other io threads. The listener is
+		// released when the io loop stops and the endpoint is destroyed; the accept
+		// socket uses SO_REUSEADDR.
 		SCG_LOG_INFO("Stopping WebSocket server");
-		if (server_.is_listening()) {
-			server_.stop_listening();
-		}
 		server_.stop();
 	}
 

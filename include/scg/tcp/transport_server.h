@@ -61,6 +61,11 @@ public:
 		if (io_context_.stopped()) {
 			io_context_.restart();
 		}
+		// Single io thread: a latency-optimized event loop. Unary handlers run
+		// inline on this thread (no thread-pool hop); stream handlers run on their
+		// own threads. Multi-threaded io was measured slower for request latency
+		// (strand dispatch + thread migration outweigh the saved hop) and is not
+		// used; scale throughput with multiple server processes.
 		io_context_.run();
 	}
 

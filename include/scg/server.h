@@ -359,7 +359,10 @@ private:
 				return;
 			}
 
-			// Submit unary requests to the thread pool to avoid blocking the event loop
+			// Dispatch the unary request to the worker pool so the single io thread
+			// stays free to read more frames, and handlers run concurrently across
+			// cores (and may block without stalling the event loop). Stream frames
+			// are routed inline above to preserve per-stream order.
 			asio::post(threadPool_, [this, connID, data]() {
 				handleMessage(connID, data);
 			});

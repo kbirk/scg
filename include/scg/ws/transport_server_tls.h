@@ -48,14 +48,14 @@ public:
 			return error::Error("Message size exceeds send limit");
 		}
 
-		auto self = shared_from_this();
-		server_->get_io_service().post([self, data]() {
-			websocketpp::lib::error_code ec;
-			self->server_->send(self->hdl_, data.data(), data.size(), websocketpp::frame::opcode::binary, ec);
-			if (ec) {
-				SCG_LOG_ERROR("WebSocket send error: " + ec.message());
-			}
-		});
+		// websocketpp's endpoint::send is thread-safe; call it directly instead of
+		// posting another task with a copy of the buffer.
+		websocketpp::lib::error_code ec;
+		server_->send(hdl_, data.data(), data.size(), websocketpp::frame::opcode::binary, ec);
+		if (ec) {
+			SCG_LOG_ERROR("WebSocket send error: " + ec.message());
+			return error::Error(ec.message());
+		}
 		return nullptr;
 	}
 
@@ -194,15 +194,15 @@ public:
 
 	void runEventLoop() override
 	{
+		// Single io thread — see ServerTransportWS::runEventLoop().
 		server_.run();
 	}
 
 	void stop() override
 	{
+		// See ServerTransportWS::stop(): avoid the unsynchronized
+		// is_listening()/stop_listening() and just stop the (thread-safe) io loop.
 		SCG_LOG_INFO("Stopping WebSocket TLS server");
-		if (server_.is_listening()) {
-			server_.stop_listening();
-		}
 		server_.stop();
 	}
 

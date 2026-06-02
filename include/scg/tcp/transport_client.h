@@ -29,6 +29,7 @@ class ConnectionTCP : public scg::rpc::Connection, public std::enable_shared_fro
 public:
 	ConnectionTCP(asio::ip::tcp::socket socket, uint32_t maxSendMessageSize = 0, uint32_t maxRecvMessageSize = 0)
 		: socket_(std::move(socket))
+		, strand_(asio::make_strand(socket_.get_executor()))
 		, closed_(false)
 		, maxSendMessageSize_(maxSendMessageSize)
 		, maxRecvMessageSize_(maxRecvMessageSize)
@@ -61,7 +62,7 @@ public:
 		buffer.insert(buffer.end(), data.begin(), data.end());
 
 		auto self = shared_from_this();
-		asio::post(socket_.get_executor(), [self, buffer = std::move(buffer)]() {
+		asio::post(strand_, [self, buffer = std::move(buffer)]() {
 			bool write_in_progress = !self->write_queue_.empty();
 			self->write_queue_.push_back(std::move(buffer));
 			if (!write_in_progress) {
@@ -75,7 +76,9 @@ public:
 	void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override
 	{
 		messageHandler_ = handler;
-		read_header();
+		// Start the read chain on the strand so all subsequent reads are serialized.
+		auto self = shared_from_this();
+		asio::post(strand_, [self]() { self->read_header(); });
 	}
 
 	void setFailHandler(std::function<void(const error::Error&)> handler) override
@@ -96,7 +99,7 @@ public:
 			SCG_LOG_INFO("TCP connection clsing");
 
 			auto self = shared_from_this();
-			asio::post(socket_.get_executor(), [self]() {
+			asio::post(strand_, [self]() {
 				if (self->socket_.is_open()) {
 					self->socket_.close();
 				}
@@ -110,7 +113,7 @@ private:
 	{
 		auto self = shared_from_this();
 		asio::async_write(socket_, asio::buffer(write_queue_.front()),
-			[self](std::error_code ec, std::size_t /*length*/) {
+			asio::bind_executor(strand_, [self](std::error_code ec, std::size_t /*length*/) {
 				if (!ec) {
 					self->write_queue_.pop_front();
 					if (!self->write_queue_.empty()) {
@@ -123,14 +126,14 @@ private:
 					}
 					self->close();
 				}
-			});
+			}));
 	}
 
 	void read_header()
 	{
 		auto self = shared_from_this();
 		asio::async_read(socket_, asio::buffer(read_buffer_, 4),
-			[self](std::error_code ec, std::size_t /*length*/) {
+			asio::bind_executor(strand_, [self](std::error_code ec, std::size_t /*length*/) {
 				if (!ec) {
 					uint32_t len = (self->read_buffer_[0] << 24) | (self->read_buffer_[1] << 16) | (self->read_buffer_[2] << 8) | self->read_buffer_[3];
 					if (self->maxRecvMessageSize_ > 0 && len > self->maxRecvMessageSize_) {
@@ -155,7 +158,7 @@ private:
 					}
 					self->close();
 				}
-			});
+			}));
 	}
 
 	void read_body(uint32_t length)
@@ -163,7 +166,7 @@ private:
 		auto self = shared_from_this();
 		body_buffer_.resize(length);
 		asio::async_read(socket_, asio::buffer(body_buffer_),
-			[self](std::error_code ec, std::size_t /*length*/) {
+			asio::bind_executor(strand_, [self](std::error_code ec, std::size_t /*length*/) {
 				if (!ec) {
 					if (self->messageHandler_) {
 						self->messageHandler_(self->body_buffer_);
@@ -182,10 +185,15 @@ private:
 					}
 					self->close();
 				}
-			});
+			}));
 	}
 
 	asio::ip::tcp::socket socket_;
+	// Serializes this connection's async ops (reads stay ordered, writes don't
+	// interleave). The server and client both run a single io thread, so this is
+	// effectively a no-op today, but it keeps each connection self-contained and
+	// correct if the io loop is ever driven by more than one thread.
+	asio::strand<asio::ip::tcp::socket::executor_type> strand_;
 	std::function<void(const std::vector<uint8_t>&)> messageHandler_;
 	std::function<void(const error::Error&)> failHandler_;
 	std::function<void()> closeHandler_;
