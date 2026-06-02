@@ -68,6 +68,15 @@ func (c *Client) Close() error {
 	if c.conn != nil {
 		err = c.conn.Close()
 		c.conn = nil
+
+		// Notify all pending requests so they don't block forever.
+		// The receive goroutine treats a closed connection as a normal exit
+		// and won't call handleError, so we must clean up here.
+		requests := c.requests
+		c.requests = make(map[uint64]chan *serialize.Reader)
+		for _, ch := range requests {
+			ch <- nil
+		}
 	}
 	c.mu.Unlock()
 
@@ -304,7 +313,8 @@ func (c *Client) sendMessage(ctx context.Context, serviceID uint64, methodID uin
 		return 0, nil, err
 	}
 
-	ch := make(chan *serialize.Reader)
+	// With a buffered channel of size 1, a late send succeeds without blocking
+	ch := make(chan *serialize.Reader, 1)
 	c.requests[requestID] = ch
 
 	// Send message
