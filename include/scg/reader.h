@@ -8,6 +8,7 @@
 #include <cassert>
 #include <type_traits>
 #include <cstring>
+#include <cstdint>
 
 #include "scg/pack.h"
 #include "scg/error.h"
@@ -35,6 +36,15 @@ public:
 	inline error::Error read(T& data)
 	{
 		return deserialize(data, *this);
+	}
+
+	// remainingBytes returns the number of unread bytes still available, counting
+	// the current partially-read byte. It bounds length-prefixed allocations
+	// against the data actually present.
+	inline uint32_t remainingBytes() const
+	{
+		uint32_t consumed = numBitsRead_ >> 3;
+		return consumed >= size_ ? 0 : size_ - consumed;
 	}
 
 	error::Error readBits(uint8_t& val, uint32_t num_bits_to_read)
@@ -176,6 +186,15 @@ public:
 		return deserialize(data, *this);
 	}
 
+	// remainingBytes returns the number of unread bytes still available, counting
+	// the current partially-read byte. It bounds length-prefixed allocations
+	// against the data actually present.
+	inline uint32_t remainingBytes() const
+	{
+		uint32_t consumed = numBitsRead_ >> 3;
+		return consumed >= bytes_.size() ? 0 : static_cast<uint32_t>(bytes_.size()) - consumed;
+	}
+
 	error::Error readBits(uint8_t& val, uint32_t num_bits_to_read)
 	{
 		assert(num_bits_to_read <= 8 && "Reader::readBits only supports reading up to 8 bits at a time");
@@ -306,6 +325,14 @@ public:
 	inline error::Error read(T& data)
 	{
 		return deserialize(data, *this);
+	}
+
+	// remainingBytes is unbounded for a stream (its size is not known ahead of
+	// time). StreamReader deserializes trusted local streams, not untrusted
+	// network frames, so the length guard is a no-op here.
+	inline uint32_t remainingBytes() const
+	{
+		return UINT32_MAX;
 	}
 
 	error::Error readBits(uint8_t& val, uint32_t num_bits_to_read)

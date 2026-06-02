@@ -42,7 +42,7 @@ func NewServerTransportTLS(config ServerTransportTLSConfig) *ServerTransportTLS 
 		CertFile:           config.CertFile,
 		KeyFile:            config.KeyFile,
 		MaxSendMessageSize: config.MaxSendMessageSize,
-		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		MaxRecvMessageSize: recvSizeOrDefault(config.MaxRecvMessageSize),
 		connCh:             make(chan rpc.Connection, 16),
 	}
 }
@@ -171,7 +171,7 @@ func NewClientTransportTLS(config ClientTransportTLSConfig) *ClientTransportTLS 
 		InsecureSkipVerify: config.InsecureSkipVerify,
 		CAFile:             config.CAFile,
 		MaxSendMessageSize: config.MaxSendMessageSize,
-		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		MaxRecvMessageSize: recvSizeOrDefault(config.MaxRecvMessageSize),
 	}
 }
 

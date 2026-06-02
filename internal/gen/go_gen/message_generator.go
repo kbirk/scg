@@ -162,7 +162,14 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 		return err
 	}
 
-	*arg = make({{.ArgType}}, int(length))
+	// Bound the initial allocation hint against the bytes actually present so a
+	// hostile length cannot force a huge allocation before the entries are read;
+	// the map still grows to hold a legitimately large map as it is populated.
+	capHint := int(length)
+	if rem := reader.RemainingBytes(); capHint > rem {
+		capHint = rem
+	}
+	result := make({{.ArgType}}, capHint)
 
 	for i := 0; i < int(length); i++ {
 		var k {{.KeyType}}
@@ -175,8 +182,9 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 		if err != nil {
 			return err
 		}
-		(*arg)[k] = v
+		result[k] = v
 	}
+	*arg = result
 	return nil
 }`
 
@@ -206,7 +214,14 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 		return err
 	}
 
-	*arg = make({{.ArgType}}, int(length))
+	// Bound the initial allocation against the bytes actually present so a
+	// hostile length cannot force a huge allocation before the elements are
+	// read; the slice still grows to hold a legitimately large list.
+	capHint := int(length)
+	if rem := reader.RemainingBytes(); capHint > rem {
+		capHint = rem
+	}
+	result := make({{.ArgType}}, 0, capHint)
 
 	for i := 0; i < int(length); i++ {
 		var v {{.ValueType}}
@@ -214,8 +229,9 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 		if err != nil {
 			return err
 		}
-		(*arg)[i] = v
+		result = append(result, v)
 	}
+	*arg = result
 	return nil
 }`
 

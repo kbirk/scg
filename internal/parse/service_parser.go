@@ -9,14 +9,21 @@ import (
 
 var (
 	serviceRegex       = regexp.MustCompile(`(?s)service\s+([a-zA-Z][a-zA-Z_0-9]*)\s*{(.*?)}`)
-	serviceMethodRegex = regexp.MustCompile(`^rpc\s+([a-zA-Z][a-zA-Z_0-9]*)\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*returns\s*\(\s*((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*;\s*$`)
+	serviceMethodRegex = regexp.MustCompile(`^rpc\s+([a-zA-Z][a-zA-Z_0-9]*)\s*\(\s*(stream\s+)?((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*returns\s*\(\s*(stream\s+)?((?:[a-zA-Z][a-zA-Z_0-9]*)(?:\.[a-zA-Z][a-zA-Z_0-9]*)*)\s*\)\s*;\s*$`)
 )
 
 type ServiceMethodDefinition struct {
-	Name     string
-	Argument *DataTypeDefinition
-	Return   *DataTypeDefinition
-	Token    *Token
+	Name           string
+	Argument       *DataTypeDefinition
+	ArgumentStream bool
+	Return         *DataTypeDefinition
+	ReturnStream   bool
+	Token          *Token
+}
+
+// IsStreaming reports whether either side of the method is a stream.
+func (m *ServiceMethodDefinition) IsStreaming() bool {
+	return m.ArgumentStream || m.ReturnStream
 }
 
 type ServiceDefinition struct {
@@ -86,16 +93,18 @@ func tokenizeServiceMethods(input *Token) ([]*Token, *ParsingError) {
 func parseMethodDefinition(input *Token) (*ServiceMethodDefinition, *ParsingError) {
 
 	match, perr := FindOneMatch(serviceMethodRegex, input)
-	if perr != nil || len(match.Captures) != 3 {
+	if perr != nil || len(match.Captures) != 5 {
 		return nil, &ParsingError{
-			Message: perr.Message,
+			Message: "invalid method declaration",
 			Token:   input,
 		}
 	}
 
 	name := match.Captures[0].Content
-	argumentType := match.Captures[1]
-	returnType := match.Captures[2]
+	argumentStream := strings.TrimSpace(match.Captures[1].Content) == "stream"
+	argumentType := match.Captures[2]
+	returnStream := strings.TrimSpace(match.Captures[3].Content) == "stream"
+	returnType := match.Captures[4]
 
 	argumentDefinition, perr := parseDataTypeDefinition(argumentType)
 	if perr != nil {
@@ -120,10 +129,12 @@ func parseMethodDefinition(input *Token) (*ServiceMethodDefinition, *ParsingErro
 	}
 
 	return &ServiceMethodDefinition{
-		Name:     name,
-		Argument: argumentDefinition,
-		Return:   returnDefinition,
-		Token:    input,
+		Name:           name,
+		Argument:       argumentDefinition,
+		ArgumentStream: argumentStream,
+		Return:         returnDefinition,
+		ReturnStream:   returnStream,
+		Token:          input,
 	}, nil
 }
 

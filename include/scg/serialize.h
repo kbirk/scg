@@ -260,6 +260,18 @@ inline error::Error deserialize(float64_t& value, ReaderType& reader)
 	return nullptr;
 }
 
+// bounded_reserve_count caps a wire-declared element count to the bytes actually
+// remaining in the reader, so a hostile count cannot drive a huge
+// reserve()/resize() before the elements are read. The container still grows to
+// its true size as elements are appended. (A StreamReader reports an unbounded
+// remaining count, so trusted local streams are unaffected.)
+template <typename ReaderType>
+inline uint32_t bounded_reserve_count(uint32_t count, const ReaderType& reader)
+{
+	uint32_t rem = reader.remainingBytes();
+	return count < rem ? count : rem;
+}
+
 inline uint32_t bit_size(const std::string& value)
 {
 	return bit_size(uint32_t(value.size())) + (value.size() * 8);
@@ -280,6 +292,12 @@ inline error::Error deserialize(std::string& value, ReaderType& reader)
 	auto err = deserialize(len, reader);
 	if (err) {
 		return err;
+	}
+
+	// Each character is one byte, so a declared length exceeding the bytes
+	// remaining cannot be satisfied — reject before allocating.
+	if (len > reader.remainingBytes()) {
+		return error::Error("declared string length exceeds remaining bytes");
 	}
 
 	value.resize(len);
@@ -389,12 +407,18 @@ inline error::Error deserialize(std::vector<T>& value, ReaderType& reader)
 	if (err) {
 		return err;
 	}
-	value.resize(size);
+	// Bound the initial allocation against the bytes present so a hostile count
+	// cannot force a huge resize before the elements are read; the vector still
+	// grows to its true size as elements are appended.
+	value.clear();
+	value.reserve(bounded_reserve_count(size, reader));
 	for (auto i = uint32_t(0); i < size; i++) {
-		err = deserialize(value[i], reader);
+		T item{};
+		err = deserialize(item, reader);
 		if (err) {
 			return err;
 		}
+		value.push_back(std::move(item));
 	}
 	return nullptr;
 }
@@ -472,7 +496,9 @@ inline error::Error deserialize(std::unordered_map<K,V>& value, ReaderType& read
 	if (err) {
 		return err;
 	}
-	value.reserve(size);
+	// Bound the reserve against the bytes present so a hostile count cannot force
+	// a huge bucket allocation before the entries are read.
+	value.reserve(bounded_reserve_count(size, reader));
 
 	for (auto i = uint32_t(0); i < size; i++) {
 		K key{};
@@ -555,7 +581,8 @@ inline error::Error deserialize(std::unordered_set<T>& value, ReaderType& reader
 	if (err) {
 		return err;
 	}
-	value.reserve(size);
+	// Bound the reserve against the bytes present (see vector/unordered_map).
+	value.reserve(bounded_reserve_count(size, reader));
 	for (auto i = uint32_t(0); i < size; i++) {
 		T t{};
 		err = deserialize(t, reader);

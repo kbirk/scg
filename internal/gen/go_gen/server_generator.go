@@ -18,6 +18,16 @@ type ServiceMethodArgs struct {
 	MethodResponseStructName string
 }
 
+type ServiceStreamMethodArgs struct {
+	MethodNamePascalCase string
+	MethodIDVarName      string
+	MethodID             uint64
+	Kind                 string // "bidi" | "server" | "client"
+	StreamTypeName       string
+	ReqStructName        string // request (argument) message — server receives
+	RespStructName       string // response (return) message — server sends
+}
+
 type ServerArgs struct {
 	ServerNamePascalCase string
 	ServerNameCamelCase  string
@@ -26,16 +36,19 @@ type ServerArgs struct {
 	ServerStubStructName string
 	ServiceID            uint64
 	ServiceMethods       []ServiceMethodArgs
+	ServiceStreamMethods []ServiceStreamMethodArgs
 }
 
 const serverTemplateStr = `
 const (
 	{{.ServiceIDVarName}} uint64 = {{.ServiceID}} {{- range .ServiceMethods}}
+	{{.MethodIDVarName}} uint64 = {{.MethodID}}{{end}}{{range .ServiceStreamMethods}}
 	{{.MethodIDVarName}} uint64 = {{.MethodID}}{{end}}
 )
 
 type {{.ServerNamePascalCase}} interface { {{- range .ServiceMethods}}
-	{{.MethodNamePascalCase}}(context.Context, *{{.MethodRequestStructName}}) (*{{.MethodResponseStructName}}, error){{end}}
+	{{.MethodNamePascalCase}}(context.Context, *{{.MethodRequestStructName}}) (*{{.MethodResponseStructName}}, error){{end}}{{range .ServiceStreamMethods}}
+	{{if eq .Kind "bidi"}}{{.MethodNamePascalCase}}(*{{.StreamTypeName}}) error{{else if eq .Kind "server"}}{{.MethodNamePascalCase}}(*{{.ReqStructName}}, *{{.StreamTypeName}}) error{{else}}{{.MethodNamePascalCase}}(*{{.StreamTypeName}}) (*{{.RespStructName}}, error){{end}}{{end}}
 }
 
 func Register{{.ServerNamePascalCase}}(server *rpc.Server, {{.ServerNameCamelCase}} {{.ServerNamePascalCase}}) {
@@ -85,6 +98,74 @@ func (s *{{$.ServerStubStructName}}) HandleWrapper(ctx context.Context, middlewa
 		return rpc.RespondWithError(requestID, fmt.Errorf("unrecognized methodID %d", methodID))
 	}
 }
+
+func (s *{{$.ServerStubStructName}}) HandleStreamWrapper(ctx context.Context, stream *rpc.ServerStream, methodID uint64) error {
+	switch methodID { {{- range .ServiceStreamMethods}}
+	case {{.MethodIDVarName}}:
+		{{if eq .Kind "bidi"}}return s.impl.{{.MethodNamePascalCase}}(&{{.StreamTypeName}}{stream: stream}){{else if eq .Kind "server"}}reader, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		req := &{{.ReqStructName}}{}
+		if err := req.Deserialize(reader); err != nil {
+			return err
+		}
+		return s.impl.{{.MethodNamePascalCase}}(req, &{{.StreamTypeName}}{stream: stream}){{else}}resp, err := s.impl.{{.MethodNamePascalCase}}(&{{.StreamTypeName}}{stream: stream})
+		if err != nil {
+			return err
+		}
+		return stream.Send(resp){{end}}{{end}}
+	default:
+		return fmt.Errorf("unrecognized stream methodID %d", methodID)
+	}
+}
+{{range .ServiceStreamMethods}}
+// {{.StreamTypeName}} is the server handle for the {{.MethodNamePascalCase}} stream.
+type {{.StreamTypeName}} struct {
+	stream *rpc.ServerStream
+}
+{{if eq .Kind "bidi"}}
+// Recv blocks for the next client message; returns io.EOF on client half-close.
+func (s *{{.StreamTypeName}}) Recv() (*{{.ReqStructName}}, error) {
+	reader, err := s.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	req := &{{.ReqStructName}}{}
+	if err := req.Deserialize(reader); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+// Send pushes a message to the client.
+func (s *{{.StreamTypeName}}) Send(resp *{{.RespStructName}}) error {
+	return s.stream.Send(resp)
+}
+{{else if eq .Kind "server"}}
+// Send pushes a message to the client.
+func (s *{{.StreamTypeName}}) Send(resp *{{.RespStructName}}) error {
+	return s.stream.Send(resp)
+}
+{{else}}
+// Recv blocks for the next client message; returns io.EOF on client half-close.
+func (s *{{.StreamTypeName}}) Recv() (*{{.ReqStructName}}, error) {
+	reader, err := s.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+	req := &{{.ReqStructName}}{}
+	if err := req.Deserialize(reader); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+{{end}}
+// Context returns the context the stream was opened with (carries OPEN metadata).
+func (s *{{.StreamTypeName}}) Context() context.Context {
+	return s.stream.Context()
+}
+{{end}}
 `
 
 var (
@@ -101,6 +182,25 @@ func methodIDVarName(serviceName string, methodName string) string {
 
 func getServerStubStructName(serviceName string) string {
 	return fmt.Sprintf("%s_Stub", util.EnsureCamelCase(serviceName))
+}
+
+func streamClientTypeName(serviceName string, methodName string) string {
+	return fmt.Sprintf("%s_%sStreamClient", util.EnsurePascalCase(serviceName), util.EnsurePascalCase(methodName))
+}
+
+func streamServerTypeName(serviceName string, methodName string) string {
+	return fmt.Sprintf("%s_%sStreamServer", util.EnsurePascalCase(serviceName), util.EnsurePascalCase(methodName))
+}
+
+// streamKind classifies a streaming method by which sides stream.
+func streamKind(method *parse.ServiceMethodDefinition) string {
+	if method.ArgumentStream && method.ReturnStream {
+		return "bidi"
+	}
+	if method.ReturnStream {
+		return "server"
+	}
+	return "client"
 }
 
 func generateServiceMethodParams(method *parse.ServiceMethodDefinition) (string, string, error) {
@@ -137,6 +237,7 @@ func generateServerGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		ServiceIDVarName:     serviceIDVarName(svc.Name),
 		ServiceID:            serverID,
 		ServiceMethods:       []ServiceMethodArgs{},
+		ServiceStreamMethods: []ServiceStreamMethodArgs{},
 		ServerStubStructName: getServerStubStructName(svc.Name),
 	}
 
@@ -149,6 +250,20 @@ func generateServerGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		if err != nil {
 			return "", err
 		}
+
+		if method.IsStreaming() {
+			args.ServiceStreamMethods = append(args.ServiceStreamMethods, ServiceStreamMethodArgs{
+				MethodNamePascalCase: util.EnsurePascalCase(name),
+				MethodIDVarName:      methodIDVarName(svc.Name, name),
+				MethodID:             methodID,
+				Kind:                 streamKind(method),
+				StreamTypeName:       streamServerTypeName(svc.Name, name),
+				ReqStructName:        methodArgType,
+				RespStructName:       methodRetType,
+			})
+			continue
+		}
+
 		args.ServiceMethods = append(args.ServiceMethods, ServiceMethodArgs{
 			MethodNamePascalCase:     util.EnsurePascalCase(name),
 			MethodNameCamelCase:      util.EnsureCamelCase(name),

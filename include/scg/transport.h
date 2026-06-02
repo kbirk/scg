@@ -4,6 +4,7 @@
 #include <memory>
 #include <functional>
 #include "scg/error.h"
+#include "scg/const.h"
 
 namespace scg {
 namespace rpc {

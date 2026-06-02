@@ -22,7 +22,7 @@ struct ClientTransportConfig {
 	std::string host;
 	int port;
 	uint32_t maxSendMessageSize = 0; // 0 for no limit
-	uint32_t maxRecvMessageSize = 0; // 0 for no limit
+	uint32_t maxRecvMessageSize = scg::rpc::DEFAULT_MAX_RECV_MESSAGE_SIZE; // 0 disables the cap
 };
 
 class ConnectionTCP : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionTCP> {
@@ -148,6 +148,10 @@ private:
 						if (self->failHandler_) {
 							self->failHandler_(error::Error(ec.message()));
 						}
+					} else if (self->closeHandler_) {
+						// Clean server close: surface it so the client fails its
+						// pending requests/streams instead of hanging.
+						self->closeHandler_();
 					}
 					self->close();
 				}
@@ -167,10 +171,14 @@ private:
 					self->read_header();
 				} else {
 					if (ec != asio::error::eof) {
-						SCG_LOG_ERROR("TCP TLS read body error: " + ec.message());
+						SCG_LOG_ERROR("TCP read body error: " + ec.message());
 						if (self->failHandler_) {
 							self->failHandler_(error::Error(ec.message()));
 						}
+					} else if (self->closeHandler_) {
+						// Clean server close: surface it so the client fails its
+						// pending requests/streams instead of hanging.
+						self->closeHandler_();
 					}
 					self->close();
 				}

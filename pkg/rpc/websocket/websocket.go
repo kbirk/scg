@@ -77,13 +77,22 @@ type ServerTransportConfig struct {
 	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
+// recvSizeOrDefault applies the library default receive cap when none is
+// configured, so transports are bounded against oversized frames out of the box.
+func recvSizeOrDefault(v uint32) uint32 {
+	if v == 0 {
+		return rpc.DefaultMaxRecvMessageSize
+	}
+	return v
+}
+
 func NewServerTransport(config ServerTransportConfig) *ServerTransport {
 	return &ServerTransport{
 		Port:               config.Port,
 		CertFile:           config.CertFile,
 		KeyFile:            config.KeyFile,
 		MaxSendMessageSize: config.MaxSendMessageSize,
-		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		MaxRecvMessageSize: recvSizeOrDefault(config.MaxRecvMessageSize),
 		connCh:             make(chan rpc.Connection, 16), // buffered channel for connections
 		mu:                 &sync.Mutex{},
 	}
@@ -124,6 +133,12 @@ func (t *ServerTransport) handleWebSocket(w http.ResponseWriter, r *http.Request
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
+	}
+
+	// Bound the read at the websocket layer so an oversized frame is rejected
+	// during the read instead of being fully buffered before the size check.
+	if t.MaxRecvMessageSize > 0 {
+		conn.SetReadLimit(int64(t.MaxRecvMessageSize))
 	}
 
 	wsConn := &WebSocketConnection{
@@ -197,7 +212,7 @@ func NewClientTransport(config ClientTransportConfig) *ClientTransport {
 		Port:               config.Port,
 		TLSConfig:          config.TLSConfig,
 		MaxSendMessageSize: config.MaxSendMessageSize,
-		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		MaxRecvMessageSize: recvSizeOrDefault(config.MaxRecvMessageSize),
 	}
 }
 
@@ -218,6 +233,12 @@ func (t *ClientTransport) Connect() (rpc.Connection, error) {
 	conn, _, err := dialer.Dial(u.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+
+	// Bound the read at the websocket layer so an oversized frame is rejected
+	// during the read instead of being fully buffered before the size check.
+	if t.MaxRecvMessageSize > 0 {
+		conn.SetReadLimit(int64(t.MaxRecvMessageSize))
 	}
 
 	return &WebSocketConnection{

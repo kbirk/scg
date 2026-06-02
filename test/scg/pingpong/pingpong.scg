@@ -4,6 +4,25 @@ service PingPong {
 	rpc Ping (PingRequest) returns (PongResponse);
 }
 
+service Chat {
+	rpc Connect (stream ChatMessage) returns (stream ChatMessage);
+	rpc Subscribe (SubscribeRequest) returns (stream ChatMessage);
+	rpc Upload (stream ChatMessage) returns (UploadSummary);
+}
+
+message ChatMessage {
+	string text = 0;
+	int32 seq = 1;
+}
+
+message SubscribeRequest {
+	int32 count = 0;
+}
+
+message UploadSummary {
+	int32 total = 0;
+}
+
 message Ping {
 	int32 count = 0;
 	TestPayload payload = 1;

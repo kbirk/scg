@@ -136,6 +136,14 @@ func DeserializeContext(ctx *context.Context, reader *serialize.Reader) error {
 		return err
 	}
 	if size > 0 {
+		// Context is deserialized on every request and, for streaming, on every
+		// OPEN *before* auth runs. Bound the declared entry count against the
+		// remaining bytes (each entry carries at least a length-prefixed key and
+		// a length-prefixed value) so a hostile frame cannot drive a huge loop
+		// or allocation pre-auth.
+		if err := serialize.CheckLength(reader, size); err != nil {
+			return err
+		}
 		md := NewMetadata()
 		for i := 0; i < int(size); i++ {
 			var k string
@@ -150,6 +158,11 @@ func DeserializeContext(ctx *context.Context, reader *serialize.Reader) error {
 				return err
 			}
 
+			// Bound the declared value length before allocating (raw bytes, one
+			// byte each).
+			if err := serialize.CheckLength(reader, size); err != nil {
+				return err
+			}
 			val := make([]byte, size)
 			for i := 0; i < int(size); i++ {
 				err := reader.ReadBits(&val[i], 8)

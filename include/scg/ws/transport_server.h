@@ -20,7 +20,7 @@ namespace ws {
 struct ServerTransportConfig {
 	int port;
 	uint32_t maxSendMessageSize = 0;
-	uint32_t maxRecvMessageSize = 0;
+	uint32_t maxRecvMessageSize = scg::rpc::DEFAULT_MAX_RECV_MESSAGE_SIZE; // 0 disables the cap
 };
 
 typedef websocketpp::server<websocketpp::config::asio> server;

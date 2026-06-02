@@ -102,6 +102,10 @@ TransportFactory createTCPTLSTransportFactory() {
 
 // ============================================================================
 // Test Suite Entry Points
+//
+// The adversarial/standalone tests (malformed frames, keepalive black-hole,
+// server keepalive, no-leak) are transport-agnostic and live in the shared
+// runTestSuite (test_suite.h), so they run identically here and over WebSocket.
 // ============================================================================
 
 void test_tcp_suite() {

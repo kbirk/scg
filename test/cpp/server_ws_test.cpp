@@ -7,6 +7,7 @@
 #include "scg/server.h"
 #include "scg/ws/transport_server.h"
 #include "pingpong/pingpong.h"
+#include "chat_impl.h"
 
 std::atomic<bool> running(true);
 
@@ -49,6 +50,7 @@ int main() {
 	// Create and register service implementation
 	auto impl = std::make_shared<PingPongServerImpl>();
 	pingpong::registerPingPongServer(server.get(), impl);
+	pingpong::registerChatServer(server.get(), std::make_shared<ChatServerImpl>());
 
 	// Start server in background thread
 	auto err = server->start();

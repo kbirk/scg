@@ -18,6 +18,17 @@ type ServerMethodArgs struct {
 	MethodResponseStructName string
 }
 
+type ServerStreamMethodArgs struct {
+	MethodNamePascalCase string
+	MethodNameCamelCase  string
+	MethodIDVarName      string
+	MethodID             uint64
+	Kind                 string // "bidi" | "server" | "client"
+	StreamTypeName       string
+	ReqStructName        string // request (argument) message — server receives
+	RespStructName       string // response (return) message — server sends
+}
+
 type ServerArgs struct {
 	ServerNamePascalCase string
 	ServerNameCamelCase  string
@@ -26,18 +37,79 @@ type ServerArgs struct {
 	ServerStubClassName  string
 	ServiceID            uint64
 	ServerMethods        []ServerMethodArgs
+	ServerStreamMethods  []ServerStreamMethodArgs
 }
 
 const serverTemplateStr = `
-static constexpr uint64_t {{.ServiceIDVarName}} = {{.ServiceID}}UL;{{- range .ServerMethods}}
-static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}
+{{- define "cppServerRecv"}}
+	inline scg::rpc::StreamRecv<{{.ReqStructName}}> recv()
+	{
+		scg::rpc::StreamRecv<{{.ReqStructName}}> res;
+		scg::serialize::Reader reader({});
+		res.state = stream_->recv(reader, res.error);
+		if (res.state == scg::rpc::StreamRecvState::Message) {
+			auto err = reader.read(res.message);
+			if (err) {
+				res.state = scg::rpc::StreamRecvState::Closed;
+				res.error = err;
+			}
+		}
+		return res;
+	}
 
+	inline scg::rpc::StreamRecv<{{.ReqStructName}}> tryRecv()
+	{
+		scg::rpc::StreamRecv<{{.ReqStructName}}> res;
+		scg::serialize::Reader reader({});
+		res.state = stream_->tryRecv(reader, res.error);
+		if (res.state == scg::rpc::StreamRecvState::Message) {
+			auto err = reader.read(res.message);
+			if (err) {
+				res.state = scg::rpc::StreamRecvState::Closed;
+				res.error = err;
+			}
+		}
+		return res;
+	}
+{{- end}}
+static constexpr uint64_t {{.ServiceIDVarName}} = {{.ServiceID}}UL;{{- range .ServerMethods}}
+static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}{{range .ServerStreamMethods}}
+static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}
+{{range .ServerStreamMethods}}
+// {{.StreamTypeName}} is the server handle for the {{.MethodNameCamelCase}} stream.
+class {{.StreamTypeName}} {
+public:
+	explicit {{.StreamTypeName}}(std::shared_ptr<scg::rpc::ServerStream> stream) : stream_(stream) {}
+{{if eq .Kind "bidi"}}{{template "cppServerRecv" .}}
+	inline scg::error::Error send(const {{.RespStructName}}& msg)
+	{
+		return stream_->send(msg);
+	}
+{{else if eq .Kind "server"}}
+	inline scg::error::Error send(const {{.RespStructName}}& msg)
+	{
+		return stream_->send(msg);
+	}
+{{else}}{{template "cppServerRecv" .}}{{end}}
+	inline const scg::context::Context& context() const
+	{
+		return stream_->context();
+	}
+
+private:
+	std::shared_ptr<scg::rpc::ServerStream> stream_;
+};
+{{end}}
 class {{.ServerNamePascalCase}} {
 public:
 	virtual ~{{.ServerNamePascalCase}}() = default;
 	{{range .ServerMethods}}
 	virtual std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(const scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) = 0;
-	{{end}}
+	{{end}}{{range .ServerStreamMethods}}
+	{{if eq .Kind "bidi"}}virtual scg::error::Error {{.MethodNameCamelCase}}(std::shared_ptr<{{.StreamTypeName}}> stream) = 0;
+	{{else if eq .Kind "server"}}virtual scg::error::Error {{.MethodNameCamelCase}}(const {{.ReqStructName}}& req, std::shared_ptr<{{.StreamTypeName}}> stream) = 0;
+	{{else}}virtual std::pair<{{.RespStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(std::shared_ptr<{{.StreamTypeName}}> stream) = 0;
+	{{end}}{{end}}
 };
 
 class {{.ServerStubClassName}} {
@@ -89,6 +161,31 @@ public:
 		}
 	}
 
+	scg::error::Error handleStreamWrapper(const scg::context::Context& ctx, std::shared_ptr<scg::rpc::ServerStream> stream, uint64_t methodID) {
+		switch (methodID) { {{- range .ServerStreamMethods}}
+		case {{.MethodIDVarName}}: {
+			{{if eq .Kind "bidi"}}return impl_->{{.MethodNameCamelCase}}(std::make_shared<{{.StreamTypeName}}>(stream));{{else if eq .Kind "server"}}scg::serialize::Reader reader({});
+			scg::error::Error recvErr;
+			auto state = stream->recv(reader, recvErr);
+			if (state != scg::rpc::StreamRecvState::Message) {
+				return recvErr ? recvErr : scg::error::Error("stream closed before request");
+			}
+			{{.ReqStructName}} req;
+			auto derr = reader.read(req);
+			if (derr) {
+				return derr;
+			}
+			return impl_->{{.MethodNameCamelCase}}(req, std::make_shared<{{.StreamTypeName}}>(stream));{{else}}auto [resp, uerr] = impl_->{{.MethodNameCamelCase}}(std::make_shared<{{.StreamTypeName}}>(stream));
+			if (uerr) {
+				return uerr;
+			}
+			return stream->send(resp);{{end}}
+		}{{end}}
+		default:
+			return scg::error::Error("Unrecognized stream method ID: " + std::to_string(methodID));
+		}
+	}
+
 private:
 	std::shared_ptr<{{.ServerNamePascalCase}}> impl_;
 };
@@ -101,6 +198,12 @@ inline void register{{.ServerNamePascalCase}}(scg::rpc::Server* server, std::sha
 	};
 
 	server->registerService({{.ServiceIDVarName}}, "{{.ServiceName}}", handler);
+
+	auto streamHandler = [stub](const scg::context::Context& ctx, std::shared_ptr<scg::rpc::ServerStream> stream, uint64_t methodID) -> scg::error::Error {
+		return stub->handleStreamWrapper(ctx, stream, methodID);
+	};
+
+	server->registerStreamService({{.ServiceIDVarName}}, streamHandler);
 }
 `
 
@@ -142,6 +245,7 @@ func generateServerCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		ServiceIDVarName:     serverServiceIDVarName(svc.Name),
 		ServiceID:            serverID,
 		ServerMethods:        []ServerMethodArgs{},
+		ServerStreamMethods:  []ServerStreamMethodArgs{},
 		ServerStubClassName:  getServerStubClassName(svc.Name),
 	}
 
@@ -154,6 +258,21 @@ func generateServerCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		if err != nil {
 			return "", err
 		}
+
+		if method.IsStreaming() {
+			args.ServerStreamMethods = append(args.ServerStreamMethods, ServerStreamMethodArgs{
+				MethodNamePascalCase: util.EnsurePascalCase(name),
+				MethodNameCamelCase:  util.EnsureCamelCase(name),
+				MethodIDVarName:      serverMethodIDVarName(svc.Name, name),
+				MethodID:             methodID,
+				Kind:                 streamKind(method),
+				StreamTypeName:       streamServerTypeName(svc.Name, name),
+				ReqStructName:        methodArgType,
+				RespStructName:       methodRetType,
+			})
+			continue
+		}
+
 		args.ServerMethods = append(args.ServerMethods, ServerMethodArgs{
 			MethodNamePascalCase:     util.EnsurePascalCase(name),
 			MethodNameCamelCase:      util.EnsureCamelCase(name),

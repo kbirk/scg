@@ -8,6 +8,7 @@ import (
 
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/rpc/websocket"
+	"github.com/kbirk/scg/test/go/chat"
 	"github.com/kbirk/scg/test/scg/generated/pingpong"
 )
 
@@ -81,6 +82,7 @@ func main() {
 	})
 	server.Middleware(authMiddleware)
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	pingpong.RegisterChatServer(server, &chat.ChatServer{})
 
 	err := server.ListenAndServe()
 	if err != nil {

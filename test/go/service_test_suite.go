@@ -3,6 +3,8 @@ package test
 import (
 	"context"
 	"fmt"
+	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,6 +14,7 @@ import (
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/rpc/tcp"
 	"github.com/kbirk/scg/pkg/rpc/websocket"
+	"github.com/kbirk/scg/test/go/chat"
 	"github.com/kbirk/scg/test/scg/generated/basic"
 	"github.com/kbirk/scg/test/scg/generated/pingpong"
 
@@ -151,8 +154,82 @@ func RunTestSuite(t *testing.T, config TestSuiteConfig) {
 			t.Run("ContextMetadata", func(t *testing.T) {
 				runContextMetadataTest(t, config.Factory, port)
 			})
+
+			t.Run("StreamServerError", func(t *testing.T) {
+				runStreamServerErrorTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamConcurrent", func(t *testing.T) {
+				runStreamConcurrentTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamUnaryCoexist", func(t *testing.T) {
+				runStreamUnaryCoexistTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamCancel", func(t *testing.T) {
+				runStreamCancelTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamConnectionDrop", func(t *testing.T) {
+				runStreamConnectionDropTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamAuthFail", func(t *testing.T) {
+				runStreamAuthFailTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamConcurrentSendRecv", func(t *testing.T) {
+				runStreamConcurrentSendRecvTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamSendAfterCloseSend", func(t *testing.T) {
+				runStreamSendAfterCloseSendTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamLargeMessage", func(t *testing.T) {
+				runStreamLargeMessageTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamRecvAfterEOF", func(t *testing.T) {
+				runStreamRecvAfterEOFTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamBackpressure", func(t *testing.T) {
+				runStreamBackpressureTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamMaxConcurrent", func(t *testing.T) {
+				runStreamMaxConcurrentTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamKeepalive", func(t *testing.T) {
+				runStreamKeepaliveTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamServerKeepaliveHealthy", func(t *testing.T) {
+				runStreamServerKeepaliveHealthyTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamHandlerNoLeak", func(t *testing.T) {
+				runStreamHandlerNoLeakTest(t, config.Factory, port)
+			})
 		}
 	}
+
+	// Streaming tests that run both in-process and against an external
+	// (cross-language) server — these validate the stream wire framing interops.
+	t.Run("StreamBidi", func(t *testing.T) {
+		runStreamBidiTest(t, config.Factory, port, config.UseExternalServer)
+	})
+
+	t.Run("StreamServerStreaming", func(t *testing.T) {
+		runStreamServerStreamingTest(t, config.Factory, port, config.UseExternalServer)
+	})
+
+	t.Run("StreamClientStreaming", func(t *testing.T) {
+		runStreamClientStreamingTest(t, config.Factory, port, config.UseExternalServer)
+	})
 
 	t.Run("Concurrency", func(t *testing.T) {
 		runConcurrencyTest(t, config.Factory, port, config.UseExternalServer)
@@ -444,7 +521,7 @@ func runConcurrencyTest(t *testing.T, factory TransportFactory, id int, useExter
 		server = rpc.NewServer(rpc.ServerConfig{
 			Transport: factory.CreateServerTransport(id),
 			ErrHandler: func(err error) {
-				t.Logf("Server error: %v", err)
+				fmt.Printf("Server error: %v\n", err)
 			},
 		})
 
@@ -461,7 +538,7 @@ func runConcurrencyTest(t *testing.T, factory TransportFactory, id int, useExter
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
 		ErrHandler: func(err error) {
-			t.Logf("Client error: %v", err)
+			fmt.Printf("Client error: %v\n", err)
 		},
 	})
 
@@ -703,7 +780,7 @@ func runServiceIsolationTest(t *testing.T, factory TransportFactory, id int) {
 	server1 := rpc.NewServer(rpc.ServerConfig{
 		Transport: factory.CreateServerTransport(id),
 		ErrHandler: func(err error) {
-			t.Logf("Server1 error: %v", err)
+			fmt.Printf("Server1 error: %v\n", err)
 		},
 	})
 
@@ -713,14 +790,14 @@ func runServiceIsolationTest(t *testing.T, factory TransportFactory, id int) {
 	go func() {
 		err := server1.ListenAndServe()
 		if err != nil {
-			t.Logf("Server1 stopped: %v", err)
+			fmt.Printf("Server1 stopped: %v\n", err)
 		}
 	}()
 
 	server2 := rpc.NewServer(rpc.ServerConfig{
 		Transport: factory.CreateServerTransport(id + 100), // Use different port for server2
 		ErrHandler: func(err error) {
-			t.Logf("Server2 error: %v", err)
+			fmt.Printf("Server2 error: %v\n", err)
 		},
 	})
 
@@ -730,7 +807,7 @@ func runServiceIsolationTest(t *testing.T, factory TransportFactory, id int) {
 	go func() {
 		err := server2.ListenAndServe()
 		if err != nil {
-			t.Logf("Server2 stopped: %v", err)
+			fmt.Printf("Server2 stopped: %v\n", err)
 		}
 	}()
 
@@ -741,7 +818,7 @@ func runServiceIsolationTest(t *testing.T, factory TransportFactory, id int) {
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
 		ErrHandler: func(err error) {
-			t.Logf("Client error: %v", err)
+			fmt.Printf("Client error: %v\n", err)
 		},
 	})
 
@@ -785,7 +862,7 @@ func runMultipleServicesOnOneServerTest(t *testing.T, factory TransportFactory, 
 	server := rpc.NewServer(rpc.ServerConfig{
 		Transport: factory.CreateServerTransport(id),
 		ErrHandler: func(err error) {
-			t.Logf("Server error: %v", err)
+			fmt.Printf("Server error: %v\n", err)
 		},
 	})
 
@@ -798,7 +875,7 @@ func runMultipleServicesOnOneServerTest(t *testing.T, factory TransportFactory, 
 	go func() {
 		err := server.ListenAndServe()
 		if err != nil {
-			t.Logf("Server stopped: %v", err)
+			fmt.Printf("Server stopped: %v\n", err)
 		}
 	}()
 
@@ -1186,7 +1263,7 @@ func runContextTimeoutTest(t *testing.T, factory TransportFactory, port int) {
 		if err := server.ListenAndServe(); err != nil {
 			// Ignore transport closed error which happens on shutdown
 			if err.Error() != "transport is closed" {
-				t.Logf("Server error: %v", err)
+				fmt.Printf("Server error: %v\n", err)
 			}
 		}
 	}()
@@ -1259,7 +1336,7 @@ func runContextTimeoutRecoveryTest(t *testing.T, factory TransportFactory, port 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
 			if err.Error() != "transport is closed" {
-				t.Logf("Server error: %v", err)
+				fmt.Printf("Server error: %v\n", err)
 			}
 		}
 	}()
@@ -1317,7 +1394,7 @@ func runContextMetadataTest(t *testing.T, factory TransportFactory, port int) {
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
 			if err.Error() != "transport is closed" {
-				t.Logf("Server error: %v", err)
+				fmt.Printf("Server error: %v\n", err)
 			}
 		}
 	}()
@@ -1464,4 +1541,673 @@ func (s *counterPingPongServerGeneric) Ping(ctx context.Context, req *pingpong.P
 			Payload: req.Ping.Payload,
 		},
 	}, nil
+}
+
+// ============================================================================
+// Streaming tests
+// ============================================================================
+
+// The Chat streaming service implementation the streaming tests assert against
+// lives in the shared chat package so the standalone cross-language test
+// servers behave identically. See chat.ChatServer.
+
+// newStreamingServer starts an in-process server hosting both the unary PingPong
+// service and the streaming Chat service.
+func newStreamingServer(t *testing.T, factory TransportFactory, id int, middleware ...rpc.Middleware) *rpc.Server {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport: factory.CreateServerTransport(id),
+		// Streams surface handler errors to the client via Recv, not via the
+		// server error handler. This runs on a background connection goroutine
+		// that can outlive the test (e.g. a teardown "connection reset by peer"),
+		// so it must not touch testing.T — doing so races the test goroutine
+		// under -race. Print instead.
+		ErrHandler: func(err error) {
+			fmt.Printf("streaming server error: %v\n", err)
+		},
+	})
+	for _, m := range middleware {
+		server.Middleware(m)
+	}
+	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	pingpong.RegisterChatServer(server, &chat.ChatServer{})
+
+	go func() {
+		server.ListenAndServe()
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	return server
+}
+
+// runStreamServerKeepaliveHealthyTest verifies the server-initiated keepalive
+// does not disturb a well-behaved client: the scg client auto-replies PONG, so
+// the connection survives idle well past the keepalive timeout and stays usable.
+// Transport-agnostic — runs on every transport the suite is driven with.
+func runStreamServerKeepaliveHealthyTest(t *testing.T, factory TransportFactory, id int) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport:         factory.CreateServerTransport(id),
+		ErrHandler:        func(err error) { fmt.Printf("server error: %v\n", err) },
+		KeepaliveInterval: 40 * time.Millisecond,
+		KeepaliveTimeout:  150 * time.Millisecond,
+	})
+	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	pingpong.RegisterChatServer(server, &chat.ChatServer{})
+	go func() { server.ListenAndServe() }()
+	defer server.Shutdown(context.Background())
+	time.Sleep(100 * time.Millisecond)
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	stream, err := pingpong.NewChatClient(client).Connect(context.Background())
+	require.NoError(t, err)
+	welcome, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, "welcome", welcome.Text)
+
+	// Idle well beyond the keepalive timeout; the server PINGs, the client PONGs.
+	time.Sleep(500 * time.Millisecond)
+
+	require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: "alive", Seq: 1}))
+	echo, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, "echo:alive", echo.Text)
+}
+
+// runStreamHandlerNoLeakTest opens and closes many streams and asserts the
+// goroutine count returns to its baseline — every per-stream handler goroutine
+// must exit on clean close. Transport-agnostic.
+func runStreamHandlerNoLeakTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	oneStream := func() {
+		stream, err := c.Connect(context.Background())
+		require.NoError(t, err)
+		_, err = stream.Recv() // welcome
+		require.NoError(t, err)
+		require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: "x", Seq: 1}))
+		_, err = stream.Recv() // echo
+		require.NoError(t, err)
+		require.NoError(t, stream.CloseSend())
+		_, err = stream.Recv() // summary
+		require.NoError(t, err)
+		_, err = stream.Recv() // io.EOF
+		require.Equal(t, io.EOF, err)
+	}
+
+	// Warm up (establish the connection + its read loop), then record baseline.
+	oneStream()
+	runtime.GC()
+	time.Sleep(200 * time.Millisecond)
+	baseline := runtime.NumGoroutine()
+
+	const n = 200
+	for i := 0; i < n; i++ {
+		oneStream()
+	}
+
+	runtime.GC()
+	time.Sleep(300 * time.Millisecond)
+	final := runtime.NumGoroutine()
+
+	t.Logf("goroutines: baseline=%d final=%d after %d streams", baseline, final, n)
+	require.LessOrEqual(t, final, baseline+10, "stream handler goroutines leaked")
+}
+
+// runStreamBidiTest exercises the full bidi lifecycle: server push on open,
+// client send + server echo, half-close, final summary, then a clean io.EOF.
+// Runs in-process and against an external (cross-language) server.
+func runStreamBidiTest(t *testing.T, factory TransportFactory, id int, useExternalServer bool) {
+	if !useExternalServer {
+		server := newStreamingServer(t, factory, id)
+		defer server.Shutdown(context.Background())
+	}
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	// Server pushes "welcome" before the client sends anything.
+	welcome, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "welcome", welcome.Text)
+
+	const n = 10
+	for i := 0; i < n; i++ {
+		err := stream.Send(&pingpong.ChatMessage{Text: fmt.Sprintf("m%d", i), Seq: int32(i)})
+		require.NoError(t, err)
+
+		echo, err := stream.Recv()
+		require.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("echo:m%d", i), echo.Text)
+		assert.Equal(t, int32(i+1), echo.Seq)
+	}
+
+	// Half-close: done sending, still receiving.
+	require.NoError(t, stream.CloseSend())
+
+	summary, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "summary", summary.Text)
+	assert.Equal(t, int32(n), summary.Seq)
+
+	// Clean close surfaces as io.EOF.
+	_, err = stream.Recv()
+	assert.Equal(t, io.EOF, err)
+}
+
+// runStreamServerErrorTest verifies a server-side handler error surfaces on the
+// client's next Recv.
+func runStreamServerErrorTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	// Drain the welcome push.
+	_, err = stream.Recv()
+	require.NoError(t, err)
+
+	require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: "fail", Seq: 1}))
+
+	_, err = stream.Recv()
+	require.Error(t, err)
+	assert.Equal(t, "requested failure", err.Error())
+}
+
+// runStreamConcurrentTest opens multiple independent streams on one connection
+// and verifies messages are not cross-delivered.
+func runStreamConcurrentTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+
+	const numStreams = 8
+	const msgsPerStream = 20
+
+	var wg sync.WaitGroup
+	var errCount atomic.Int32
+
+	for s := 0; s < numStreams; s++ {
+		wg.Add(1)
+		go func(streamIdx int) {
+			defer wg.Done()
+
+			stream, err := c.Connect(context.Background())
+			if err != nil {
+				errCount.Add(1)
+				return
+			}
+
+			welcome, err := stream.Recv()
+			if err != nil || welcome.Text != "welcome" {
+				errCount.Add(1)
+				return
+			}
+
+			for i := 0; i < msgsPerStream; i++ {
+				text := fmt.Sprintf("s%d-m%d", streamIdx, i)
+				if err := stream.Send(&pingpong.ChatMessage{Text: text, Seq: int32(i)}); err != nil {
+					errCount.Add(1)
+					return
+				}
+				echo, err := stream.Recv()
+				if err != nil || echo.Text != "echo:"+text || echo.Seq != int32(i+1) {
+					errCount.Add(1)
+					return
+				}
+			}
+
+			if err := stream.CloseSend(); err != nil {
+				errCount.Add(1)
+				return
+			}
+			if _, err := stream.Recv(); err != nil { // summary
+				errCount.Add(1)
+				return
+			}
+			if _, err := stream.Recv(); err != io.EOF {
+				errCount.Add(1)
+				return
+			}
+		}(s)
+	}
+
+	wg.Wait()
+	assert.Equal(t, int32(0), errCount.Load(), "all concurrent streams should complete cleanly")
+}
+
+// runStreamUnaryCoexistTest verifies unary calls and a stream coexist on the
+// same connection concurrently.
+func runStreamUnaryCoexistTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	pingClient := pingpong.NewPingPongClient(client)
+	chatClient := pingpong.NewChatClient(client)
+
+	stream, err := chatClient.Connect(context.Background())
+	require.NoError(t, err)
+
+	welcome, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "welcome", welcome.Text)
+
+	// Interleave a unary call with stream traffic.
+	for i := 0; i < 5; i++ {
+		resp, err := pingClient.Ping(context.Background(), &pingpong.PingRequest{
+			Ping: pingpong.Ping{Count: int32(i)},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int32(i+1), resp.Pong.Count)
+
+		require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: fmt.Sprintf("x%d", i), Seq: int32(i)}))
+		echo, err := stream.Recv()
+		require.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("echo:x%d", i), echo.Text)
+	}
+
+	require.NoError(t, stream.CloseSend())
+	_, err = stream.Recv() // summary
+	require.NoError(t, err)
+	_, err = stream.Recv()
+	assert.Equal(t, io.EOF, err)
+}
+
+// runStreamCancelTest verifies cancelling the caller context terminates the
+// client side of the stream.
+func runStreamCancelTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := c.Connect(ctx)
+	require.NoError(t, err)
+
+	_, err = stream.Recv() // welcome
+	require.NoError(t, err)
+
+	cancel()
+
+	_, err = stream.Recv()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// runStreamConnectionDropTest verifies that closing the client connection fails
+// in-flight streams with an error.
+func runStreamConnectionDropTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+
+	c := pingpong.NewChatClient(client)
+
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	_, err = stream.Recv() // welcome
+	require.NoError(t, err)
+
+	// Drop the connection out from under the live stream.
+	require.NoError(t, client.Close())
+
+	_, err = stream.Recv()
+	require.Error(t, err)
+}
+
+// runStreamAuthFailTest verifies stream OPEN is gated by server middleware
+// (auth is validated once on open).
+func runStreamAuthFailTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id, authMiddleware)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport: factory.CreateClientTransport(id),
+	})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+
+	// No token in context -> auth middleware rejects on OPEN.
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	require.Error(t, err)
+	assert.Equal(t, "no metadata", err.Error())
+
+	// With a valid token the stream opens and the welcome push arrives.
+	md := rpc.NewMetadata()
+	md.PutString("token", validToken)
+	ctx := rpc.NewContextWithMetadata(context.Background(), md)
+
+	stream2, err := c.Connect(ctx)
+	require.NoError(t, err)
+	welcome, err := stream2.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "welcome", welcome.Text)
+}
+
+// runStreamConcurrentSendRecvTest sends from one goroutine while receiving on
+// another on the same stream, exercising both paths concurrently (run -race).
+func runStreamConcurrentSendRecvTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	const n = 200
+	go func() {
+		for i := 0; i < n; i++ {
+			_ = stream.Send(&pingpong.ChatMessage{Text: fmt.Sprintf("m%d", i), Seq: int32(i)})
+		}
+		_ = stream.CloseSend()
+	}()
+
+	echoes := 0
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		if msg.Text != "welcome" && msg.Text != "summary" {
+			echoes++
+		}
+	}
+	assert.Equal(t, n, echoes)
+}
+
+// runStreamSendAfterCloseSendTest verifies Send after CloseSend returns an error.
+func runStreamSendAfterCloseSendTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	_, err = stream.Recv() // welcome
+	require.NoError(t, err)
+
+	require.NoError(t, stream.CloseSend())
+	err = stream.Send(&pingpong.ChatMessage{Text: "late"})
+	require.Error(t, err)
+}
+
+// runStreamLargeMessageTest verifies a large payload round-trips over a stream.
+func runStreamLargeMessageTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	_, err = stream.Recv() // welcome
+	require.NoError(t, err)
+
+	big := strings.Repeat("x", 256*1024)
+	require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: big, Seq: 1}))
+
+	echo, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "echo:"+big, echo.Text)
+}
+
+// runStreamRecvAfterEOFTest verifies the terminal state is sticky: once a stream
+// is cleanly closed, further Recv calls keep returning io.EOF.
+func runStreamRecvAfterEOFTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	_, err = stream.Recv() // welcome
+	require.NoError(t, err)
+	require.NoError(t, stream.CloseSend())
+	_, err = stream.Recv() // summary
+	require.NoError(t, err)
+
+	_, err = stream.Recv()
+	assert.Equal(t, io.EOF, err)
+	// Terminal is sticky.
+	_, err = stream.Recv()
+	assert.Equal(t, io.EOF, err)
+}
+
+// runStreamBackpressureTest verifies that a slow reader whose bounded buffer
+// overflows has its stream terminated with an overflow error (and not the
+// connection or other streams).
+func runStreamBackpressureTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	// Tiny receive buffer so a flood overflows quickly.
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport:            factory.CreateClientTransport(id),
+		StreamRecvBufferSize: 4,
+	})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	// Trigger a server flood, then deliberately don't read for a moment so the
+	// bounded buffer overflows.
+	require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: "flood"}))
+	time.Sleep(250 * time.Millisecond)
+
+	var lastErr error
+	for i := 0; i < 200; i++ {
+		if _, err := stream.Recv(); err != nil {
+			lastErr = err
+			break
+		}
+	}
+	require.Error(t, lastErr)
+	assert.Contains(t, lastErr.Error(), "overflow")
+
+	// The connection is still usable for new streams/calls.
+	stream2, err := c.Connect(context.Background())
+	require.NoError(t, err)
+	welcome, err := stream2.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "welcome", welcome.Text)
+}
+
+// runStreamMaxConcurrentTest verifies the per-connection stream cap rejects
+// streams beyond the limit while existing streams keep working.
+func runStreamMaxConcurrentTest(t *testing.T, factory TransportFactory, id int) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport:            factory.CreateServerTransport(id),
+		ErrHandler:           func(err error) { fmt.Printf("server error: %v\n", err) },
+		MaxConcurrentStreams: 2,
+	})
+	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	pingpong.RegisterChatServer(server, &chat.ChatServer{})
+	go func() { server.ListenAndServe() }()
+	time.Sleep(100 * time.Millisecond)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+
+	// Two streams open and stay open (handlers block on Recv).
+	s1, err := c.Connect(context.Background())
+	require.NoError(t, err)
+	w1, err := s1.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "welcome", w1.Text)
+
+	s2, err := c.Connect(context.Background())
+	require.NoError(t, err)
+	w2, err := s2.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "welcome", w2.Text)
+
+	// Third exceeds the cap and is rejected on open.
+	s3, err := c.Connect(context.Background())
+	require.NoError(t, err)
+	_, err = s3.Recv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "max concurrent streams")
+
+	// Freeing a slot lets a new stream open.
+	require.NoError(t, s1.CloseSend())
+	_, _ = s1.Recv() // summary
+	_, _ = s1.Recv() // EOF
+	time.Sleep(50 * time.Millisecond)
+
+	s4, err := c.Connect(context.Background())
+	require.NoError(t, err)
+	w4, err := s4.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "welcome", w4.Text)
+}
+
+// runStreamServerStreamingTest exercises the server-streaming form: the client
+// sends a single request and reads a stream of responses.
+// Runs in-process and against an external (cross-language) server.
+func runStreamServerStreamingTest(t *testing.T, factory TransportFactory, id int, useExternalServer bool) {
+	if !useExternalServer {
+		server := newStreamingServer(t, factory, id)
+		defer server.Shutdown(context.Background())
+	}
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	stream, err := c.Subscribe(context.Background(), &pingpong.SubscribeRequest{Count: 5})
+	require.NoError(t, err)
+
+	var got []int32
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		got = append(got, msg.Seq)
+	}
+	require.Equal(t, []int32{0, 1, 2, 3, 4}, got)
+}
+
+// runStreamClientStreamingTest exercises the client-streaming form: the client
+// sends a stream of requests and reads a single response.
+// Runs in-process and against an external (cross-language) server.
+func runStreamClientStreamingTest(t *testing.T, factory TransportFactory, id int, useExternalServer bool) {
+	if !useExternalServer {
+		server := newStreamingServer(t, factory, id)
+		defer server.Shutdown(context.Background())
+	}
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	stream, err := c.Upload(context.Background())
+	require.NoError(t, err)
+
+	var sum int32
+	for i := int32(1); i <= 5; i++ {
+		require.NoError(t, stream.Send(&pingpong.ChatMessage{Seq: i}))
+		sum += i
+	}
+
+	resp, err := stream.CloseAndRecv()
+	require.NoError(t, err)
+	assert.Equal(t, sum, resp.Total)
+}
+
+// runStreamKeepaliveTest verifies that connection-level keepalive keeps an idle
+// stream healthy (PING/PONG flow without disrupting the stream).
+func runStreamKeepaliveTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{
+		Transport:         factory.CreateClientTransport(id),
+		KeepaliveInterval: 40 * time.Millisecond,
+		KeepaliveTimeout:  500 * time.Millisecond,
+	})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	stream, err := c.Connect(context.Background())
+	require.NoError(t, err)
+
+	welcome, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "welcome", welcome.Text)
+
+	// Idle well beyond the keepalive interval; pings keep the connection alive.
+	time.Sleep(250 * time.Millisecond)
+
+	// The stream is still usable.
+	require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: "after-idle", Seq: 1}))
+	echo, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "echo:after-idle", echo.Text)
 }
