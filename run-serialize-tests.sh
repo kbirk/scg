@@ -9,6 +9,18 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # ========================================
+# Go Package Unit Tests (serialize + rpc), under the race detector
+# ========================================
+echo -e "${YELLOW}Running Go package unit tests (-race)...${NC}"
+go test -race -count=1 ./pkg/...
+if [ $? -eq 0 ]; then
+	echo -e "${GREEN}Go package unit tests passed${NC}"
+else
+	echo -e "${RED}Go package unit tests failed${NC}"
+	exit 1
+fi
+
+# ========================================
 # Go Serialization Tests
 # ========================================
 echo -e "${YELLOW}Running Go serialization tests...${NC}"

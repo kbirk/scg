@@ -16,7 +16,7 @@ namespace tcp {
 struct ServerTransportConfig {
 	int port;
 	uint32_t maxSendMessageSize = 0; // 0 for no limit
-	uint32_t maxRecvMessageSize = 0; // 0 for no limit
+	uint32_t maxRecvMessageSize = scg::rpc::DEFAULT_MAX_RECV_MESSAGE_SIZE; // 0 disables the cap
 };
 
 class ServerTransportTCP : public scg::rpc::ServerTransport, public std::enable_shared_from_this<ServerTransportTCP> {

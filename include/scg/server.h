@@ -9,6 +9,8 @@
 #include <vector>
 #include <array>
 #include <thread>
+#include <chrono>
+#include <atomic>
 
 #define ASIO_STANDALONE
 #include <asio.hpp>
@@ -65,6 +67,14 @@ struct ServerConfig {
 	size_t streamRecvBufferSize = 0;
 	// maxConcurrentStreams caps live streams per connection (0 = unlimited).
 	size_t maxConcurrentStreams = 0;
+	// keepaliveInterval, if > 0, enables server-initiated connection keepalive: a
+	// PING is sent after this much idle time. keepaliveTimeout is the max idle
+	// time before a connection is declared dead and closed (defaults to
+	// 2*keepaliveInterval). This detects a client that vanished without a clean
+	// close (e.g. a dropped mobile connection) and prevents leaked stream-handler
+	// threads and connection objects.
+	std::chrono::milliseconds keepaliveInterval{0};
+	std::chrono::milliseconds keepaliveTimeout{0};
 };
 
 // Server group for organizing services and middleware
@@ -150,6 +160,13 @@ public:
 			transport_->runEventLoop();
 		});
 
+		// Start the server-initiated keepalive scanner if configured.
+		if (config_.keepaliveInterval.count() > 0) {
+			keepaliveThread_ = std::thread([this]() {
+				keepaliveLoop();
+			});
+		}
+
 		return nullptr;
 	}
 
@@ -159,6 +176,10 @@ public:
 		// Check if already stopped
 		if (!running_) {
 			// Join threads if they're still running
+			keepaliveCv_.notify_all();
+			if (keepaliveThread_.joinable()) {
+				keepaliveThread_.join();
+			}
 			if (transportThread_.joinable()) {
 				transportThread_.join();
 			}
@@ -167,6 +188,12 @@ public:
 
 		// Signal shutdown
 		running_ = false;
+
+		// Stop the keepalive scanner.
+		keepaliveCv_.notify_all();
+		if (keepaliveThread_.joinable()) {
+			keepaliveThread_.join();
+		}
 
 		// Stop the transport
 		if (transport_) {
@@ -301,6 +328,10 @@ private:
 			std::lock_guard<std::mutex> lock(mu_);
 			connections_[connID] = conn;
 		}
+		{
+			std::lock_guard<std::mutex> lock(activityMu_);
+			lastActivity_[connID] = std::chrono::steady_clock::now();
+		}
 
 		// Process messages using thread pool to avoid blocking io_context.
 		// Stream frames are routed inline on the I/O thread to preserve per-stream
@@ -308,6 +339,13 @@ private:
 		conn->setMessageHandler([this, connID](const std::vector<uint8_t>& data) {
 			if (!running_) {
 				return;
+			}
+
+			// Record liveness for the keepalive scanner: any inbound frame
+			// (including a client's PONG reply) keeps the connection alive.
+			{
+				std::lock_guard<std::mutex> lock(activityMu_);
+				lastActivity_[connID] = std::chrono::steady_clock::now();
 			}
 
 			serialize::Reader reader(data);
@@ -341,6 +379,8 @@ private:
 	{
 		failConnStreams(connID, error::Error("connection closed"));
 
+		eraseActivity(connID);
+
 		std::lock_guard<std::mutex> lock(mu_);
 
 		auto it = connections_.find(connID);
@@ -354,6 +394,8 @@ private:
 	{
 		failConnStreams(connID, error::Error("connection failed: " + err.message()));
 
+		eraseActivity(connID);
+
 		std::lock_guard<std::mutex> lock(mu_);
 
 		handleError(err);
@@ -361,6 +403,72 @@ private:
 		auto it = connections_.find(connID);
 		if (it != connections_.end()) {
 			connections_.erase(it);
+		}
+	}
+
+	void eraseActivity(uint64_t connID)
+	{
+		std::lock_guard<std::mutex> lock(activityMu_);
+		lastActivity_.erase(connID);
+	}
+
+	// keepaliveLoop periodically scans connections: it PINGs an idle connection
+	// and closes one that has been silent past the timeout. The peer (Go or C++
+	// client) auto-replies PONG, which records activity. Closing the connection
+	// triggers its close handler, which fails the connection's streams so their
+	// handler threads unblock and exit — preventing the dead-client leak. Mirrors
+	// the Go server keepalive and the C++ client keepalive thread.
+	void keepaliveLoop()
+	{
+		auto interval = config_.keepaliveInterval;
+		auto timeout = config_.keepaliveTimeout.count() > 0
+			? config_.keepaliveTimeout
+			: interval * 2;
+
+		while (true) {
+			{
+				std::unique_lock<std::mutex> lock(keepaliveMu_);
+				keepaliveCv_.wait_for(lock, interval, [this]() { return !running_; });
+				if (!running_) {
+					return;
+				}
+			}
+
+			auto now = std::chrono::steady_clock::now();
+
+			// Snapshot the connections, then read activity, then act — all
+			// without holding two locks at once, and send/close outside any lock
+			// (close() re-enters via the connection's close handler).
+			std::vector<std::pair<uint64_t, std::shared_ptr<Connection>>> conns;
+			{
+				std::lock_guard<std::mutex> lock(mu_);
+				for (auto& pair : connections_) {
+					conns.emplace_back(pair.first, pair.second);
+				}
+			}
+
+			std::vector<std::shared_ptr<Connection>> toPing;
+			std::vector<std::shared_ptr<Connection>> toClose;
+			{
+				std::lock_guard<std::mutex> lock(activityMu_);
+				for (auto& pair : conns) {
+					auto it = lastActivity_.find(pair.first);
+					auto last = (it != lastActivity_.end()) ? it->second : now;
+					auto idle = now - last;
+					if (idle > timeout) {
+						toClose.push_back(pair.second);
+					} else if (idle >= interval) {
+						toPing.push_back(pair.second);
+					}
+				}
+			}
+
+			for (auto& conn : toPing) {
+				conn->send(serializeStreamControl(STREAM_FRAME_PING));
+			}
+			for (auto& conn : toClose) {
+				conn->close();
+			}
 		}
 	}
 
@@ -761,6 +869,15 @@ private:
 	asio::thread_pool threadPool_;
 	std::thread transportThread_;
 	mutable std::mutex mu_;
+
+	// Server-initiated keepalive: a scanner thread PINGs idle connections and
+	// closes silent (dead) ones. lastActivity_ is guarded by its own mutex so the
+	// hot inbound-frame path does not contend on mu_.
+	std::map<uint64_t, std::chrono::steady_clock::time_point> lastActivity_;
+	std::mutex activityMu_;
+	std::thread keepaliveThread_;
+	std::mutex keepaliveMu_;
+	std::condition_variable keepaliveCv_;
 };
 
 // Helper function to create an error response

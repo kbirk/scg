@@ -28,6 +28,14 @@ const (
 	MessageResponse = uint8(0x02)
 )
 
+// DefaultMaxRecvMessageSize is the per-frame receive cap applied by transports
+// when none is configured (MaxRecvMessageSize == 0). It bounds the buffer a
+// peer can force the receiver to allocate from a single length-prefixed frame,
+// closing the pre-auth "tiny frame declares a 4 GiB body" allocation DoS while
+// leaving ample headroom for legitimate messages. Deployments that need larger
+// frames set MaxRecvMessageSize explicitly.
+const DefaultMaxRecvMessageSize uint32 = 32 << 20 // 32 MiB
+
 // Streaming frame kinds. Carried as a uint8 immediately after the stream id.
 const (
 	StreamFrameOpen      = uint8(0x01) // client -> server: open a stream (ctx, serviceID, methodID)

@@ -41,24 +41,49 @@ func varEncodeUint(writer *Writer, val uint64, numBytes uint32) {
 }
 
 func varDecodeUint(reader *Reader, val *uint64, numBytes uint32) error {
-	*val = 0
-	for i := uint32(0); i < numBytes; i++ {
-		var flag byte
-		if err := reader.ReadBits(&flag, 1); err != nil {
-			return err
-		}
+	// Hot path: each unit is a 1-bit continuation flag followed (if set) by 8
+	// data bits, bit-packed and usually unaligned. Reading those through the
+	// ReadBits method per bit/byte dominates deserialization (it is called for
+	// every integer field, enum, length prefix, and collection count), so the bit
+	// extraction is inlined here against the backing slice. The wire format is
+	// unchanged — this only removes ~18 non-inlined calls per decode.
+	data := reader.bytes
+	n := uint32(len(data))
+	pos := reader.numBitsRead
+	var result uint64
 
-		if flag == 0 {
+	for i := uint32(0); i < numBytes; i++ {
+		bi := pos >> 3
+		if bi >= n {
+			return errInsufficientData(int(n), int(bi)+1)
+		}
+		off := pos & 7
+		if (data[bi]>>off)&1 == 0 {
+			pos++
 			break
 		}
+		pos++
 
-		var b byte
-		if err := reader.ReadBits(&b, 8); err != nil {
-			return err
+		// Read 8 data bits at pos.
+		bi = pos >> 3
+		off = pos & 7
+		if bi >= n {
+			return errInsufficientData(int(n), int(bi)+1)
 		}
+		b := data[bi] >> off
+		if off != 0 {
+			if bi+1 >= n {
+				return errInsufficientData(int(n), int(bi)+2)
+			}
+			b |= data[bi+1] << (8 - off)
+		}
+		pos += 8
 
-		*val |= uint64(b) << (8 * i)
+		result |= uint64(b) << (8 * i)
 	}
+
+	*val = result
+	reader.numBitsRead = pos
 	return nil
 }
 

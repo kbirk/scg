@@ -26,6 +26,16 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# ========================================
+# Generate test code (Go + C++). The generated code is gitignored, so the
+# runner regenerates it to stay self-contained.
+# ========================================
+echo -e "${YELLOW}Generating test code...${NC}"
+if ! ./gen-test-code.sh > /dev/null 2>&1; then
+	echo -e "${RED}Test code generation failed${NC}"
+	exit 1
+fi
+
 # Function to cleanup background processes
 cleanup() {
 	if [ ! -z "$pid" ] && kill -0 $pid 2>/dev/null; then
@@ -42,7 +52,12 @@ trap cleanup EXIT INT TERM
 # Go TCP Tests (Go Client + Go Server)
 # ========================================
 echo -e "${YELLOW}Running Go TCP tests (Go Client + Go Server)...${NC}"
-run_with_timeout "Go TCP tests" go test -v -count=1 -run "^(TestTCP|TestTCPTLS|TestStreamHandlerNoLeak|TestServerSurvivesMalformedFrames|TestStreamKeepaliveTimeout|TestStreamKeepaliveReconnect)$" ./test/go/service_tcp_test.go ./test/go/service_test_suite.go ./test/go/service_leak_test.go ./test/go/service_malformed_test.go ./test/go/service_keepalive_test.go ./test/go/test_utils.go
+# -race exercises the per-stream goroutines and shared stream/connection
+# registries. TestTCP/TestTCPTLS run the full transport-agnostic suite (which
+# now includes the no-leak and server-keepalive-healthy tests). The adversarial
+# tests (keepalive black-hole, malformed frames, server-keepalive dead-client)
+# are transport-parameterized and run both their tcp and ws subtests here.
+run_with_timeout "Go TCP tests" go test -race -v -count=1 -run "^(TestTCP|TestTCPTLS|TestKeepaliveTimeout|TestKeepaliveReconnect|TestServerKeepaliveDeadClient|TestMalformedFrames|TestGeneratedContainerRejectsOversizedLength|TestGeneratedContainerRoundTripsLargeLegitimateList)$" ./test/go/
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go TCP tests passed${NC}"
 else

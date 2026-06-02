@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 
 namespace scg {
 namespace rpc {
@@ -24,6 +25,13 @@ namespace rpc {
 
 	constexpr uint8_t ERROR_RESPONSE = 0x01;
 	constexpr uint8_t MESSAGE_RESPONSE = 0x02;
+
+	// DEFAULT_MAX_RECV_MESSAGE_SIZE is the per-frame receive cap applied by
+	// transports unless overridden. It bounds the buffer a peer can force the
+	// receiver to allocate from a single length-prefixed frame, closing the
+	// "tiny frame declares a huge body" allocation DoS. Set maxRecvMessageSize
+	// to 0 to disable the cap, or to a larger value to raise it.
+	constexpr uint32_t DEFAULT_MAX_RECV_MESSAGE_SIZE = 32u << 20; // 32 MiB
 
 	// Streaming frame kinds, carried as a uint8 immediately after the stream id.
 	constexpr uint8_t STREAM_FRAME_OPEN = 0x01;        // client -> server: open (ctx, serviceID, methodID)

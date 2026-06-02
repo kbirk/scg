@@ -22,7 +22,7 @@ struct ServerTransportTLSConfig {
 	std::string certFile;
 	std::string keyFile;
 	uint32_t maxSendMessageSize = 0;
-	uint32_t maxRecvMessageSize = 0;
+	uint32_t maxRecvMessageSize = scg::rpc::DEFAULT_MAX_RECV_MESSAGE_SIZE; // 0 disables the cap
 };
 
 typedef websocketpp::server<websocketpp::config::asio_tls> server_tls;

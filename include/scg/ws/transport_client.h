@@ -24,7 +24,7 @@ struct ClientTransportConfig {
 	int port;
 	std::string path = "/";
 	uint32_t maxSendMessageSize = 0;
-	uint32_t maxRecvMessageSize = 0;
+	uint32_t maxRecvMessageSize = scg::rpc::DEFAULT_MAX_RECV_MESSAGE_SIZE; // 0 disables the cap
 };
 
 typedef websocketpp::client<websocketpp::config::asio_client> client;

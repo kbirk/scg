@@ -96,12 +96,21 @@ type ServerTransportConfig struct {
 	MaxRecvMessageSize uint32 // Maximum receive message size in bytes (0 for no limit)
 }
 
+// recvSizeOrDefault applies the library default receive cap when none is
+// configured, so transports are bounded against oversized frames out of the box.
+func recvSizeOrDefault(v uint32) uint32 {
+	if v == 0 {
+		return rpc.DefaultMaxRecvMessageSize
+	}
+	return v
+}
+
 func NewServerTransport(config ServerTransportConfig) *ServerTransport {
 	return &ServerTransport{
 		Port:               config.Port,
 		NoDelay:            config.NoDelay,
 		MaxSendMessageSize: config.MaxSendMessageSize,
-		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		MaxRecvMessageSize: recvSizeOrDefault(config.MaxRecvMessageSize),
 		connCh:             make(chan rpc.Connection, 16),
 	}
 }
@@ -213,7 +222,7 @@ func NewClientTransport(config ClientTransportConfig) *ClientTransport {
 		Port:               config.Port,
 		NoDelay:            config.NoDelay,
 		MaxSendMessageSize: config.MaxSendMessageSize,
-		MaxRecvMessageSize: config.MaxRecvMessageSize,
+		MaxRecvMessageSize: recvSizeOrDefault(config.MaxRecvMessageSize),
 	}
 }
 

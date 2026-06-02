@@ -16,6 +16,18 @@ func NewReader(data []byte) *Reader {
 	}
 }
 
+// RemainingBytes returns the number of unread bytes still available, counting
+// the current partially-read byte as available. It bounds length-prefixed
+// allocations against the data actually present so a hostile declared length
+// cannot force a huge allocation before the bytes are read.
+func (r *Reader) RemainingBytes() int {
+	consumed := int(r.numBitsRead >> 3)
+	if consumed >= len(r.bytes) {
+		return 0
+	}
+	return len(r.bytes) - consumed
+}
+
 func errInsufficientData(available, needed int) error {
 	return fmt.Errorf("Reader does not contain enough data to fill the argument, num bytes available: %d, num bytes needed: %d", available, needed)
 }

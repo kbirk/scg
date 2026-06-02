@@ -36,12 +36,12 @@ func streamRecvBufferSizeOrDefault(size int) int {
 // gate the stream from the OPEN context metadata.
 type emptyStreamMessage struct{}
 
-func (e *emptyStreamMessage) BitSize() int                   { return 0 }
-func (e *emptyStreamMessage) ToJSON() ([]byte, error)        { return []byte("{}"), nil }
-func (e *emptyStreamMessage) FromJSON([]byte) error          { return nil }
-func (e *emptyStreamMessage) ToBytes() []byte                { return []byte{} }
-func (e *emptyStreamMessage) FromBytes([]byte) error         { return nil }
-func (e *emptyStreamMessage) Serialize(*serialize.Writer)    {}
+func (e *emptyStreamMessage) BitSize() int                        { return 0 }
+func (e *emptyStreamMessage) ToJSON() ([]byte, error)             { return []byte("{}"), nil }
+func (e *emptyStreamMessage) FromJSON([]byte) error               { return nil }
+func (e *emptyStreamMessage) ToBytes() []byte                     { return []byte{} }
+func (e *emptyStreamMessage) FromBytes([]byte) error              { return nil }
+func (e *emptyStreamMessage) Serialize(*serialize.Writer)         {}
 func (e *emptyStreamMessage) Deserialize(*serialize.Reader) error { return nil }
 
 // streamServerStub is implemented by generated service stubs that contain at
@@ -203,7 +203,7 @@ type ClientStream struct {
 	recvDone chan struct{}
 
 	mu         sync.Mutex
-	recvClosed bool  // recv direction is terminal (io.EOF or error in recvErr)
+	recvClosed bool // recv direction is terminal (io.EOF or error in recvErr)
 	recvErr    error
 	dead       bool // whole stream is dead (Send fails)
 	sendClosed bool // local CloseSend has been issued
@@ -353,6 +353,7 @@ type ServerStream struct {
 	streamID  uint64
 	serviceID uint64
 	ctx       context.Context
+	cancel    context.CancelCauseFunc
 
 	recvCh   chan *serialize.Reader
 	recvDone chan struct{}
@@ -364,18 +365,27 @@ type ServerStream struct {
 }
 
 func newServerStream(conn Connection, ctx context.Context, streamID uint64, serviceID uint64, bufferSize int) *ServerStream {
+	// Wrap the OPEN context so the stream's death (client cancel / connection
+	// drop) cancels it. A push-only handler — one that only Sends and never
+	// Recvs (e.g. a chat presence pump fed by a broadcast channel) — would
+	// otherwise not observe the client going away until its next Send; it can now
+	// select on Context().Done() instead. Metadata on the OPEN context (the
+	// authenticated identity) is preserved.
+	ctx, cancel := context.WithCancelCause(ctx)
 	return &ServerStream{
 		conn:      conn,
 		streamID:  streamID,
 		serviceID: serviceID,
 		ctx:       ctx,
+		cancel:    cancel,
 		recvCh:    make(chan *serialize.Reader, streamRecvBufferSizeOrDefault(bufferSize)),
 		recvDone:  make(chan struct{}),
 	}
 }
 
-// Context returns the context the stream was opened with (carries the OPEN
-// metadata, e.g. the authenticated identity).
+// Context returns a context that carries the OPEN metadata (e.g. the
+// authenticated identity) and is cancelled when the stream dies — so a handler
+// can watch Context().Done() to react to client cancellation or connection loss.
 func (s *ServerStream) Context() context.Context {
 	return s.ctx
 }
@@ -445,7 +455,8 @@ func (s *ServerStream) closeRecv(err error) {
 	s.mu.Unlock()
 }
 
-// die marks the whole stream dead (connection dropped / client cancelled).
+// die marks the whole stream dead (connection dropped / client cancelled) and
+// cancels the handler's context with the cause.
 func (s *ServerStream) die(err error) {
 	s.mu.Lock()
 	s.dead = true
@@ -455,6 +466,8 @@ func (s *ServerStream) die(err error) {
 		close(s.recvDone)
 	}
 	s.mu.Unlock()
+
+	s.cancel(err)
 }
 
 // halfClose is called when the client signals it is done sending; the handler's

@@ -129,6 +129,41 @@ func (c *Client) handleError(gen uint64, err error) error {
 	return err
 }
 
+// handleConnectionClosed tears down the connection identified by gen after a
+// clean server-initiated close, failing its in-flight requests and streams so
+// they don't hang. Unlike handleError it does not log or invoke ErrHandler — a
+// close is normal. gen guards against a stale goroutine from a replaced
+// connection tearing down the current one's state.
+func (c *Client) handleConnectionClosed(gen uint64) {
+	c.mu.Lock()
+	if gen != c.connGen {
+		c.mu.Unlock()
+		return
+	}
+	c.stopKeepaliveUnsafe()
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+	requests := c.requests
+	c.requests = make(map[uint64]chan *serialize.Reader)
+	streams := c.streams
+	c.streams = make(map[uint64]*ClientStream)
+	c.mu.Unlock()
+
+	// Fail all in-flight streams.
+	for _, s := range streams {
+		s.die(errors.New("connection closed"))
+	}
+
+	// Notify all pending requests so they don't block forever.
+	go func() {
+		for _, ch := range requests {
+			ch <- nil
+		}
+	}()
+}
+
 func (c *Client) logDebug(msg string) {
 	if c.conf.Logger != nil {
 		c.conf.Logger.Debug(msg)
@@ -173,9 +208,12 @@ func (c *Client) connectUnsafe() error {
 			c.logDebug("Waiting for message")
 			bs, err := conn.Receive()
 			if err != nil {
-				// Don't treat normal connection closures as errors
+				// A clean server-initiated close is not an error, but the
+				// in-flight requests/streams must still be failed so they don't
+				// hang (mirrors the C++ client surfacing a clean close).
 				if err.Error() == "connection closed" {
 					c.logDebug("Connection closed normally")
+					c.handleConnectionClosed(gen)
 					return
 				}
 				c.handleError(gen, err)

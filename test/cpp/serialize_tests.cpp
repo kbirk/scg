@@ -818,10 +818,64 @@ void test_writer_resize_unaligned_write()
 	}
 }
 
+// test_deserialize_rejects_oversized_length verifies the length-prefixed
+// deserializers bound their allocation against the bytes actually present, so a
+// tiny hostile frame cannot force a huge allocation.
+void test_deserialize_rejects_oversized_length()
+{
+	using scg::serialize::Writer;
+	using scg::serialize::Reader;
+
+	// A declared string length far exceeding the data is rejected before allocating.
+	{
+		Writer writer(8);
+		serialize(writer, uint32_t(1u << 30)); // ~1 GiB declared
+		std::vector<uint8_t> buf = writer.bytes();
+		buf.push_back(0xAB);
+		buf.push_back(0xCD);
+		Reader reader(buf);
+		std::string out;
+		auto err = deserialize(out, reader);
+		TEST_CHECK(err);
+	}
+
+	// A declared vector element count far exceeding the data is rejected as the
+	// bytes are exhausted (no multi-GiB reserve up front).
+	{
+		Writer writer(8);
+		serialize(writer, uint32_t(1u << 28));
+		std::vector<uint8_t> buf = writer.bytes();
+		buf.push_back(1);
+		buf.push_back(2);
+		buf.push_back(3);
+		Reader reader(buf);
+		std::vector<float64_t> out;
+		auto err = deserialize(out, reader);
+		TEST_CHECK(err);
+	}
+
+	// A genuinely large vector whose elements really are present still round-trips
+	// (the bound must not over-reject).
+	{
+		std::vector<int32_t> input(5000);
+		for (size_t i = 0; i < input.size(); i++) {
+			input[i] = int32_t(i);
+		}
+		Writer writer(scg::serialize::bits_to_bytes(bit_size(input)));
+		serialize(writer, input);
+		Reader reader(writer.bytes());
+		std::vector<int32_t> output;
+		auto err = deserialize(output, reader);
+		TEST_CHECK(!err);
+		TEST_CHECK(input == output);
+	}
+}
+
 // helper method to reduce redundant test typing
 #define TEST(x) {#x, x}
 
 TEST_LIST = {
+	TEST(test_deserialize_rejects_oversized_length),
 	TEST(test_serialize_uint8),
 	TEST(test_serialize_int8),
 	TEST(test_serialize_uint16),

@@ -45,6 +45,15 @@ struct ClientConfig {
 	std::chrono::milliseconds keepaliveTimeout{0};
 };
 
+// Client owns its transport exclusively. The connection callbacks installed in
+// connectUnsafe() (fail/close/message handlers) capture the raw `this` pointer
+// and fire on the transport's background I/O thread, so `this` must outlive that
+// thread. The destructor guarantees this by stopping/joining the I/O thread
+// (via transport->shutdown(), which the destructor calls last) before the Client
+// members are torn down — therefore the transport must not be shared with, or
+// outlive into, anything else. (Per-stream send paths capture the connection
+// shared_ptr instead of `this`, so streams may safely outlive the Client; this
+// `this`-capture contract is specific to the Client's own connection handlers.)
 class Client {
 public:
 

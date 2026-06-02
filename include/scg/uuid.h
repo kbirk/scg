@@ -147,16 +147,18 @@ public:
 	template <typename WriterType>
 	friend inline void serialize(WriterType& writer, const uuid& value)
 	{
-		for (int i = 0; i < 16; ++i) {
-			writer.writeBits(value.bytes_[i], 8);
-		}
+		// Bulk-write the 16 bytes rather than 16 per-byte writeBits calls through
+		// the bit machinery — wire-identical, and a large win on the hot path
+		// (matches the Go bulk WriteBytes).
+		writer.writeBytes(value.bytes_, 16);
 	}
 
 	template <typename ReaderType>
 	friend inline error::Error deserialize(uuid& value, ReaderType& reader)
 	{
-		for (int i = 0; i < 16; ++i) {
-			reader.readBits(value.bytes_[i], 8);
+		auto err = reader.readBytes(value.bytes_, 16);
+		if (err) {
+			return err;
 		}
 
 		if (value.isNull()) {

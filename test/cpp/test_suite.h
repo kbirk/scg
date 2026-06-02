@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <stdexcept>
+#include <fstream>
 
 #include <acutest.h>
 
@@ -1807,6 +1808,470 @@ inline void runStreamKeepaliveTest(TestContext& ctx) {
 }
 
 // ============================================================================
+// Adversarial / standalone tests. These cannot use the well-behaved factory
+// servers, so they build a black-hole peer (a real transport that accepts and
+// discards, never replying) or inject raw frames through a bare Connection.
+// Both use the transport abstraction, so every case runs on TCP and WS.
+// ============================================================================
+
+// BlackHole accepts connections on a real transport and discards everything,
+// never replying — used to drive client keepalive timeouts. Transport-agnostic.
+class BlackHole {
+public:
+	explicit BlackHole(std::shared_ptr<scg::rpc::ServerTransport> transport)
+		: transport_(std::move(transport)) {
+		transport_->setOnConnection([this](std::shared_ptr<scg::rpc::Connection> conn) {
+			conn->setMessageHandler([](const std::vector<uint8_t>&) {}); // discard, never reply
+			std::lock_guard<std::mutex> lock(mu_);
+			conns_.push_back(conn);
+		});
+		transport_->startListening();
+		thread_ = std::thread([this]() { transport_->runEventLoop(); });
+	}
+	~BlackHole() {
+		transport_->stop();
+		if (thread_.joinable()) {
+			thread_.join();
+		}
+	}
+
+private:
+	std::shared_ptr<scg::rpc::ServerTransport> transport_;
+	std::thread thread_;
+	std::mutex mu_;
+	std::vector<std::shared_ptr<scg::rpc::Connection>> conns_;
+};
+
+// streamFrameBytes builds one stream frame: STREAM_PREFIX | streamID | kind | tail.
+inline std::vector<uint8_t> streamFrameBytes(uint64_t streamID, uint8_t frameKind, std::vector<uint8_t> tail) {
+	scg::serialize::Writer w(64);
+	w.write(scg::rpc::STREAM_PREFIX);
+	w.write(streamID);
+	w.write(frameKind);
+	auto b = w.bytes();
+	b.insert(b.end(), tail.begin(), tail.end());
+	return b;
+}
+
+// oversizedOpenFrame builds an OPEN whose context declares a ~1 GiB metadata
+// value but supplies none — exercising the pre-auth allocation guard over the
+// wire (server must reject, not allocate).
+inline std::vector<uint8_t> oversizedOpenFrame() {
+	scg::serialize::Writer tail(32);
+	tail.write(uint32_t(1));        // context entry count
+	std::string k = "k";
+	tail.write(k);                  // key
+	tail.write(uint32_t(1u << 30)); // value byte length (hostile)
+	return streamFrameBytes(200, scg::rpc::STREAM_FRAME_OPEN, tail.bytes());
+}
+
+// currentThreadCount reads the process thread count (Linux /proc) for the leak test.
+inline int currentThreadCount() {
+	std::ifstream f("/proc/self/status");
+	std::string line;
+	while (std::getline(f, line)) {
+		if (line.rfind("Threads:", 0) == 0) {
+			try {
+				return std::stoi(line.substr(8));
+			} catch (...) {
+				return -1;
+			}
+		}
+	}
+	return -1;
+}
+
+inline void expectKeepaliveTimeout(pingpong::ChatClient& chatClient) {
+	scg::context::Context ctx;
+	auto cr = chatClient.connect(ctx);
+	TEST_CHECK(cr.second == nullptr);
+	if (cr.second) {
+		return;
+	}
+	auto r = cr.first->recv();
+	TEST_CHECK(r.state == scg::rpc::StreamRecvState::Closed);
+	TEST_CHECK(r.error != nullptr);
+	if (r.error) {
+		TEST_CHECK(r.error.message().find("keepalive timeout") != std::string::npos);
+	}
+}
+
+// Build a real scg server with keepalive enabled on the factory transport.
+inline std::shared_ptr<scg::rpc::Server> makeKeepaliveServer(TestContext& ctx) {
+	scg::rpc::ServerConfig scfg;
+	scfg.transport = ctx.factory().createServerTransport(ctx.id());
+	scfg.errorHandler = [](const scg::error::Error&) {};
+	scfg.keepaliveInterval = std::chrono::milliseconds(40);
+	scfg.keepaliveTimeout = std::chrono::milliseconds(150);
+	auto server = std::make_shared<scg::rpc::Server>(scfg);
+	pingpong::registerPingPongServer(server.get(), std::make_shared<PingPongServerImpl>());
+	pingpong::registerChatServer(server.get(), std::make_shared<ChatServerImpl>());
+	return server;
+}
+
+// Client keepalive must detect a dead peer (a black-hole) and fail the stream.
+inline void runKeepaliveTimeoutTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Keepalive Timeout test...\n");
+
+	BlackHole blackhole(ctx.factory().createServerTransport(ctx.id()));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+	scg::rpc::ClientConfig cfg;
+	cfg.transport = ctx.factory().createClientTransport(ctx.id());
+	cfg.keepaliveInterval = std::chrono::milliseconds(40);
+	cfg.keepaliveTimeout = std::chrono::milliseconds(150);
+	auto client = std::make_shared<scg::rpc::Client>(cfg);
+
+	pingpong::ChatClient chatClient(client);
+	expectKeepaliveTimeout(chatClient);
+
+	client->disconnect();
+	printf("Keepalive Timeout test passed\n");
+}
+
+// Client keepalive must resume after a reconnect: a second stream must also fail.
+inline void runKeepaliveReconnectTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Keepalive Reconnect test...\n");
+
+	BlackHole blackhole(ctx.factory().createServerTransport(ctx.id()));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+	scg::rpc::ClientConfig cfg;
+	cfg.transport = ctx.factory().createClientTransport(ctx.id());
+	cfg.keepaliveInterval = std::chrono::milliseconds(40);
+	cfg.keepaliveTimeout = std::chrono::milliseconds(150);
+	auto client = std::make_shared<scg::rpc::Client>(cfg);
+
+	pingpong::ChatClient chatClient(client);
+	expectKeepaliveTimeout(chatClient); // connection 1
+	expectKeepaliveTimeout(chatClient); // connection 2 (reconnect)
+
+	client->disconnect();
+	printf("Keepalive Reconnect test passed\n");
+}
+
+// Server keepalive must not disturb a well-behaved client (auto-PONG).
+inline void runServerKeepaliveHealthyTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Server Keepalive Healthy test...\n");
+
+	auto server = makeKeepaliveServer(ctx);
+	TEST_CHECK(!server->start());
+	std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+	scg::rpc::ClientConfig ccfg;
+	ccfg.transport = ctx.factory().createClientTransport(ctx.id());
+	auto client = std::make_shared<scg::rpc::Client>(ccfg);
+	TEST_CHECK(connectWithRetries(client, ctx.maxRetries()));
+
+	pingpong::ChatClient chatClient(client);
+	scg::context::Context cctx;
+	auto cr = chatClient.connect(cctx);
+	TEST_CHECK(cr.second == nullptr);
+	if (cr.second) {
+		server->shutdown();
+		return;
+	}
+	auto stream = cr.first;
+	auto welcome = stream->recv();
+	TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(welcome.message.text == "welcome");
+
+	// Idle beyond the keepalive timeout; the server PINGs, the client PONGs.
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+	pingpong::ChatMessage m;
+	m.text = "alive";
+	m.seq = 1;
+	TEST_CHECK(stream->send(m) == nullptr);
+	auto echo = stream->recv();
+	TEST_CHECK(echo.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(echo.message.text == "echo:alive");
+
+	client->disconnect();
+	server->shutdown();
+	printf("Server Keepalive Healthy test passed\n");
+}
+
+// Server keepalive must tear down a connection whose client went silent.
+inline void runServerKeepaliveDeadClientTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Server Keepalive Dead Client test...\n");
+
+	auto server = makeKeepaliveServer(ctx);
+	TEST_CHECK(!server->start());
+	std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+	// Raw client: connect, then ignore the server's PINGs (never PONG).
+	auto clientTransport = ctx.factory().createClientTransport(ctx.id());
+	auto connRes = clientTransport->connect();
+	TEST_CHECK(connRes.second == nullptr);
+	auto conn = connRes.first;
+	auto closed = std::make_shared<std::atomic<bool>>(false);
+	conn->setMessageHandler([](const std::vector<uint8_t>&) {});
+	conn->setCloseHandler([closed]() { closed->store(true); });
+	conn->setFailHandler([closed](const scg::error::Error&) { closed->store(true); });
+
+	bool ok = false;
+	auto start = std::chrono::steady_clock::now();
+	while (std::chrono::steady_clock::now() - start < std::chrono::seconds(2)) {
+		if (closed->load()) {
+			ok = true;
+			break;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+	TEST_CHECK(ok);
+
+	clientTransport->shutdown();
+	server->shutdown();
+	printf("Server Keepalive Dead Client test passed\n");
+}
+
+// A server must survive a grab-bag of hostile frames and still serve afterward.
+inline void runMalformedFramesTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Malformed Frames test...\n");
+
+	scg::rpc::ServerConfig scfg;
+	scfg.transport = ctx.factory().createServerTransport(ctx.id());
+	scfg.errorHandler = [](const scg::error::Error&) {};
+	auto server = std::make_shared<scg::rpc::Server>(scfg);
+	pingpong::registerPingPongServer(server.get(), std::make_shared<PingPongServerImpl>());
+	pingpong::registerChatServer(server.get(), std::make_shared<ChatServerImpl>());
+	TEST_CHECK(!server->start());
+	std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+	// Raw client injects hostile frames, then disconnects.
+	{
+		auto clientTransport = ctx.factory().createClientTransport(ctx.id());
+		auto connRes = clientTransport->connect();
+		TEST_CHECK(connRes.second == nullptr);
+		auto conn = connRes.first;
+
+		std::vector<std::vector<uint8_t>> malformed;
+		malformed.push_back({'g', 'a', 'r', 'b', 'a', 'g', 'e', '!', '!', '!', '!', '!', '!', '!', '!', '!', '!', '!'});
+		malformed.push_back({});
+		{
+			scg::serialize::Writer w(16);
+			w.write(scg::rpc::STREAM_PREFIX);
+			malformed.push_back(w.bytes());
+		}
+		{
+			// A valid unary request prefix followed by garbage — exercises the
+			// unary request path's robustness, not just the stream path.
+			scg::serialize::Writer w(32);
+			w.write(scg::rpc::REQUEST_PREFIX);
+			auto b = w.bytes();
+			const uint8_t garbage[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22};
+			b.insert(b.end(), std::begin(garbage), std::end(garbage));
+			malformed.push_back(b);
+		}
+		malformed.push_back(streamFrameBytes(7, 0xFF, {}));
+		malformed.push_back(streamFrameBytes(123, scg::rpc::STREAM_FRAME_MESSAGE, {0x01, 0x02, 0x03}));
+		malformed.push_back(streamFrameBytes(124, scg::rpc::STREAM_FRAME_HALF_CLOSE, {}));
+		malformed.push_back(streamFrameBytes(125, scg::rpc::STREAM_FRAME_CLOSE, {0x00}));
+		malformed.push_back(streamFrameBytes(200, scg::rpc::STREAM_FRAME_OPEN, {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11}));
+		malformed.push_back(oversizedOpenFrame());
+		malformed.push_back(streamFrameBytes(0, scg::rpc::STREAM_FRAME_PING, {}));
+		malformed.push_back(streamFrameBytes(0, scg::rpc::STREAM_FRAME_PONG, {}));
+
+		for (const auto& m : malformed) {
+			conn->send(m);
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		clientTransport->shutdown();
+	}
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+	// The server must still be alive and serving.
+	scg::rpc::ClientConfig ccfg;
+	ccfg.transport = ctx.factory().createClientTransport(ctx.id());
+	auto client = std::make_shared<scg::rpc::Client>(ccfg);
+	TEST_CHECK(connectWithRetries(client, ctx.maxRetries()));
+
+	pingpong::PingPongClient pp(client);
+	scg::context::Context pctx;
+	pingpong::PingRequest req;
+	req.ping.count = 41;
+	auto pr = pp.ping(pctx, req);
+	TEST_CHECK(pr.second == nullptr);
+	TEST_CHECK(pr.first.pong.count == 42);
+
+	pingpong::ChatClient chat(client);
+	auto cr = chat.connect(pctx);
+	TEST_CHECK(cr.second == nullptr);
+	if (!cr.second) {
+		auto welcome = cr.first->recv();
+		TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+		TEST_CHECK(welcome.message.text == "welcome");
+	}
+
+	client->disconnect();
+	server->shutdown();
+	printf("Malformed Frames test passed\n");
+}
+
+// Open and close many streams; the process thread count must return to baseline.
+inline void runStreamHandlerNoLeakTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Handler No-Leak test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+
+	auto client = ctx.createClient();
+	pingpong::ChatClient chat(client);
+
+	auto oneStream = [&]() {
+		scg::context::Context cctx;
+		auto cr = chat.connect(cctx);
+		if (cr.second) {
+			return;
+		}
+		auto stream = cr.first;
+		stream->recv(); // welcome
+		pingpong::ChatMessage m;
+		m.text = "x";
+		m.seq = 1;
+		stream->send(m);
+		stream->recv(); // echo
+		stream->closeSend();
+		stream->recv(); // summary
+		stream->recv(); // closed
+	};
+
+	oneStream();
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	int baseline = currentThreadCount();
+
+	const int N = 200;
+	for (int i = 0; i < N; i++) {
+		oneStream();
+	}
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(400));
+	int final = currentThreadCount();
+
+	printf("threads: baseline=%d final=%d after %d streams\n", baseline, final, N);
+	TEST_CHECK(baseline > 0);
+	TEST_CHECK(final > 0);
+	TEST_CHECK(final <= baseline + 5);
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Handler No-Leak test passed\n");
+}
+
+// A second OPEN reusing a live stream id must be rejected with a CLOSE(error)
+// rather than orphaning the existing stream. Driven over the wire so it runs on
+// every transport.
+inline void runDuplicateStreamIDTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Duplicate Stream ID test...\n");
+
+	scg::rpc::ServerConfig scfg;
+	scfg.transport = ctx.factory().createServerTransport(ctx.id());
+	scfg.errorHandler = [](const scg::error::Error&) {};
+	auto server = std::make_shared<scg::rpc::Server>(scfg);
+	pingpong::registerPingPongServer(server.get(), std::make_shared<PingPongServerImpl>());
+	pingpong::registerChatServer(server.get(), std::make_shared<ChatServerImpl>());
+	TEST_CHECK(!server->start());
+	std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+	auto clientTransport = ctx.factory().createClientTransport(ctx.id());
+	auto connRes = clientTransport->connect();
+	TEST_CHECK(connRes.second == nullptr);
+	auto conn = connRes.first;
+
+	// Collect the status messages of any CLOSE frames the server sends.
+	auto closeMessages = std::make_shared<std::vector<std::string>>();
+	auto cmu = std::make_shared<std::mutex>();
+	conn->setMessageHandler([closeMessages, cmu](const std::vector<uint8_t>& data) {
+		scg::serialize::ReaderView reader(data);
+		std::array<uint8_t, 16> prefix;
+		if (scg::serialize::deserialize(prefix, reader)) return;
+		if (prefix != scg::rpc::STREAM_PREFIX) return;
+		uint64_t streamID;
+		if (scg::serialize::deserialize(streamID, reader)) return;
+		uint8_t kind;
+		if (scg::serialize::deserialize(kind, reader)) return;
+		if (kind != scg::rpc::STREAM_FRAME_CLOSE) return;
+		uint8_t status;
+		if (scg::serialize::deserialize(status, reader)) return;
+		std::string msg;
+		if (scg::serialize::deserialize(msg, reader)) return;
+		std::lock_guard<std::mutex> lock(*cmu);
+		closeMessages->push_back(msg);
+	});
+
+	scg::context::Context octx;
+	auto open = scg::rpc::serializeStreamOpen(octx, 1, pingpong::chatServerID, pingpong::chatServer_ConnectID);
+	conn->send(open); // first OPEN: registers the stream (handler blocks in recv)
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	conn->send(open); // duplicate OPEN reusing id 1: must be rejected
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+	bool found = false;
+	{
+		std::lock_guard<std::mutex> lock(*cmu);
+		for (const auto& m : *closeMessages) {
+			if (m.find("duplicate stream id") != std::string::npos) {
+				found = true;
+			}
+		}
+	}
+	TEST_CHECK(found);
+
+	clientTransport->shutdown();
+	server->shutdown();
+	printf("Duplicate Stream ID test passed\n");
+}
+
+// Cancelling a stream from the client side must notify the server and fail a
+// blocked recv() with a cancelled error. The C++ analogue of the Go context-
+// cancel test.
+inline void runStreamClientCancelTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Client Cancel test...\n");
+
+	ctx.startServerWithSetup(registerStreamingServices);
+
+	auto client = ctx.createClient();
+	pingpong::ChatClient chat(client);
+
+	scg::context::Context cctx;
+	auto cr = chat.connect(cctx);
+	TEST_CHECK(cr.second == nullptr);
+	if (cr.second) {
+		ctx.stopServer();
+		return;
+	}
+	auto stream = cr.first;
+
+	auto welcome = stream->recv();
+	TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+	TEST_CHECK(welcome.message.text == "welcome");
+
+	// Cancel from the client side.
+	TEST_CHECK(stream->cancel() == nullptr);
+
+	// A subsequent recv must return a terminal cancelled error.
+	auto after = stream->recv();
+	TEST_CHECK(after.state == scg::rpc::StreamRecvState::Closed);
+	TEST_CHECK(after.error != nullptr);
+	if (after.error) {
+		TEST_CHECK(after.error.message().find("cancelled") != std::string::npos);
+	}
+
+	client->disconnect();
+	ctx.stopServer();
+	printf("Stream Client Cancel test passed\n");
+}
+
+// ============================================================================
 // Main Test Suite Runner (like Go's RunTestSuite)
 // ============================================================================
 
@@ -1979,6 +2444,54 @@ inline void runTestSuite(const TestSuiteConfig& config) {
 				printf("\n=== Running Stream Keepalive Test ===\n");
 				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
 				runStreamKeepaliveTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Server Keepalive Healthy Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runServerKeepaliveHealthyTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Server Keepalive Dead Client Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runServerKeepaliveDeadClientTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Keepalive Timeout Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runKeepaliveTimeoutTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Keepalive Reconnect Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runKeepaliveReconnectTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Malformed Frames Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runMalformedFramesTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Handler No-Leak Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamHandlerNoLeakTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Duplicate Stream ID Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runDuplicateStreamIDTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Client Cancel Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamClientCancelTest(ctx);
 			}
 		}
 	}

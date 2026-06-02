@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -204,6 +205,14 @@ func RunTestSuite(t *testing.T, config TestSuiteConfig) {
 
 			t.Run("StreamKeepalive", func(t *testing.T) {
 				runStreamKeepaliveTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamServerKeepaliveHealthy", func(t *testing.T) {
+				runStreamServerKeepaliveHealthyTest(t, config.Factory, port)
+			})
+
+			t.Run("StreamHandlerNoLeak", func(t *testing.T) {
+				runStreamHandlerNoLeakTest(t, config.Factory, port)
 			})
 		}
 	}
@@ -512,7 +521,7 @@ func runConcurrencyTest(t *testing.T, factory TransportFactory, id int, useExter
 		server = rpc.NewServer(rpc.ServerConfig{
 			Transport: factory.CreateServerTransport(id),
 			ErrHandler: func(err error) {
-				t.Logf("Server error: %v", err)
+				fmt.Printf("Server error: %v\n", err)
 			},
 		})
 
@@ -529,7 +538,7 @@ func runConcurrencyTest(t *testing.T, factory TransportFactory, id int, useExter
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
 		ErrHandler: func(err error) {
-			t.Logf("Client error: %v", err)
+			fmt.Printf("Client error: %v\n", err)
 		},
 	})
 
@@ -771,7 +780,7 @@ func runServiceIsolationTest(t *testing.T, factory TransportFactory, id int) {
 	server1 := rpc.NewServer(rpc.ServerConfig{
 		Transport: factory.CreateServerTransport(id),
 		ErrHandler: func(err error) {
-			t.Logf("Server1 error: %v", err)
+			fmt.Printf("Server1 error: %v\n", err)
 		},
 	})
 
@@ -781,14 +790,14 @@ func runServiceIsolationTest(t *testing.T, factory TransportFactory, id int) {
 	go func() {
 		err := server1.ListenAndServe()
 		if err != nil {
-			t.Logf("Server1 stopped: %v", err)
+			fmt.Printf("Server1 stopped: %v\n", err)
 		}
 	}()
 
 	server2 := rpc.NewServer(rpc.ServerConfig{
 		Transport: factory.CreateServerTransport(id + 100), // Use different port for server2
 		ErrHandler: func(err error) {
-			t.Logf("Server2 error: %v", err)
+			fmt.Printf("Server2 error: %v\n", err)
 		},
 	})
 
@@ -798,7 +807,7 @@ func runServiceIsolationTest(t *testing.T, factory TransportFactory, id int) {
 	go func() {
 		err := server2.ListenAndServe()
 		if err != nil {
-			t.Logf("Server2 stopped: %v", err)
+			fmt.Printf("Server2 stopped: %v\n", err)
 		}
 	}()
 
@@ -809,7 +818,7 @@ func runServiceIsolationTest(t *testing.T, factory TransportFactory, id int) {
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
 		ErrHandler: func(err error) {
-			t.Logf("Client error: %v", err)
+			fmt.Printf("Client error: %v\n", err)
 		},
 	})
 
@@ -853,7 +862,7 @@ func runMultipleServicesOnOneServerTest(t *testing.T, factory TransportFactory, 
 	server := rpc.NewServer(rpc.ServerConfig{
 		Transport: factory.CreateServerTransport(id),
 		ErrHandler: func(err error) {
-			t.Logf("Server error: %v", err)
+			fmt.Printf("Server error: %v\n", err)
 		},
 	})
 
@@ -866,7 +875,7 @@ func runMultipleServicesOnOneServerTest(t *testing.T, factory TransportFactory, 
 	go func() {
 		err := server.ListenAndServe()
 		if err != nil {
-			t.Logf("Server stopped: %v", err)
+			fmt.Printf("Server stopped: %v\n", err)
 		}
 	}()
 
@@ -1254,7 +1263,7 @@ func runContextTimeoutTest(t *testing.T, factory TransportFactory, port int) {
 		if err := server.ListenAndServe(); err != nil {
 			// Ignore transport closed error which happens on shutdown
 			if err.Error() != "transport is closed" {
-				t.Logf("Server error: %v", err)
+				fmt.Printf("Server error: %v\n", err)
 			}
 		}
 	}()
@@ -1327,7 +1336,7 @@ func runContextTimeoutRecoveryTest(t *testing.T, factory TransportFactory, port 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
 			if err.Error() != "transport is closed" {
-				t.Logf("Server error: %v", err)
+				fmt.Printf("Server error: %v\n", err)
 			}
 		}
 	}()
@@ -1385,7 +1394,7 @@ func runContextMetadataTest(t *testing.T, factory TransportFactory, port int) {
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
 			if err.Error() != "transport is closed" {
-				t.Logf("Server error: %v", err)
+				fmt.Printf("Server error: %v\n", err)
 			}
 		}
 	}()
@@ -1548,9 +1557,12 @@ func newStreamingServer(t *testing.T, factory TransportFactory, id int, middlewa
 	server := rpc.NewServer(rpc.ServerConfig{
 		Transport: factory.CreateServerTransport(id),
 		// Streams surface handler errors to the client via Recv, not via the
-		// server error handler, so just log here.
+		// server error handler. This runs on a background connection goroutine
+		// that can outlive the test (e.g. a teardown "connection reset by peer"),
+		// so it must not touch testing.T — doing so races the test goroutine
+		// under -race. Print instead.
 		ErrHandler: func(err error) {
-			t.Logf("server error: %v", err)
+			fmt.Printf("streaming server error: %v\n", err)
 		},
 	})
 	for _, m := range middleware {
@@ -1565,6 +1577,86 @@ func newStreamingServer(t *testing.T, factory TransportFactory, id int, middlewa
 
 	time.Sleep(100 * time.Millisecond)
 	return server
+}
+
+// runStreamServerKeepaliveHealthyTest verifies the server-initiated keepalive
+// does not disturb a well-behaved client: the scg client auto-replies PONG, so
+// the connection survives idle well past the keepalive timeout and stays usable.
+// Transport-agnostic — runs on every transport the suite is driven with.
+func runStreamServerKeepaliveHealthyTest(t *testing.T, factory TransportFactory, id int) {
+	server := rpc.NewServer(rpc.ServerConfig{
+		Transport:         factory.CreateServerTransport(id),
+		ErrHandler:        func(err error) { fmt.Printf("server error: %v\n", err) },
+		KeepaliveInterval: 40 * time.Millisecond,
+		KeepaliveTimeout:  150 * time.Millisecond,
+	})
+	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	pingpong.RegisterChatServer(server, &chat.ChatServer{})
+	go func() { server.ListenAndServe() }()
+	defer server.Shutdown(context.Background())
+	time.Sleep(100 * time.Millisecond)
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	stream, err := pingpong.NewChatClient(client).Connect(context.Background())
+	require.NoError(t, err)
+	welcome, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, "welcome", welcome.Text)
+
+	// Idle well beyond the keepalive timeout; the server PINGs, the client PONGs.
+	time.Sleep(500 * time.Millisecond)
+
+	require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: "alive", Seq: 1}))
+	echo, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, "echo:alive", echo.Text)
+}
+
+// runStreamHandlerNoLeakTest opens and closes many streams and asserts the
+// goroutine count returns to its baseline — every per-stream handler goroutine
+// must exit on clean close. Transport-agnostic.
+func runStreamHandlerNoLeakTest(t *testing.T, factory TransportFactory, id int) {
+	server := newStreamingServer(t, factory, id)
+	defer server.Shutdown(context.Background())
+
+	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
+	defer client.Close()
+
+	c := pingpong.NewChatClient(client)
+	oneStream := func() {
+		stream, err := c.Connect(context.Background())
+		require.NoError(t, err)
+		_, err = stream.Recv() // welcome
+		require.NoError(t, err)
+		require.NoError(t, stream.Send(&pingpong.ChatMessage{Text: "x", Seq: 1}))
+		_, err = stream.Recv() // echo
+		require.NoError(t, err)
+		require.NoError(t, stream.CloseSend())
+		_, err = stream.Recv() // summary
+		require.NoError(t, err)
+		_, err = stream.Recv() // io.EOF
+		require.Equal(t, io.EOF, err)
+	}
+
+	// Warm up (establish the connection + its read loop), then record baseline.
+	oneStream()
+	runtime.GC()
+	time.Sleep(200 * time.Millisecond)
+	baseline := runtime.NumGoroutine()
+
+	const n = 200
+	for i := 0; i < n; i++ {
+		oneStream()
+	}
+
+	runtime.GC()
+	time.Sleep(300 * time.Millisecond)
+	final := runtime.NumGoroutine()
+
+	t.Logf("goroutines: baseline=%d final=%d after %d streams", baseline, final, n)
+	require.LessOrEqual(t, final, baseline+10, "stream handler goroutines leaked")
 }
 
 // runStreamBidiTest exercises the full bidi lifecycle: server push on open,
@@ -1987,7 +2079,7 @@ func runStreamBackpressureTest(t *testing.T, factory TransportFactory, id int) {
 func runStreamMaxConcurrentTest(t *testing.T, factory TransportFactory, id int) {
 	server := rpc.NewServer(rpc.ServerConfig{
 		Transport:            factory.CreateServerTransport(id),
-		ErrHandler:           func(err error) { t.Logf("server error: %v", err) },
+		ErrHandler:           func(err error) { fmt.Printf("server error: %v\n", err) },
 		MaxConcurrentStreams: 2,
 	})
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})

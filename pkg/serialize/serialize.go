@@ -53,6 +53,21 @@ func DeserializeTime(data *time.Time, reader *Reader) error {
 	return nil
 }
 
+// CheckLength validates a wire-declared element/byte count against the bytes
+// remaining in the reader. It is the guard prescribed for length-prefixed
+// allocations: every element of the collections that use it occupies at least
+// one byte on the wire (raw bytes, characters, or map entries whose key/value
+// each carry their own length prefix), so a count exceeding the remaining bytes
+// cannot be satisfied and signals a truncated or hostile frame. Bounding here
+// prevents a small frame from forcing a huge make()/resize() before the bytes
+// are read — the pre-auth allocation-DoS fix.
+func CheckLength(reader *Reader, count uint32) error {
+	if int(count) > reader.RemainingBytes() {
+		return fmt.Errorf("declared length %d exceeds %d remaining bytes", count, reader.RemainingBytes())
+	}
+	return nil
+}
+
 func BitSizeString(data string) int {
 	ln := len(data)
 	return BitSizeUInt32(uint32(ln)) + BytesToBits(ln)
@@ -72,6 +87,13 @@ func DeserializeString(data *string, reader *Reader) error {
 	if length == 0 {
 		*data = ""
 		return nil
+	}
+
+	// Bound the declared length against the data actually present before any
+	// allocation, so a hostile length cannot force a huge make() (each char is
+	// one byte). The fast path's own bound is kept below as a precise check.
+	if err := CheckLength(reader, length); err != nil {
+		return err
 	}
 
 	// Fast path for byte-aligned reads

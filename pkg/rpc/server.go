@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/kbirk/scg/pkg/log"
 	"github.com/kbirk/scg/pkg/serialize"
@@ -35,6 +37,14 @@ type ServerConfig struct {
 	StreamRecvBufferSize int
 	// MaxConcurrentStreams caps live streams per connection (0 = unlimited).
 	MaxConcurrentStreams int
+	// KeepaliveInterval, if > 0, enables server-initiated connection keepalive: a
+	// PING is sent after this much idle time. KeepaliveTimeout is the max idle
+	// time before a connection is declared dead and closed (defaults to
+	// 2*KeepaliveInterval). This detects a client that vanished without a clean
+	// close (e.g. a dropped mobile connection) and prevents leaked handler
+	// goroutines and stream buffers.
+	KeepaliveInterval time.Duration
+	KeepaliveTimeout  time.Duration
 }
 
 type serverStub interface {
@@ -241,6 +251,19 @@ func (s *Server) handleConnection(conn Connection) {
 	cs := newConnStreams()
 	defer cs.terminateAll(fmt.Errorf("connection closed"))
 
+	// Server-initiated keepalive detects a client that vanished without a clean
+	// close: without it, Receive() below would block forever, leaking this
+	// goroutine, its per-stream handlers, and their buffers. When enabled, the
+	// server PINGs an idle connection and closes it (unblocking Receive) if no
+	// frame arrives within the timeout.
+	var lastActivity atomic.Int64
+	lastActivity.Store(time.Now().UnixNano())
+	if s.conf.KeepaliveInterval > 0 {
+		stop := make(chan struct{})
+		defer close(stop)
+		go s.serverKeepaliveLoop(conn, &lastActivity, stop)
+	}
+
 	for {
 		// read message
 		bs, err := conn.Receive()
@@ -252,6 +275,7 @@ func (s *Server) handleConnection(conn Connection) {
 			s.handleError(err)
 			break
 		}
+		lastActivity.Store(time.Now().UnixNano())
 
 		reader := serialize.NewReader(bs)
 
@@ -274,6 +298,43 @@ func (s *Server) handleConnection(conn Connection) {
 
 		default:
 			s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
+		}
+	}
+}
+
+// serverKeepaliveLoop probes an idle connection with a PING and closes it if no
+// frame arrives within the timeout window, mirroring the client keepalive. The
+// peer (Go or C++ client) auto-replies PONG, which counts as activity. Closing
+// the connection unblocks the read loop in handleConnection, which then tears
+// down the connection's streams. It exits when stop is closed (connection
+// handler returned) or a send fails.
+func (s *Server) serverKeepaliveLoop(conn Connection, lastActivity *atomic.Int64, stop chan struct{}) {
+	interval := s.conf.KeepaliveInterval
+	timeout := s.conf.KeepaliveTimeout
+	if timeout <= 0 {
+		timeout = 2 * interval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			idle := time.Since(time.Unix(0, lastActivity.Load()))
+			if idle > timeout {
+				// Dead peer: close the connection to unblock Receive and trigger
+				// stream teardown in handleConnection.
+				conn.Close()
+				return
+			}
+			if idle >= interval {
+				if err := conn.Send(serializeStreamControl(StreamFramePing), 0); err != nil {
+					return
+				}
+			}
 		}
 	}
 }
@@ -418,6 +479,10 @@ func (s *Server) handleStreamFrame(conn Connection, cs *connStreams, reader *ser
 func (s *Server) runStreamHandler(conn Connection, cs *connStreams, stream *ServerStream, methodID uint64) {
 	serviceID := stream.serviceID
 	defer cs.remove(stream.streamID)
+	// Always release the stream context when the handler returns (die() already
+	// cancels with a specific cause on client cancel / connection drop; the first
+	// cause wins, so this is a no-op there and a clean release on normal exit).
+	defer stream.cancel(context.Canceled)
 
 	closeWithError := func(err error) {
 		_ = conn.Send(serializeStreamClose(stream.streamID, StreamStatusError, err.Error()), serviceID)

@@ -18,7 +18,7 @@ struct ServerTransportTLSConfig {
 	std::string certFile;
 	std::string keyFile;
 	uint32_t maxSendMessageSize = 0; // 0 for no limit
-	uint32_t maxRecvMessageSize = 0; // 0 for no limit
+	uint32_t maxRecvMessageSize = scg::rpc::DEFAULT_MAX_RECV_MESSAGE_SIZE; // 0 disables the cap
 };
 
 class ServerTransportTCPTLS : public scg::rpc::ServerTransport, public std::enable_shared_from_this<ServerTransportTCPTLS> {

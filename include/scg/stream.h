@@ -307,6 +307,24 @@ public:
 		return sendFn_(serializeStreamHalfClose(streamID_));
 	}
 
+	// cancel terminates the whole stream from the client side: it best-effort
+	// notifies the server (so its handler is torn down) and fails the local recv
+	// with a cancelled error. Idempotent. This is the C++ analogue of cancelling
+	// the caller context in the Go client — C++ contexts carry only a deadline and
+	// do not propagate cancellation, so cancellation is explicit here. The stream's
+	// registry entry on the Client is reaped on disconnect.
+	error::Error cancel()
+	{
+		if (cancelled_.exchange(true)) {
+			return nullptr; // already cancelled
+		}
+		// Notify the server first (while the connection is up), then fail the
+		// local stream so a blocked recv() returns.
+		auto err = sendFn_(serializeStreamClose(streamID_, STREAM_STATUS_ERROR, "stream cancelled by client"));
+		queue_.die(error::Error("stream cancelled by client"));
+		return err;
+	}
+
 	StreamRecvState tryRecv(serialize::Reader& out, error::Error& err)
 	{
 		return queue_.tryRecv(out, err);
@@ -328,6 +346,7 @@ private:
 	uint64_t streamID_;
 	SendFn sendFn_;
 	std::atomic<bool> sendClosed_{false};
+	std::atomic<bool> cancelled_{false};
 	StreamRecvQueue queue_;
 };
 

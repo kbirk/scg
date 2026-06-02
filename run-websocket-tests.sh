@@ -25,6 +25,16 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# ========================================
+# Generate test code (Go + C++). The generated code is gitignored, so the
+# runner regenerates it to stay self-contained.
+# ========================================
+echo -e "${YELLOW}Generating test code...${NC}"
+if ! ./gen-test-code.sh > /dev/null 2>&1; then
+	echo -e "${RED}Test code generation failed${NC}"
+	exit 1
+fi
+
 # Function to cleanup background processes
 cleanup() {
 	if [ ! -z "$pid" ] && kill -0 $pid 2>/dev/null; then
@@ -41,7 +51,11 @@ trap cleanup EXIT INT TERM
 # Go WebSocket Tests (Go Client + Go Server)
 # ========================================
 echo -e "${YELLOW}Running Go WebSocket tests (Go Client + Go Server)...${NC}"
-run_with_timeout "Go WebSocket tests" go test -v -count=1 -run "^(TestWebSocket|TestWebSocketTLS)$" ./test/go/service_websocket_test.go ./test/go/service_test_suite.go ./test/go/test_utils.go
+# -race exercises the stream registries / keepalive concurrency. TestWebSocket
+# runs the full transport-agnostic suite over WebSocket — including the no-leak,
+# server-keepalive-healthy, and (via the suite) all streaming edge tests. The
+# transport-parameterized adversarial tests' ws subtests run from the TCP script.
+run_with_timeout "Go WebSocket tests" go test -race -v -count=1 -run "^(TestWebSocket|TestWebSocketTLS)$" ./test/go/
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go WebSocket tests passed${NC}"
 else

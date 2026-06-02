@@ -124,6 +124,13 @@ public:
 		return stream_->context();
 	}
 
+	// cancel terminates the stream from the client side, notifying the server so
+	// its handler is torn down and failing a blocked recv() with a cancelled error.
+	inline scg::error::Error cancel()
+	{
+		return stream_->cancel();
+	}
+
 private:
 	std::shared_ptr<scg::rpc::ClientStream> stream_;
 };
