@@ -1213,6 +1213,72 @@ inline void runContextTimeoutRecoveryTest(TestContext& ctx) {
 	printf("Context Timeout Recovery test passed\n");
 }
 
+// Verify that disconnecting the client unblocks an in-flight unary call instead
+// of leaving it hung forever. A deadline-less call blocks until its response
+// arrives or the request is failed, so the client must fail in-flight requests
+// when the connection goes away. This is the C++ analog of the Go "Close
+// notifies pending requests" fix.
+//
+// Unlike Go, the C++ client has no "clean close skips notification" gap: it
+// fails pending requests on every teardown path — disconnect()
+// (failPendingRequestsUnsafe), the connection close handler, the fail handler,
+// and keepalive timeout. So this is a contract test (the close handler also
+// backstops it); it cannot isolate a single notification the way the Go test
+// can, because the Go bug it mirrors simply does not exist here.
+//
+// The buffered-channel half of that Go fix likewise has no C++ analog —
+// responses are delivered with std::promise::set_value, which never blocks the
+// producer even if the caller has already abandoned the future.
+inline void runDisconnectUnblocksPendingRequestTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) {
+		printf("Skipping Disconnect Unblocks Pending Request test (using external server)\n");
+		return;
+	}
+
+	printf("Running Disconnect Unblocks Pending Request test...\n");
+
+	ctx.startServer();
+	auto client = ctx.createClient();
+
+	pingpong::PingPongClient pingPongClient(client);
+
+	std::atomic<bool> done{false};
+	std::atomic<bool> gotError{false};
+
+	std::thread caller([&]() {
+		// No deadline: the only thing that can unblock this call is the client
+		// failing the pending request on disconnect. The server sleeps far longer
+		// than the test, so the response cannot arrive on its own.
+		scg::context::Context context;
+		context.put("sleep", "10000");
+
+		pingpong::PingRequest req;
+		req.ping.count = 1;
+
+		auto [res, err] = pingPongClient.ping(context, req);
+		gotError.store(err != nullptr);
+		done.store(true);
+	});
+
+	// Give the request time to be sent and registered on the client.
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+	// Disconnect while the request is in flight; this must wake the blocked call.
+	client->disconnect();
+
+	// Wait up to 2s for the call to return rather than hang.
+	for (int i = 0; i < 200 && !done.load(); i++) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+
+	TEST_CHECK(done.load());      // call returned (was not left hanging)
+	TEST_CHECK(gotError.load());  // and returned an error
+
+	caller.join();
+	ctx.stopServer();
+	printf("Disconnect Unblocks Pending Request test passed\n");
+}
+
 // Test multiple clients
 inline void runMultipleClientsTest(TestContext& ctx) {
 	printf("Running Multiple Clients test...\n");
@@ -1984,6 +2050,12 @@ inline void runTestSuite(const TestSuiteConfig& config) {
 				printf("\n=== Running Context Timeout Recovery Test ===\n");
 				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
 				runContextTimeoutRecoveryTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Disconnect Unblocks Pending Request Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runDisconnectUnblocksPendingRequestTest(ctx);
 			}
 
 			{
