@@ -74,14 +74,25 @@ static constexpr uint64_t {{.MethodIDVarName}} = {{.MethodID}}UL;{{end}}
 {{range .ClientStreamMethods}}
 // {{.StreamTypeName}} is the client handle for the {{.MethodNameCamelCase}} stream.
 // Receiving is non-blocking via tryRecv() (drain from a game loop); a blocking
-// recv() is also provided. Sending is non-blocking.
+// recv() is also provided. send() blocks on flow-control credit; trySend() is
+// the non-blocking variant for a frame loop.
 class {{.StreamTypeName}} {
 public:
 	explicit {{.StreamTypeName}}(std::shared_ptr<scg::rpc::ClientStream> stream) : stream_(stream) {}
 {{if eq .Kind "bidi"}}
+	// send blocks until the stream has enough send credit (or it dies / closeSend
+	// is called), so a fast producer cannot outrun a slow server.
 	inline scg::error::Error send(const {{.ReqStructName}}& msg)
 	{
 		return stream_->send(msg);
+	}
+
+	// trySend is the non-blocking counterpart: (true, nil) when sent, (false, nil)
+	// when out of credit (hold the message and retry next frame), (false, err) on
+	// a terminal condition.
+	inline std::pair<bool, scg::error::Error> trySend(const {{.ReqStructName}}& msg)
+	{
+		return stream_->trySend(msg);
 	}
 {{template "cppClientRecv" .}}
 	inline scg::error::Error closeSend()
@@ -90,9 +101,19 @@ public:
 	}
 {{else if eq .Kind "server"}}
 {{template "cppClientRecv" .}}{{else}}
+	// send blocks until the stream has enough send credit (or it dies / closeSend
+	// is called), so a fast producer cannot outrun a slow server.
 	inline scg::error::Error send(const {{.ReqStructName}}& msg)
 	{
 		return stream_->send(msg);
+	}
+
+	// trySend is the non-blocking counterpart: (true, nil) when sent, (false, nil)
+	// when out of credit (hold the message and retry next frame), (false, err) on
+	// a terminal condition.
+	inline std::pair<bool, scg::error::Error> trySend(const {{.ReqStructName}}& msg)
+	{
+		return stream_->trySend(msg);
 	}
 
 	// closeAndRecv half-closes the send direction and blocks for the single response.

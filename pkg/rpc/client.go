@@ -25,6 +25,14 @@ type Client struct {
 	connGen       uint64       // bumped on each (re)connect; guards stale-connection teardown
 	lastActivity  atomic.Int64 // UnixNano of the last frame received (keepalive)
 	keepaliveStop chan struct{}
+
+	// Flow control: the server dictates the initial per-stream send window via the
+	// SETTINGS frame it sends first on each connection. settingsCh is closed once
+	// SETTINGS arrives (recreated per connection); a stream's first Send waits on
+	// it so the initial credit is known before sending.
+	settingsCh       chan struct{}
+	initialStreamWin atomic.Int64
+	initialConnWin   atomic.Int64
 }
 
 type ClientConfig struct {
@@ -48,6 +56,10 @@ func NewClient(conf ClientConfig) *Client {
 		mu:        &sync.Mutex{},
 		requests:  make(map[uint64]chan *serialize.Reader),
 		streams:   make(map[uint64]*ClientStream),
+		// IDs start at 1: stream id 0 is reserved for connection-level stream
+		// frames (SETTINGS, PING/PONG, the connection-level WINDOW_UPDATE), so a
+		// real stream must never take id 0.
+		requestID: 1,
 	}
 }
 
@@ -158,6 +170,13 @@ func (c *Client) connectUnsafe() error {
 	c.conn = conn
 	c.connGen++
 	gen := c.connGen
+
+	// Reset per-connection flow-control state: the server re-sends SETTINGS on
+	// every (re)connect. Done before the read goroutine starts so SETTINGS can
+	// never arrive before settingsCh exists.
+	c.settingsCh = make(chan struct{})
+	c.initialStreamWin.Store(0)
+	c.initialConnWin.Store(0)
 
 	go func() {
 		for {
@@ -393,6 +412,65 @@ func (c *Client) connection() Connection {
 	return conn
 }
 
+// initialStreamWindow returns the server-dictated per-stream send window (bytes)
+// for the current connection. Valid once SETTINGS has been received.
+func (c *Client) initialStreamWindow() int64 {
+	return c.initialStreamWin.Load()
+}
+
+// settingsReady reports whether the server's SETTINGS frame has arrived on the
+// current connection (so the initial send window is known).
+func (c *Client) settingsReady() bool {
+	c.mu.Lock()
+	ch := c.settingsCh
+	c.mu.Unlock()
+	if ch == nil {
+		return false
+	}
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// waitSettings blocks until the server's SETTINGS frame arrives (the initial
+// send window is known), or the context is cancelled, or the stream dies.
+func (c *Client) waitSettings(ctx context.Context, deadCh <-chan struct{}) error {
+	c.mu.Lock()
+	ch := c.settingsCh
+	c.mu.Unlock()
+	if ch == nil {
+		return nil
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-deadCh:
+		return ErrStreamClosed
+	}
+}
+
+// applySettings latches the server-dictated flow-control windows and wakes any
+// stream waiting to send. Called by the demux on SETTINGS receipt.
+func (c *Client) applySettings(initialStreamWin uint64, initialConnWin uint64) {
+	c.initialStreamWin.Store(int64(initialStreamWin))
+	c.initialConnWin.Store(int64(initialConnWin))
+	c.mu.Lock()
+	ch := c.settingsCh
+	// Close exactly once.
+	select {
+	case <-ch:
+		// already closed
+	default:
+		close(ch)
+	}
+	c.mu.Unlock()
+}
+
 // sendStreamFrame writes a pre-serialized stream frame to the connection.
 func (c *Client) sendStreamFrame(bs []byte, serviceID uint64) error {
 	conn := c.connection()
@@ -427,6 +505,40 @@ func (c *Client) handleStreamFrame(reader *serialize.Reader) error {
 	}
 	if frameKind == StreamFramePong {
 		return nil // liveness already recorded via lastActivity
+	}
+
+	// SETTINGS: the server dictates the initial flow-control windows. Latch them
+	// and unblock any stream waiting to send.
+	if frameKind == StreamFrameSettings {
+		var initStreamWin uint64
+		if err := serialize.DeserializeUInt64(&initStreamWin, reader); err != nil {
+			return err
+		}
+		var initConnWin uint64
+		if err := serialize.DeserializeUInt64(&initConnWin, reader); err != nil {
+			return err
+		}
+		c.applySettings(initStreamWin, initConnWin)
+		return nil
+	}
+
+	// WINDOW_UPDATE: the server grants more send credit as it consumes our
+	// messages. streamID 0 is the connection-level window (phase 3).
+	if frameKind == StreamFrameWindowUpdate {
+		var increment uint64
+		if err := serialize.DeserializeUInt64(&increment, reader); err != nil {
+			return err
+		}
+		if streamID == 0 {
+			return nil
+		}
+		c.mu.Lock()
+		stream, ok := c.streams[streamID]
+		c.mu.Unlock()
+		if ok {
+			stream.addSendCredit(int64(increment))
+		}
+		return nil
 	}
 
 	c.mu.Lock()

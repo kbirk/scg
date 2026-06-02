@@ -36,6 +36,14 @@ const (
 	StreamFrameClose     = uint8(0x04) // terminal: status + message
 	StreamFramePing      = uint8(0x05) // connection-level keepalive probe (stream id ignored)
 	StreamFramePong      = uint8(0x06) // connection-level keepalive reply (stream id ignored)
+	// StreamFrameWindowUpdate grants the sender `increment` more bytes of credit
+	// for a stream (or the whole connection when streamID == 0). Flow control.
+	StreamFrameWindowUpdate = uint8(0x07)
+	// StreamFrameSettings carries the server-dictated flow-control parameters. It
+	// is sent by the server only, as the first frame on every accepted connection
+	// (streamID == 0). The client obeys it; a client that sends SETTINGS is a
+	// protocol violation and the server closes the connection.
+	StreamFrameSettings = uint8(0x08)
 )
 
 // Stream close statuses, carried in a CLOSE frame.

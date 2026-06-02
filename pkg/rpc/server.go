@@ -35,6 +35,16 @@ type ServerConfig struct {
 	StreamRecvBufferSize int
 	// MaxConcurrentStreams caps live streams per connection (0 = unlimited).
 	MaxConcurrentStreams int
+	// InitialStreamWindow is the per-stream flow-control window in bytes the
+	// server grants each client for the client->server direction (0 = default,
+	// 1 MiB). It also bounds the per-stream receive buffer, so it must be at
+	// least as large as the biggest message a client may send. A client that
+	// sends beyond its granted credit overruns the window — a protocol violation
+	// that closes the connection.
+	InitialStreamWindow uint64
+	// InitialConnectionWindow is the connection-wide flow-control window in bytes
+	// (0 = default, 4 MiB). Reserved for the connection-level window (phase 3).
+	InitialConnectionWindow uint64
 }
 
 type serverStub interface {
@@ -241,6 +251,19 @@ func (s *Server) handleConnection(conn Connection) {
 	cs := newConnStreams()
 	defer cs.terminateAll(fmt.Errorf("connection closed"))
 
+	// Flow control is server-authoritative: dictate the windows up front via
+	// SETTINGS, the first frame on the connection, so the client knows its
+	// initial send credit before its first message (no startup stall).
+	if err := conn.Send(serializeStreamSettings(
+		initialStreamWindowOrDefault(s.conf.InitialStreamWindow),
+		initialConnectionWindowOrDefault(s.conf.InitialConnectionWindow)), 0); err != nil {
+		// Couldn't greet the client; nothing more to do on this connection.
+		if err.Error() != "connection closed" {
+			s.handleError(err)
+		}
+		return
+	}
+
 	for {
 		// read message
 		bs, err := conn.Receive()
@@ -269,8 +292,13 @@ func (s *Server) handleConnection(conn Connection) {
 
 		case StreamPrefix:
 			// Stream frames are routed inline on the read loop to preserve
-			// per-stream ordering; only the handler body runs concurrently.
-			s.handleStreamFrame(conn, cs, reader)
+			// per-stream ordering; only the handler body runs concurrently. A
+			// non-nil return is a fatal protocol violation (e.g. a client that
+			// exceeded its flow-control credit) — tear the connection down.
+			if ferr := s.handleStreamFrame(conn, cs, reader); ferr != nil {
+				s.handleError(ferr)
+				return
+			}
 
 		default:
 			s.handleError(fmt.Errorf("unexpected prefix: %v", prefix))
@@ -331,27 +359,48 @@ func (s *Server) handleUnaryRequest(conn Connection, reader *serialize.Reader) {
 }
 
 // handleStreamFrame routes one inbound stream frame. OPEN spawns a handler
-// goroutine; MSG/HALF_CLOSE/CLOSE are delivered to the existing stream.
-func (s *Server) handleStreamFrame(conn Connection, cs *connStreams, reader *serialize.Reader) {
+// goroutine; MSG/HALF_CLOSE/CLOSE are delivered to the existing stream. A
+// non-nil return is a fatal protocol violation: the caller closes the whole
+// connection. A malformed (but non-abusive) frame is logged and tolerated
+// (returns nil) so a single bad frame cannot take the connection down.
+func (s *Server) handleStreamFrame(conn Connection, cs *connStreams, reader *serialize.Reader) error {
+	frameLen := reader.Len()
+
 	var streamID uint64
 	if err := serialize.DeserializeUInt64(&streamID, reader); err != nil {
 		s.handleError(err)
-		return
+		return nil
 	}
 
 	var frameKind uint8
 	if err := serialize.DeserializeUInt8(&frameKind, reader); err != nil {
 		s.handleError(err)
-		return
+		return nil
 	}
 
 	// Connection-level keepalive frames are not associated with a stream.
 	if frameKind == StreamFramePing {
 		_ = conn.Send(serializeStreamControl(StreamFramePong), 0)
-		return
+		return nil
 	}
 	if frameKind == StreamFramePong {
-		return
+		return nil
+	}
+
+	// SETTINGS is server->client only; a client must never send it. Treat as a
+	// protocol violation and close the connection.
+	if frameKind == StreamFrameSettings {
+		return fmt.Errorf("protocol violation: client sent SETTINGS frame")
+	}
+
+	// WINDOW_UPDATE from the client replenishes the server's send credit
+	// (server->client direction, phase 2). Accepted and ignored until then.
+	if frameKind == StreamFrameWindowUpdate {
+		var increment uint64
+		if err := serialize.DeserializeUInt64(&increment, reader); err != nil {
+			s.handleError(err)
+		}
+		return nil
 	}
 
 	switch frameKind {
@@ -359,40 +408,41 @@ func (s *Server) handleStreamFrame(conn Connection, cs *connStreams, reader *ser
 		ctx := context.Background()
 		if err := DeserializeContext(&ctx, reader); err != nil {
 			s.handleError(err)
-			return
+			return nil
 		}
 		var serviceID uint64
 		if err := serialize.DeserializeUInt64(&serviceID, reader); err != nil {
 			s.handleError(err)
-			return
+			return nil
 		}
 		var methodID uint64
 		if err := serialize.DeserializeUInt64(&methodID, reader); err != nil {
 			s.handleError(err)
-			return
+			return nil
 		}
 
 		// Reject a duplicate stream id rather than orphaning the existing stream.
 		if cs.get(streamID) != nil {
 			_ = conn.Send(serializeStreamClose(streamID, StreamStatusError, "duplicate stream id"), serviceID)
-			return
+			return nil
 		}
 		// Enforce the per-connection concurrent-stream cap.
 		if max := s.conf.MaxConcurrentStreams; max > 0 && cs.count() >= max {
 			_ = conn.Send(serializeStreamClose(streamID, StreamStatusError, "max concurrent streams exceeded"), serviceID)
-			return
+			return nil
 		}
 
-		stream := newServerStream(conn, ctx, streamID, serviceID, s.conf.StreamRecvBufferSize)
+		stream := newServerStream(conn, ctx, streamID, serviceID, s.conf.InitialStreamWindow)
 		cs.add(streamID, stream)
 		go s.runStreamHandler(conn, cs, stream, methodID)
 
 	case StreamFrameMessage:
 		if st := cs.get(streamID); st != nil {
-			if st.deliver(reader) {
-				// Bounded buffer overflowed: notify the client and drop the stream.
-				_ = conn.Send(serializeStreamClose(streamID, StreamStatusError, errStreamOverflow.Error()), st.serviceID)
-				cs.remove(streamID)
+			// The frame's wire length is the flow-control cost; the client sized
+			// its send credit identically. An overflow means the client sent more
+			// than its granted credit — a protocol violation → close connection.
+			if st.deliver(reader, frameLen) {
+				return fmt.Errorf("protocol violation: stream %d exceeded flow-control window", streamID)
 			}
 		}
 
@@ -411,6 +461,7 @@ func (s *Server) handleStreamFrame(conn Connection, cs *connStreams, reader *ser
 	default:
 		s.handleError(fmt.Errorf("unknown stream frame kind: %d", frameKind))
 	}
+	return nil
 }
 
 // runStreamHandler validates/authorizes the stream and runs its handler to

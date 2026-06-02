@@ -32,6 +32,8 @@ namespace rpc {
 	constexpr uint8_t STREAM_FRAME_CLOSE = 0x04;       // terminal: status + message
 	constexpr uint8_t STREAM_FRAME_PING = 0x05;        // connection-level keepalive probe (stream id ignored)
 	constexpr uint8_t STREAM_FRAME_PONG = 0x06;        // connection-level keepalive reply (stream id ignored)
+	constexpr uint8_t STREAM_FRAME_WINDOW_UPDATE = 0x07; // grants `increment` more bytes of credit (streamID 0 = connection)
+	constexpr uint8_t STREAM_FRAME_SETTINGS = 0x08;    // server -> client only: dictated flow-control parameters (first frame)
 
 	// Stream close statuses, carried in a CLOSE frame.
 	constexpr uint8_t STREAM_STATUS_OK = 0x00;

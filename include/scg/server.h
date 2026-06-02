@@ -65,6 +65,16 @@ struct ServerConfig {
 	size_t streamRecvBufferSize = 0;
 	// maxConcurrentStreams caps live streams per connection (0 = unlimited).
 	size_t maxConcurrentStreams = 0;
+	// initialStreamWindow is the per-stream flow-control window in bytes the
+	// server grants each client for the client->server direction (0 = default,
+	// 1 MiB). It also bounds the per-stream receive buffer, so it must be at least
+	// as large as the biggest message a client may send. A client that sends
+	// beyond its granted credit overruns the window — a protocol violation that
+	// closes the connection.
+	uint64_t initialStreamWindow = 0;
+	// initialConnectionWindow is the connection-wide flow-control window in bytes
+	// (0 = default, 4 MiB). Reserved for the connection-level window (phase 3).
+	uint64_t initialConnectionWindow = 0;
 };
 
 // Server group for organizing services and middleware
@@ -302,6 +312,13 @@ private:
 			connections_[connID] = conn;
 		}
 
+		// Flow control is server-authoritative: dictate the windows up front via
+		// SETTINGS, the first frame on the connection, so the client knows its
+		// initial send credit before its first message (no startup stall).
+		conn->send(serializeStreamSettings(
+			initialStreamWindowOrDefault(config_.initialStreamWindow),
+			initialConnectionWindowOrDefault(config_.initialConnectionWindow)));
+
 		// Process messages using thread pool to avoid blocking io_context.
 		// Stream frames are routed inline on the I/O thread to preserve per-stream
 		// order; unary requests are dispatched to the pool.
@@ -393,6 +410,24 @@ private:
 		}
 	}
 
+	// closeConnection tears a connection down after a fatal protocol violation
+	// (e.g. a client that exceeded its flow-control credit, or sent SETTINGS). The
+	// connection's close handler fails its streams and removes it from the map.
+	void closeConnection(uint64_t connID)
+	{
+		std::shared_ptr<Connection> conn;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			auto it = connections_.find(connID);
+			if (it != connections_.end()) {
+				conn = it->second;
+			}
+		}
+		if (conn) {
+			conn->close();
+		}
+	}
+
 	// handleStreamFrame routes one inbound stream frame. OPEN spawns a handler
 	// thread; MSG/HALF_CLOSE/CLOSE are delivered to the existing stream. Runs on
 	// the transport I/O thread.
@@ -426,6 +461,21 @@ private:
 			return;
 		}
 
+		// SETTINGS is server->client only; a client must never send it. Treat as a
+		// protocol violation and close the connection.
+		if (frameKind == STREAM_FRAME_SETTINGS) {
+			closeConnection(connID);
+			return;
+		}
+
+		// WINDOW_UPDATE from the client replenishes the server's send credit
+		// (server->client direction, phase 2). Accepted and ignored until then.
+		if (frameKind == STREAM_FRAME_WINDOW_UPDATE) {
+			uint64_t increment = 0;
+			serialize::deserialize(increment, reader);
+			return;
+		}
+
 		if (frameKind == STREAM_FRAME_OPEN) {
 			context::Context ctx;
 			if (deserialize(ctx, reader)) {
@@ -450,7 +500,7 @@ private:
 				conn = it->second;
 			}
 
-			auto stream = std::make_shared<ServerStream>(conn, ctx, streamID, config_.streamRecvBufferSize);
+			auto stream = std::make_shared<ServerStream>(conn, ctx, streamID, config_.initialStreamWindow);
 			std::string rejectReason;
 			bool spawn = false;
 			{
@@ -499,19 +549,9 @@ private:
 		switch (frameKind) {
 			case STREAM_FRAME_MESSAGE:
 				if (stream->deliver(std::move(reader))) {
-					// Bounded buffer overflowed: notify the client and drop the stream.
-					std::shared_ptr<Connection> conn;
-					{
-						std::lock_guard<std::mutex> lock(mu_);
-						auto it = connections_.find(connID);
-						if (it != connections_.end()) {
-							conn = it->second;
-						}
-					}
-					if (conn) {
-						conn->send(serializeStreamClose(streamID, STREAM_STATUS_ERROR, "stream receive buffer overflow"));
-					}
-					removeStream(connID, streamID);
+					// The client sent more than its granted credit (byte window
+					// overrun) — a protocol violation. Close the whole connection.
+					closeConnection(connID);
 				}
 				break;
 			case STREAM_FRAME_HALF_CLOSE:

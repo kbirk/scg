@@ -16,6 +16,13 @@ func NewReader(data []byte) *Reader {
 	}
 }
 
+// Len returns the total number of bytes the reader was constructed with. For a
+// received frame this is its full wire size — used as the flow-control cost so
+// the sender (which sizes its writer identically) and receiver agree on credit.
+func (r *Reader) Len() int {
+	return len(r.bytes)
+}
+
 func errInsufficientData(available, needed int) error {
 	return fmt.Errorf("Reader does not contain enough data to fill the argument, num bytes available: %d, num bytes needed: %d", available, needed)
 }

@@ -103,6 +103,12 @@ public:
 		}
 
 		uint64_t streamID = requestID_++;
+		// Stream id 0 is reserved for connection-level stream frames (SETTINGS,
+		// PING/PONG, the connection-level WINDOW_UPDATE), so a real stream must
+		// never take id 0.
+		if (streamID == 0) {
+			streamID = requestID_++;
+		}
 
 		// Capture the connection (a shared_ptr that internally uses
 		// shared_from_this for async safety) rather than the Client. This binds
@@ -120,6 +126,13 @@ public:
 			config_.streamRecvBufferSize);
 
 		streams_[streamID] = stream;
+
+		// Flow control: if the server's SETTINGS already arrived, grant this
+		// stream its initial send window now; otherwise it is granted when
+		// SETTINGS is processed (see applySettingsUnsafe).
+		if (settingsReceived_) {
+			stream->addSendCredit(initialStreamWindow_);
+		}
 
 		err = sendBytesUnsafe(serializeStreamOpen(ctx, streamID, serviceID, methodID));
 		if (err) {
@@ -185,6 +198,26 @@ protected:
 		streams_.erase(streamID);
 	}
 
+	// applySettings latches the server-dictated flow-control windows and grants
+	// the initial send window to every live stream (those opened before SETTINGS
+	// arrived). Streams opened after this are granted in openStream.
+	void applySettings(uint64_t initialStreamWindow, uint64_t initialConnWindow)
+	{
+		std::vector<std::shared_ptr<ClientStream>> toGrant;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			initialStreamWindow_ = static_cast<int64_t>(initialStreamWindow);
+			initialConnWindow_ = initialConnWindow;
+			settingsReceived_ = true;
+			for (auto& pair : streams_) {
+				toGrant.push_back(pair.second);
+			}
+		}
+		for (auto& s : toGrant) {
+			s->addSendCredit(static_cast<int64_t>(initialStreamWindow));
+		}
+	}
+
 	// handleStreamFrame routes one inbound stream frame to its ClientStream.
 	// Runs on the transport I/O thread (via onMessage), preserving per-stream order.
 	void handleStreamFrame(serialize::Reader& reader)
@@ -212,6 +245,45 @@ protected:
 		}
 		if (frameKind == STREAM_FRAME_PONG) {
 			return; // liveness already recorded via lastActivity
+		}
+
+		// SETTINGS: the server dictates the initial flow-control windows. Latch
+		// them and grant the initial send window to every live stream.
+		if (frameKind == STREAM_FRAME_SETTINGS) {
+			uint64_t initStreamWin = 0;
+			if (serialize::deserialize(initStreamWin, reader)) {
+				return;
+			}
+			uint64_t initConnWin = 0;
+			if (serialize::deserialize(initConnWin, reader)) {
+				return;
+			}
+			applySettings(initStreamWin, initConnWin);
+			return;
+		}
+
+		// WINDOW_UPDATE: the server grants more send credit as it consumes our
+		// messages. streamID 0 is the connection-level window (phase 3).
+		if (frameKind == STREAM_FRAME_WINDOW_UPDATE) {
+			uint64_t increment = 0;
+			if (serialize::deserialize(increment, reader)) {
+				return;
+			}
+			if (streamID == 0) {
+				return;
+			}
+			std::shared_ptr<ClientStream> stream;
+			{
+				std::lock_guard<std::mutex> lock(mu_);
+				auto it = streams_.find(streamID);
+				if (it != streams_.end()) {
+					stream = it->second;
+				}
+			}
+			if (stream) {
+				stream->addSendCredit(static_cast<int64_t>(increment));
+			}
+			return;
 		}
 
 		std::shared_ptr<ClientStream> stream;
@@ -280,6 +352,12 @@ protected:
 
 		connection_ = result.first;
 		status_ = ConnectionStatus::CONNECTED;
+
+		// Reset per-connection flow-control state: the server re-sends SETTINGS on
+		// every (re)connect.
+		settingsReceived_ = false;
+		initialStreamWindow_ = 0;
+		initialConnWindow_ = 0;
 
 		// Each connection gets a generation; a fail/close handler from a connection
 		// that has since been replaced (e.g. after a reconnect) must not tear down
@@ -581,6 +659,12 @@ private:
 
 	// Bumped on each (re)connect so stale connection handlers can be ignored.
 	uint64_t connectionGeneration_ = 0;
+
+	// Flow control: the server dictates the initial windows via SETTINGS (its
+	// first frame on each connection). Guarded by mu_.
+	bool settingsReceived_ = false;
+	int64_t initialStreamWindow_ = 0;
+	uint64_t initialConnWindow_ = 0;
 
 	// Keepalive state.
 	std::atomic<int64_t> lastActivityNs_{0};

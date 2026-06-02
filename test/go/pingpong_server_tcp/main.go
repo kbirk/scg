@@ -9,6 +9,7 @@ import (
 
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/rpc/tcp"
+	"github.com/kbirk/scg/test/go/streamimpl"
 	"github.com/kbirk/scg/test/scg/generated/pingpong"
 )
 
@@ -50,6 +51,7 @@ func main() {
 		},
 	})
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	pingpong.RegisterChatServer(server, &streamimpl.ChatServer{})
 
 	fmt.Println("Starting TCP server on port", port)
 	err := server.ListenAndServe()

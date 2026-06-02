@@ -34,6 +34,38 @@ inline size_t streamRecvBufferSizeOrDefault(size_t size)
 	return size > 0 ? size : DEFAULT_STREAM_RECV_BUFFER_SIZE;
 }
 
+// Flow control (credit-based, server-authoritative). The server dictates these
+// byte windows via the SETTINGS frame on every accepted connection. The
+// per-stream window also bounds the receive buffer: a sender that exceeds its
+// granted credit overruns the window — a protocol violation.
+constexpr uint64_t DEFAULT_INITIAL_STREAM_WINDOW = 1u << 20;     // 1 MiB per-stream window
+constexpr uint64_t DEFAULT_INITIAL_CONNECTION_WINDOW = 4u << 20; // 4 MiB connection window (phase 3)
+
+inline uint64_t initialStreamWindowOrDefault(uint64_t n)
+{
+	return n > 0 ? n : DEFAULT_INITIAL_STREAM_WINDOW;
+}
+
+inline uint64_t initialConnectionWindowOrDefault(uint64_t n)
+{
+	return n > 0 ? n : DEFAULT_INITIAL_CONNECTION_WINDOW;
+}
+
+// streamMessageCost returns the exact wire byte size of a MESSAGE frame for msg
+// on the given stream — the unit of flow-control credit. The receiver derives
+// the identical value from the received frame's length (Reader::size), so both
+// ends agree on cost.
+template <typename T>
+inline size_t streamMessageCost(uint64_t streamID, const T& msg)
+{
+	using scg::serialize::bit_size;
+	return scg::serialize::bits_to_bytes(
+		bit_size(STREAM_PREFIX) +
+		bit_size(streamID) +
+		bit_size(STREAM_FRAME_MESSAGE) +
+		bit_size(msg));
+}
+
 // StreamRecvState is the tri-state result of a (non-blocking) receive. A frame
 // loop must distinguish "nothing yet" from "stream ended" without blocking.
 enum class StreamRecvState {
@@ -130,6 +162,49 @@ inline std::vector<uint8_t> serializeStreamHalfClose(uint64_t streamID)
 	return writer.bytes();
 }
 
+// serializeStreamWindowUpdate grants `increment` more bytes of credit to the
+// sender on that stream (or the whole connection when streamID == 0).
+inline std::vector<uint8_t> serializeStreamWindowUpdate(uint64_t streamID, uint64_t increment)
+{
+	using scg::serialize::bit_size;
+
+	serialize::Writer writer(
+		scg::serialize::bits_to_bytes(
+			bit_size(STREAM_PREFIX) +
+			bit_size(streamID) +
+			bit_size(STREAM_FRAME_WINDOW_UPDATE) +
+			bit_size(increment)));
+
+	writer.write(STREAM_PREFIX);
+	writer.write(streamID);
+	writer.write(STREAM_FRAME_WINDOW_UPDATE);
+	writer.write(increment);
+	return writer.bytes();
+}
+
+// serializeStreamSettings builds the server-dictated SETTINGS frame (streamID
+// 0). Sent by the server only, as the first frame on each accepted connection.
+inline std::vector<uint8_t> serializeStreamSettings(uint64_t initialStreamWindow, uint64_t initialConnectionWindow)
+{
+	using scg::serialize::bit_size;
+
+	uint64_t streamID = 0;
+	serialize::Writer writer(
+		scg::serialize::bits_to_bytes(
+			bit_size(STREAM_PREFIX) +
+			bit_size(streamID) +
+			bit_size(STREAM_FRAME_SETTINGS) +
+			bit_size(initialStreamWindow) +
+			bit_size(initialConnectionWindow)));
+
+	writer.write(STREAM_PREFIX);
+	writer.write(streamID);
+	writer.write(STREAM_FRAME_SETTINGS);
+	writer.write(initialStreamWindow);
+	writer.write(initialConnectionWindow);
+	return writer.bytes();
+}
+
 inline std::vector<uint8_t> serializeStreamClose(uint64_t streamID, uint8_t status, const std::string& message)
 {
 	using scg::serialize::bit_size;
@@ -158,28 +233,32 @@ inline std::vector<uint8_t> serializeStreamClose(uint64_t streamID, uint8_t stat
 
 class StreamRecvQueue {
 public:
-	explicit StreamRecvQueue(size_t bufferSize)
-		: bufferSize_(bufferSize)
+	// maxBytes bounds buffered *bytes* (not message count) so a window's worth of
+	// tiny messages cannot blow memory.
+	explicit StreamRecvQueue(size_t maxBytes)
+		: maxBytes_(maxBytes)
 	{
 	}
 
-	// deliver enqueues an inbound message (positioned at its payload). Returns
-	// true if the bounded buffer overflowed, in which case the stream is now dead
-	// and the caller must notify the peer. Never blocks the producer.
-	bool deliver(serialize::Reader&& reader)
+	// deliver enqueues an inbound message (positioned at its payload) tagged with
+	// its wire cost. Returns true if the byte window was exceeded — i.e. the peer
+	// sent more than its granted credit — in which case the stream is now dead and
+	// the caller must respond to the violation. Never blocks the producer.
+	bool deliver(serialize::Reader&& reader, size_t cost)
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		if (recvClosed_) {
 			return false;
 		}
-		if (queue_.size() >= bufferSize_) {
+		if (bytes_ + cost > maxBytes_) {
 			dead_ = true;
 			recvClosed_ = true;
 			recvErr_ = error::Error("stream receive buffer overflow");
 			cv_.notify_all();
 			return true;
 		}
-		queue_.push_back(std::move(reader));
+		queue_.push_back(std::make_pair(std::move(reader), cost));
+		bytes_ += cost;
 		cv_.notify_all();
 		return false;
 	}
@@ -215,12 +294,19 @@ public:
 	}
 
 	// tryRecv never blocks. Buffered messages are returned before the terminal.
-	StreamRecvState tryRecv(serialize::Reader& out, error::Error& err)
+	// If costOut is non-null it receives the consumed message's wire cost (so the
+	// receiver can replenish exactly that many bytes of credit).
+	StreamRecvState tryRecv(serialize::Reader& out, error::Error& err, size_t* costOut = nullptr)
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		if (!queue_.empty()) {
-			out = std::move(queue_.front());
+			out = std::move(queue_.front().first);
+			size_t cost = queue_.front().second;
 			queue_.pop_front();
+			bytes_ -= cost;
+			if (costOut) {
+				*costOut = cost;
+			}
 			return StreamRecvState::Message;
 		}
 		if (recvClosed_) {
@@ -231,13 +317,18 @@ public:
 	}
 
 	// recv blocks until a message arrives or the stream terminates.
-	StreamRecvState recv(serialize::Reader& out, error::Error& err)
+	StreamRecvState recv(serialize::Reader& out, error::Error& err, size_t* costOut = nullptr)
 	{
 		std::unique_lock<std::mutex> lock(mu_);
 		cv_.wait(lock, [this]() { return !queue_.empty() || recvClosed_; });
 		if (!queue_.empty()) {
-			out = std::move(queue_.front());
+			out = std::move(queue_.front().first);
+			size_t cost = queue_.front().second;
 			queue_.pop_front();
+			bytes_ -= cost;
+			if (costOut) {
+				*costOut = cost;
+			}
 			return StreamRecvState::Message;
 		}
 		err = recvErr_;
@@ -245,10 +336,11 @@ public:
 	}
 
 private:
-	size_t bufferSize_;
+	size_t maxBytes_;
+	size_t bytes_ = 0;
 	std::mutex mu_;
 	std::condition_variable cv_;
-	std::deque<serialize::Reader> queue_;
+	std::deque<std::pair<serialize::Reader, size_t>> queue_;
 	bool recvClosed_ = false;
 	error::Error recvErr_;
 	bool dead_ = false;
@@ -267,7 +359,9 @@ public:
 		: ctx_(ctx)
 		, streamID_(streamID)
 		, sendFn_(std::move(sendFn))
-		, queue_(streamRecvBufferSizeOrDefault(bufferSize))
+		// The client's inbound (server->client) buffer is byte-bounded; until S2C
+		// flow control (phase 2) it is just a generous safety bound.
+		, queue_(bufferSize > 0 ? bufferSize : static_cast<size_t>(DEFAULT_INITIAL_STREAM_WINDOW))
 	{
 	}
 
@@ -281,18 +375,65 @@ public:
 		return streamID_;
 	}
 
-	// Send writes a message to the server. Non-blocking; fails once the stream is
-	// dead or after closeSend. A server half-close does not stop the client.
+	// send writes a message to the server. Under flow control it BLOCKS until the
+	// stream has enough send credit (or the stream dies / closeSend is called), so
+	// a fast producer cannot outrun a slow server. Frame-loop callers that must
+	// not block should use trySend.
 	template <typename T>
 	error::Error send(const T& msg)
 	{
-		if (queue_.isDead()) {
+		size_t cost = streamMessageCost(streamID_, msg);
+		std::unique_lock<std::mutex> lock(sendMu_);
+		sendCv_.wait(lock, [&]() {
+			return sendDead_ || sendClosed_.load() || sendCredit_ >= static_cast<int64_t>(cost);
+		});
+		if (sendDead_) {
 			return error::Error("stream closed");
 		}
 		if (sendClosed_.load()) {
 			return error::Error("stream send is already closed");
 		}
+		sendCredit_ -= static_cast<int64_t>(cost);
+		lock.unlock();
 		return sendFn_(serializeStreamMessage(streamID_, msg));
+	}
+
+	// trySend is the non-blocking counterpart to send: it sends and returns
+	// (true, nil) when credit is available, (false, nil) when the stream is out of
+	// credit (hold the message and retry next frame), or (false, err) on a
+	// terminal condition.
+	template <typename T>
+	std::pair<bool, error::Error> trySend(const T& msg)
+	{
+		size_t cost = streamMessageCost(streamID_, msg);
+		std::unique_lock<std::mutex> lock(sendMu_);
+		if (sendDead_) {
+			return std::make_pair(false, error::Error("stream closed"));
+		}
+		if (sendClosed_.load()) {
+			return std::make_pair(false, error::Error("stream send is already closed"));
+		}
+		if (sendCredit_ < static_cast<int64_t>(cost)) {
+			return std::make_pair(false, error::Error(nullptr)); // out of credit
+		}
+		sendCredit_ -= static_cast<int64_t>(cost);
+		lock.unlock();
+		auto err = sendFn_(serializeStreamMessage(streamID_, msg));
+		if (err) {
+			return std::make_pair(false, err);
+		}
+		return std::make_pair(true, error::Error(nullptr));
+	}
+
+	// addSendCredit grants n more bytes of send credit (the initial window from
+	// SETTINGS, or a WINDOW_UPDATE) and wakes a blocked send. Called by the Client.
+	void addSendCredit(int64_t n)
+	{
+		{
+			std::lock_guard<std::mutex> lock(sendMu_);
+			sendCredit_ += n;
+		}
+		sendCv_.notify_all();
 	}
 
 	// closeSend signals the client is done sending; it may still receive.
@@ -301,6 +442,7 @@ public:
 		if (sendClosed_.exchange(true)) {
 			return nullptr; // already closed
 		}
+		sendCv_.notify_all(); // wake a blocked send so it observes the close
 		if (queue_.isDead()) {
 			return nullptr;
 		}
@@ -318,10 +460,22 @@ public:
 	}
 
 	// internal (called by the Client demux on the I/O thread). deliver returns
-	// true if the bounded buffer overflowed (caller must notify the peer).
-	bool deliver(serialize::Reader&& reader) { return queue_.deliver(std::move(reader)); }
+	// true if the byte window overflowed (caller must notify the peer).
+	bool deliver(serialize::Reader&& reader)
+	{
+		size_t cost = reader.size();
+		return queue_.deliver(std::move(reader), cost);
+	}
 	void closeRecv(error::Error err) { queue_.closeRecv(err); }
-	void die(error::Error err) { queue_.die(err); }
+	void die(error::Error err)
+	{
+		queue_.die(err);
+		{
+			std::lock_guard<std::mutex> lock(sendMu_);
+			sendDead_ = true;
+		}
+		sendCv_.notify_all();
+	}
 
 private:
 	context::Context ctx_;
@@ -329,6 +483,13 @@ private:
 	SendFn sendFn_;
 	std::atomic<bool> sendClosed_{false};
 	StreamRecvQueue queue_;
+
+	// C2S flow control: send credit in bytes, shared between the app thread (send)
+	// and the I/O thread (addSendCredit on WINDOW_UPDATE / SETTINGS).
+	std::mutex sendMu_;
+	std::condition_variable sendCv_;
+	int64_t sendCredit_ = 0;
+	bool sendDead_ = false;
 };
 
 // ----------------------------------------------------------------------------
@@ -338,11 +499,12 @@ private:
 
 class ServerStream {
 public:
-	ServerStream(std::shared_ptr<Connection> conn, const context::Context& ctx, uint64_t streamID, size_t bufferSize)
+	ServerStream(std::shared_ptr<Connection> conn, const context::Context& ctx, uint64_t streamID, uint64_t window)
 		: conn_(conn)
 		, ctx_(ctx)
 		, streamID_(streamID)
-		, queue_(streamRecvBufferSizeOrDefault(bufferSize))
+		, queue_(static_cast<size_t>(initialStreamWindowOrDefault(window)))
+		, threshold_(static_cast<int64_t>(initialStreamWindowOrDefault(window)) / 2)
 	{
 	}
 
@@ -369,25 +531,62 @@ public:
 
 	StreamRecvState tryRecv(serialize::Reader& out, error::Error& err)
 	{
-		return queue_.tryRecv(out, err);
+		size_t cost = 0;
+		auto state = queue_.tryRecv(out, err, &cost);
+		if (state == StreamRecvState::Message) {
+			replenish(cost);
+		}
+		return state;
 	}
 
 	StreamRecvState recv(serialize::Reader& out, error::Error& err)
 	{
-		return queue_.recv(out, err);
+		size_t cost = 0;
+		auto state = queue_.recv(out, err, &cost);
+		if (state == StreamRecvState::Message) {
+			replenish(cost);
+		}
+		return state;
 	}
 
-	// internal (called by the server demux). deliver returns true if the bounded
-	// buffer overflowed (caller must notify the peer).
-	bool deliver(serialize::Reader&& reader) { return queue_.deliver(std::move(reader)); }
+	// internal (called by the server demux). deliver returns true if the client
+	// exceeded its granted credit (byte window overrun) — a protocol violation.
+	bool deliver(serialize::Reader&& reader)
+	{
+		size_t cost = reader.size();
+		return queue_.deliver(std::move(reader), cost);
+	}
 	void halfClose() { queue_.closeRecv(nullptr); } // clean EOF; handler may still send
 	void die(error::Error err) { queue_.die(err); }
 
 private:
+	// replenish accrues freed bytes and grants them back to the client as a
+	// batched WINDOW_UPDATE once the threshold is crossed, replenishing its send
+	// credit (rather than one control frame per message).
+	void replenish(size_t cost)
+	{
+		int64_t grant = 0;
+		{
+			std::lock_guard<std::mutex> lock(replenishMu_);
+			pendingGrant_ += static_cast<int64_t>(cost);
+			if (pendingGrant_ < threshold_) {
+				return;
+			}
+			grant = pendingGrant_;
+			pendingGrant_ = 0;
+		}
+		conn_->send(serializeStreamWindowUpdate(streamID_, static_cast<uint64_t>(grant)));
+	}
+
 	std::shared_ptr<Connection> conn_;
 	context::Context ctx_;
 	uint64_t streamID_;
 	StreamRecvQueue queue_;
+
+	// C2S flow control replenishment state.
+	int64_t threshold_;
+	std::mutex replenishMu_;
+	int64_t pendingGrant_ = 0;
 };
 
 } // namespace rpc

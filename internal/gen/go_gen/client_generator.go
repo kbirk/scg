@@ -81,9 +81,20 @@ type {{.StreamTypeName}} struct {
 	stream *rpc.ClientStream
 }
 {{if eq .Kind "bidi"}}
-// Send writes a message to the server. It does not block on the peer.
+// Send writes a message to the server. Under flow control it blocks until the
+// stream has enough send credit (or it dies / the context is cancelled), so a
+// fast producer cannot outrun a slow server. Frame-loop callers should use
+// TrySend instead.
 func (s *{{.StreamTypeName}}) Send(req *{{.ReqStructName}}) error {
 	return s.stream.Send(req)
+}
+
+// TrySend is the non-blocking counterpart to Send: it sends and returns
+// (true, nil) when credit is available, (false, nil) when the stream is out of
+// credit (hold the message and retry next frame), or (false, err) on a terminal
+// condition.
+func (s *{{.StreamTypeName}}) TrySend(req *{{.ReqStructName}}) (bool, error) {
+	return s.stream.TrySend(req)
 }
 
 // Recv blocks for the next server message; returns io.EOF on a clean close.
@@ -117,9 +128,20 @@ func (s *{{.StreamTypeName}}) Recv() (*{{.RespStructName}}, error) {
 	return resp, nil
 }
 {{else}}
-// Send writes a message to the server. It does not block on the peer.
+// Send writes a message to the server. Under flow control it blocks until the
+// stream has enough send credit (or it dies / the context is cancelled), so a
+// fast producer cannot outrun a slow server. Frame-loop callers should use
+// TrySend instead.
 func (s *{{.StreamTypeName}}) Send(req *{{.ReqStructName}}) error {
 	return s.stream.Send(req)
+}
+
+// TrySend is the non-blocking counterpart to Send: it sends and returns
+// (true, nil) when credit is available, (false, nil) when the stream is out of
+// credit (hold the message and retry next frame), or (false, err) on a terminal
+// condition.
+func (s *{{.StreamTypeName}}) TrySend(req *{{.ReqStructName}}) (bool, error) {
+	return s.stream.TrySend(req)
 }
 
 // CloseAndRecv half-closes the send direction and blocks for the single response.

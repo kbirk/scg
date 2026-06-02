@@ -170,6 +170,14 @@ public:
 	{
 	}
 
+	// size returns the total number of bytes the reader was constructed with. For
+	// a received frame this is its full wire size — used as the flow-control cost
+	// so sender and receiver agree on credit.
+	inline size_t size() const
+	{
+		return bytes_.size();
+	}
+
 	template <typename T>
 	inline error::Error read(T& data)
 	{
