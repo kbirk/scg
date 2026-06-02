@@ -72,6 +72,7 @@ public:
 		if (io_context_.stopped()) {
 			io_context_.restart();
 		}
+		// Single io thread — see ServerTransportTCP::runEventLoop().
 		io_context_.run();
 	}
 

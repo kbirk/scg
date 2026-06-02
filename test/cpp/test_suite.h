@@ -2010,9 +2010,12 @@ inline void runServerKeepaliveDeadClientTest(TestContext& ctx) {
 	TEST_CHECK(connRes.second == nullptr);
 	auto conn = connRes.first;
 	auto closed = std::make_shared<std::atomic<bool>>(false);
-	conn->setMessageHandler([](const std::vector<uint8_t>&) {});
+	// setMessageHandler starts the read loop on an io thread, so the fail/close
+	// handlers it may invoke must be installed first (the same order the Client
+	// uses) — otherwise the io thread races the handler assignment.
 	conn->setCloseHandler([closed]() { closed->store(true); });
 	conn->setFailHandler([closed](const scg::error::Error&) { closed->store(true); });
+	conn->setMessageHandler([](const std::vector<uint8_t>&) {});
 
 	bool ok = false;
 	auto start = std::chrono::steady_clock::now();

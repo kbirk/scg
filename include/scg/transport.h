@@ -17,7 +17,9 @@ public:
 	// Send binary data over the connection
 	virtual error::Error send(const std::vector<uint8_t>& data) = 0;
 
-	// Set callback for when messages are received
+	// Set callback for when messages are received. This starts the read loop, so
+	// it must be called LAST — after setFailHandler/setCloseHandler — otherwise
+	// the io thread may read those handlers while they are still being assigned.
 	virtual void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) = 0;
 
 	// Set callback for when connection fails
