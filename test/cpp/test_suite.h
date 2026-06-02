@@ -20,6 +20,7 @@
 #include "scg/middleware.h"
 #include "pingpong/pingpong.h"
 #include "basic/service.h"
+#include "chat_impl.h"
 
 // ============================================================================
 // Transport Factory Interface (similar to Go's TransportFactory)
@@ -116,92 +117,9 @@ public:
 	}
 };
 
-// Chat (streaming) server implementation. On open it pushes a "welcome"
-// message, then echoes each client message; a "fail" message terminates the
-// stream with an error. When the client half-closes it sends a "summary" with
-// the echo count and returns (clean close).
-class ChatServerImpl : public pingpong::ChatServer {
-public:
-	scg::error::Error connect(std::shared_ptr<pingpong::Chat_ConnectStreamServer> stream) override {
-		pingpong::ChatMessage welcome;
-		welcome.text = "welcome";
-		welcome.seq = 0;
-		auto err = stream->send(welcome);
-		if (err) {
-			return err;
-		}
-
-		int32_t count = 0;
-		for (;;) {
-			auto r = stream->recv();
-			if (r.state == scg::rpc::StreamRecvState::Closed) {
-				if (r.error) {
-					return r.error; // client cancelled / connection dropped
-				}
-				// client half-closed: send a final summary and close cleanly
-				pingpong::ChatMessage summary;
-				summary.text = "summary";
-				summary.seq = count;
-				return stream->send(summary);
-			}
-			if (r.message.text == "fail") {
-				return scg::error::Error("requested failure");
-			}
-			if (r.message.text == "flood") {
-				// Push many messages rapidly to overflow a slow client's bounded buffer.
-				for (int i = 0; i < 100; i++) {
-					pingpong::ChatMessage f;
-					f.text = "flood-" + std::to_string(i);
-					f.seq = i;
-					auto e = stream->send(f);
-					if (e) {
-						return e;
-					}
-				}
-				continue;
-			}
-			count++;
-			pingpong::ChatMessage echo;
-			echo.text = "echo:" + r.message.text;
-			echo.seq = r.message.seq + 1;
-			err = stream->send(echo);
-			if (err) {
-				return err;
-			}
-		}
-	}
-
-	// Subscribe is a server-streaming handler: push req.count events and return.
-	scg::error::Error subscribe(const pingpong::SubscribeRequest& req, std::shared_ptr<pingpong::Chat_SubscribeStreamServer> stream) override {
-		for (int32_t i = 0; i < req.count; i++) {
-			pingpong::ChatMessage m;
-			m.text = "event-" + std::to_string(i);
-			m.seq = i;
-			auto err = stream->send(m);
-			if (err) {
-				return err;
-			}
-		}
-		return nullptr;
-	}
-
-	// Upload is a client-streaming handler: sum the seqs and return a summary.
-	std::pair<pingpong::UploadSummary, scg::error::Error> upload(std::shared_ptr<pingpong::Chat_UploadStreamServer> stream) override {
-		int32_t total = 0;
-		for (;;) {
-			auto r = stream->recv();
-			if (r.state == scg::rpc::StreamRecvState::Closed) {
-				if (r.error) {
-					return std::make_pair(pingpong::UploadSummary{}, r.error);
-				}
-				pingpong::UploadSummary summary;
-				summary.total = total;
-				return std::make_pair(summary, nullptr);
-			}
-			total += r.message.seq;
-		}
-	}
-};
+// The Chat streaming service implementation (ChatServerImpl) is defined in the
+// shared chat_impl.h so the standalone cross-language test servers behave
+// identically to the in-process suite.
 
 // ============================================================================
 // Middleware
@@ -1325,9 +1243,10 @@ inline void registerStreamingServices(scg::rpc::Server* server) {
 // Full bidi lifecycle: server push on open, client send + server echo,
 // half-close, final summary, then a clean close.
 inline void runStreamBidiTest(TestContext& ctx) {
-	if (ctx.isUsingExternalServer()) return;
 	printf("Running Stream Bidi test...\n");
 
+	// startServerWithSetup / stopServer are no-ops against an external server, so
+	// this runs unchanged in-process and cross-language.
 	ctx.startServerWithSetup(registerStreamingServices);
 	auto client = ctx.createClient();
 	pingpong::ChatClient chatClient(client);
@@ -1783,7 +1702,6 @@ inline void runStreamMaxConcurrentTest(TestContext& ctx) {
 
 // Server-streaming form: the client sends a single request and reads a stream.
 inline void runStreamServerStreamingTest(TestContext& ctx) {
-	if (ctx.isUsingExternalServer()) return;
 	printf("Running Stream Server-Streaming test...\n");
 
 	ctx.startServerWithSetup(registerStreamingServices);
@@ -1817,7 +1735,6 @@ inline void runStreamServerStreamingTest(TestContext& ctx) {
 
 // Client-streaming form: the client sends a stream and reads a single response.
 inline void runStreamClientStreamingTest(TestContext& ctx) {
-	if (ctx.isUsingExternalServer()) return;
 	printf("Running Stream Client-Streaming test...\n");
 
 	ctx.startServerWithSetup(registerStreamingServices);
@@ -1999,12 +1916,6 @@ inline void runTestSuite(const TestSuiteConfig& config) {
 			}
 
 			{
-				printf("\n=== Running Stream Bidi Test ===\n");
-				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
-				runStreamBidiTest(ctx);
-			}
-
-			{
 				printf("\n=== Running Stream Server Error Test ===\n");
 				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
 				runStreamServerErrorTest(ctx);
@@ -2065,23 +1976,31 @@ inline void runTestSuite(const TestSuiteConfig& config) {
 			}
 
 			{
-				printf("\n=== Running Stream Server-Streaming Test ===\n");
-				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
-				runStreamServerStreamingTest(ctx);
-			}
-
-			{
-				printf("\n=== Running Stream Client-Streaming Test ===\n");
-				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
-				runStreamClientStreamingTest(ctx);
-			}
-
-			{
 				printf("\n=== Running Stream Keepalive Test ===\n");
 				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
 				runStreamKeepaliveTest(ctx);
 			}
 		}
+	}
+
+	// Streaming tests that run both in-process and against an external
+	// (cross-language) server — these validate the stream wire framing interops.
+	{
+		printf("\n=== Running Stream Bidi Test ===\n");
+		TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+		runStreamBidiTest(ctx);
+	}
+
+	{
+		printf("\n=== Running Stream Server-Streaming Test ===\n");
+		TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+		runStreamServerStreamingTest(ctx);
+	}
+
+	{
+		printf("\n=== Running Stream Client-Streaming Test ===\n");
+		TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+		runStreamClientStreamingTest(ctx);
 	}
 
 	// Tests that work with external server

@@ -42,7 +42,7 @@ trap cleanup EXIT INT TERM
 # Go TCP Tests (Go Client + Go Server)
 # ========================================
 echo -e "${YELLOW}Running Go TCP tests (Go Client + Go Server)...${NC}"
-run_with_timeout "Go TCP tests" go test -v -count=1 -run "^(TestTCP|TestTCPTLS)$" ./test/go/service_tcp_test.go ./test/go/service_test_suite.go ./test/go/test_utils.go
+run_with_timeout "Go TCP tests" go test -v -count=1 -run "^(TestTCP|TestTCPTLS|TestStreamHandlerNoLeak|TestServerSurvivesMalformedFrames|TestStreamKeepaliveTimeout|TestStreamKeepaliveReconnect)$" ./test/go/service_tcp_test.go ./test/go/service_test_suite.go ./test/go/service_leak_test.go ./test/go/service_malformed_test.go ./test/go/service_keepalive_test.go ./test/go/test_utils.go
 if [ $? -eq 0 ]; then
 	echo -e "${GREEN}Go TCP tests passed${NC}"
 else

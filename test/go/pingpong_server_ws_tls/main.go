@@ -9,6 +9,7 @@ import (
 
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/rpc/websocket"
+	"github.com/kbirk/scg/test/go/chat"
 	"github.com/kbirk/scg/test/scg/generated/pingpong"
 )
 
@@ -57,6 +58,7 @@ func main() {
 		},
 	})
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
+	pingpong.RegisterChatServer(server, &chat.ChatServer{})
 
 	fmt.Println("Starting TLS server on port", port)
 	err := server.ListenAndServe()

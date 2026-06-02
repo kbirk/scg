@@ -2,7 +2,6 @@ package test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/kbirk/scg/pkg/rpc"
 	"github.com/kbirk/scg/pkg/rpc/tcp"
 	"github.com/kbirk/scg/pkg/rpc/websocket"
+	"github.com/kbirk/scg/test/go/chat"
 	"github.com/kbirk/scg/test/scg/generated/basic"
 	"github.com/kbirk/scg/test/scg/generated/pingpong"
 
@@ -154,10 +154,6 @@ func RunTestSuite(t *testing.T, config TestSuiteConfig) {
 				runContextMetadataTest(t, config.Factory, port)
 			})
 
-			t.Run("StreamBidi", func(t *testing.T) {
-				runStreamBidiTest(t, config.Factory, port)
-			})
-
 			t.Run("StreamServerError", func(t *testing.T) {
 				runStreamServerErrorTest(t, config.Factory, port)
 			})
@@ -206,19 +202,25 @@ func RunTestSuite(t *testing.T, config TestSuiteConfig) {
 				runStreamMaxConcurrentTest(t, config.Factory, port)
 			})
 
-			t.Run("StreamServerStreaming", func(t *testing.T) {
-				runStreamServerStreamingTest(t, config.Factory, port)
-			})
-
-			t.Run("StreamClientStreaming", func(t *testing.T) {
-				runStreamClientStreamingTest(t, config.Factory, port)
-			})
-
 			t.Run("StreamKeepalive", func(t *testing.T) {
 				runStreamKeepaliveTest(t, config.Factory, port)
 			})
 		}
 	}
+
+	// Streaming tests that run both in-process and against an external
+	// (cross-language) server — these validate the stream wire framing interops.
+	t.Run("StreamBidi", func(t *testing.T) {
+		runStreamBidiTest(t, config.Factory, port, config.UseExternalServer)
+	})
+
+	t.Run("StreamServerStreaming", func(t *testing.T) {
+		runStreamServerStreamingTest(t, config.Factory, port, config.UseExternalServer)
+	})
+
+	t.Run("StreamClientStreaming", func(t *testing.T) {
+		runStreamClientStreamingTest(t, config.Factory, port, config.UseExternalServer)
+	})
 
 	t.Run("Concurrency", func(t *testing.T) {
 		runConcurrencyTest(t, config.Factory, port, config.UseExternalServer)
@@ -1536,73 +1538,9 @@ func (s *counterPingPongServerGeneric) Ping(ctx context.Context, req *pingpong.P
 // Streaming tests
 // ============================================================================
 
-// chatServerImpl is a bidirectional stream handler used by the streaming tests.
-// On open it pushes a "welcome" message (server-initiated push), then echoes
-// each client message; a "fail" message terminates the stream with an error.
-// When the client half-closes it sends a "summary" with the echo count and
-// returns (clean close).
-type chatServerImpl struct{}
-
-func (s *chatServerImpl) Connect(stream *pingpong.Chat_ConnectStreamServer) error {
-	if err := stream.Send(&pingpong.ChatMessage{Text: "welcome", Seq: 0}); err != nil {
-		return err
-	}
-
-	count := int32(0)
-	for {
-		msg, err := stream.Recv()
-		if err == io.EOF {
-			// client half-closed: send a final summary and close cleanly
-			return stream.Send(&pingpong.ChatMessage{Text: "summary", Seq: count})
-		}
-		if err != nil {
-			// client cancelled or connection dropped
-			return err
-		}
-		if msg.Text == "fail" {
-			return errors.New("requested failure")
-		}
-		if msg.Text == "flood" {
-			// Push many messages rapidly to overflow a slow client's bounded buffer.
-			for i := 0; i < 100; i++ {
-				if err := stream.Send(&pingpong.ChatMessage{Text: fmt.Sprintf("flood-%d", i), Seq: int32(i)}); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		count++
-		if err := stream.Send(&pingpong.ChatMessage{Text: "echo:" + msg.Text, Seq: msg.Seq + 1}); err != nil {
-			return err
-		}
-	}
-}
-
-// Subscribe is a server-streaming handler: it pushes req.Count events and returns.
-func (s *chatServerImpl) Subscribe(req *pingpong.SubscribeRequest, stream *pingpong.Chat_SubscribeStreamServer) error {
-	for i := int32(0); i < req.Count; i++ {
-		if err := stream.Send(&pingpong.ChatMessage{Text: fmt.Sprintf("event-%d", i), Seq: i}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Upload is a client-streaming handler: it sums the seqs of all client messages
-// and returns a single summary.
-func (s *chatServerImpl) Upload(stream *pingpong.Chat_UploadStreamServer) (*pingpong.UploadSummary, error) {
-	total := int32(0)
-	for {
-		msg, err := stream.Recv()
-		if err == io.EOF {
-			return &pingpong.UploadSummary{Total: total}, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		total += msg.Seq
-	}
-}
+// The Chat streaming service implementation the streaming tests assert against
+// lives in the shared chat package so the standalone cross-language test
+// servers behave identically. See chat.ChatServer.
 
 // newStreamingServer starts an in-process server hosting both the unary PingPong
 // service and the streaming Chat service.
@@ -1619,7 +1557,7 @@ func newStreamingServer(t *testing.T, factory TransportFactory, id int, middlewa
 		server.Middleware(m)
 	}
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
-	pingpong.RegisterChatServer(server, &chatServerImpl{})
+	pingpong.RegisterChatServer(server, &chat.ChatServer{})
 
 	go func() {
 		server.ListenAndServe()
@@ -1631,9 +1569,12 @@ func newStreamingServer(t *testing.T, factory TransportFactory, id int, middlewa
 
 // runStreamBidiTest exercises the full bidi lifecycle: server push on open,
 // client send + server echo, half-close, final summary, then a clean io.EOF.
-func runStreamBidiTest(t *testing.T, factory TransportFactory, id int) {
-	server := newStreamingServer(t, factory, id)
-	defer server.Shutdown(context.Background())
+// Runs in-process and against an external (cross-language) server.
+func runStreamBidiTest(t *testing.T, factory TransportFactory, id int, useExternalServer bool) {
+	if !useExternalServer {
+		server := newStreamingServer(t, factory, id)
+		defer server.Shutdown(context.Background())
+	}
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
@@ -2050,7 +1991,7 @@ func runStreamMaxConcurrentTest(t *testing.T, factory TransportFactory, id int) 
 		MaxConcurrentStreams: 2,
 	})
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
-	pingpong.RegisterChatServer(server, &chatServerImpl{})
+	pingpong.RegisterChatServer(server, &chat.ChatServer{})
 	go func() { server.ListenAndServe() }()
 	time.Sleep(100 * time.Millisecond)
 	defer server.Shutdown(context.Background())
@@ -2095,9 +2036,12 @@ func runStreamMaxConcurrentTest(t *testing.T, factory TransportFactory, id int) 
 
 // runStreamServerStreamingTest exercises the server-streaming form: the client
 // sends a single request and reads a stream of responses.
-func runStreamServerStreamingTest(t *testing.T, factory TransportFactory, id int) {
-	server := newStreamingServer(t, factory, id)
-	defer server.Shutdown(context.Background())
+// Runs in-process and against an external (cross-language) server.
+func runStreamServerStreamingTest(t *testing.T, factory TransportFactory, id int, useExternalServer bool) {
+	if !useExternalServer {
+		server := newStreamingServer(t, factory, id)
+		defer server.Shutdown(context.Background())
+	}
 
 	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
 	defer client.Close()
@@ -2120,9 +2064,12 @@ func runStreamServerStreamingTest(t *testing.T, factory TransportFactory, id int
 
 // runStreamClientStreamingTest exercises the client-streaming form: the client
 // sends a stream of requests and reads a single response.
-func runStreamClientStreamingTest(t *testing.T, factory TransportFactory, id int) {
-	server := newStreamingServer(t, factory, id)
-	defer server.Shutdown(context.Background())
+// Runs in-process and against an external (cross-language) server.
+func runStreamClientStreamingTest(t *testing.T, factory TransportFactory, id int, useExternalServer bool) {
+	if !useExternalServer {
+		server := newStreamingServer(t, factory, id)
+		defer server.Shutdown(context.Background())
+	}
 
 	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
 	defer client.Close()
