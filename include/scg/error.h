@@ -4,6 +4,8 @@
 #include <cstring>
 #include <utility>
 #include <cstddef>
+#include <cstdio>
+#include <cstdarg>
 
 namespace scg {
 namespace error {
@@ -17,6 +19,15 @@ public:
 	{
 	}
 
+	inline explicit Error(const std::string& msg)
+	{
+		if (!msg.empty()) {
+			size_t len = msg.size();
+			msg_ = new char[len + 1];
+			std::memcpy(msg_, msg.c_str(), len + 1);
+		}
+	}
+
 	inline explicit Error(const char* msg)
 	{
 		if (msg && msg[0] != '\0') {
@@ -26,13 +37,26 @@ public:
 		}
 	}
 
-	inline explicit Error(const std::string& msg)
+#if defined(__GNUC__) || defined(__clang__)
+	__attribute__((format(printf, 1, 2)))
+#endif
+	static inline Error Errorf(const char* fmt, ...)
 	{
-		if (!msg.empty()) {
-			size_t len = msg.size();
-			msg_ = new char[len + 1];
-			std::memcpy(msg_, msg.c_str(), len + 1);
+		Error err;
+		if (fmt && fmt[0] != '\0') {
+			va_list args;
+			va_start(args, fmt);
+			va_list args_copy;
+			va_copy(args_copy, args);
+			int len = std::vsnprintf(nullptr, 0, fmt, args_copy);
+			va_end(args_copy);
+			if (len > 0) {
+				err.msg_ = new char[len + 1];
+				std::vsnprintf(err.msg_, len + 1, fmt, args);
+			}
+			va_end(args);
 		}
+		return err;
 	}
 
 	inline Error(const Error& other)
