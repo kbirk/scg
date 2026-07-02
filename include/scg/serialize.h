@@ -263,8 +263,7 @@ inline error::Error deserialize(float64_t& value, ReaderType& reader)
 // bounded_reserve_count caps a wire-declared element count to the bytes actually
 // remaining in the reader, so a hostile count cannot drive a huge
 // reserve()/resize() before the elements are read. The container still grows to
-// its true size as elements are appended. (A StreamReader reports an unbounded
-// remaining count, so trusted local streams are unaffected.)
+// its true size as elements are appended.
 template <typename ReaderType>
 inline uint32_t bounded_reserve_count(uint32_t count, const ReaderType& reader)
 {

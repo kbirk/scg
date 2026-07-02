@@ -50,12 +50,17 @@ public:
 
 	inline static uuid random()
 	{
+		// Every byte comes straight from std::random_device (OS entropy). Expanding a single 32-bit
+		// seed through a PRNG here would cap the space at 2^32 distinct UUIDs — birthday collisions at
+		// ~77k ids — which is fatal for durable identities (these mint database primary keys).
 		uuid u;
 		std::random_device rd;
-		std::mt19937 gen(rd());
-		std::uniform_int_distribution<> dis(0, 255);
-		for (int i = 0; i < 16; ++i) {
-			u.bytes_[i] = static_cast<uint8_t>(dis(gen));
+		for (int i = 0; i < 16; i += 4) {
+			const uint32_t word = static_cast<uint32_t>(rd());
+			u.bytes_[i] = static_cast<uint8_t>(word & 0xFF);
+			u.bytes_[i + 1] = static_cast<uint8_t>((word >> 8) & 0xFF);
+			u.bytes_[i + 2] = static_cast<uint8_t>((word >> 16) & 0xFF);
+			u.bytes_[i + 3] = static_cast<uint8_t>((word >> 24) & 0xFF);
 		}
 		u.bytes_[6] = (u.bytes_[6] & 0x0F) | 0x40;
 		u.bytes_[8] = (u.bytes_[8] & 0x3F) | 0x80;
