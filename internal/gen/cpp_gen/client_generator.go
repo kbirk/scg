@@ -10,6 +10,7 @@ import (
 )
 
 type ClientMethodArgs struct {
+	MethodNamePascalCase     string
 	MethodNameCamelCase      string
 	MethodIDVarName          string
 	MethodID                 uint64
@@ -135,7 +136,20 @@ private:
 	std::shared_ptr<scg::rpc::ClientStream> stream_;
 };
 {{end}}
-class {{.ClientNamePascalCase}}Client {
+// {{.ClientNamePascalCase}}Api is the abstract call surface of the {{.ClientNamePascalCase}} service,
+// mirroring the client call shape one-to-one. {{.ClientNamePascalCase}}Client is the RPC-backed
+// implementation; tests (or alternative transports) substitute their own. Symmetric to the
+// server-side {{.ClientNamePascalCase}}Server interface. Only unary rpcs are part of the interface;
+// streaming rpcs stay on the concrete client.
+class {{.ClientNamePascalCase}}Api {
+public:
+	virtual ~{{.ClientNamePascalCase}}Api() = default;
+	{{range .ClientMethods}}
+	virtual std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) = 0;
+	{{end}}
+};
+
+class {{.ClientNamePascalCase}}Client final : public {{.ClientNamePascalCase}}Api {
 public:
 	inline explicit
 	{{.ClientNamePascalCase}}Client(scg::rpc::Client* client) : client_(client) {}
@@ -143,7 +157,7 @@ public:
 	inline explicit
 	{{.ClientNamePascalCase}}Client(std::shared_ptr<scg::rpc::Client> client) : client_(client) {}
 	{{range .ClientMethods}}
-	inline std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) const
+	inline std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) override
 	{
 		{{.MethodResponseStructName}} resp;
 		auto err = {{.MethodNameCamelCase}}(&resp, ctx, req);
@@ -198,6 +212,23 @@ public:
 
 private:
 	std::shared_ptr<scg::rpc::Client> client_;
+};
+
+// {{.ClientNamePascalCase}}Fake is a test double for {{.ClientNamePascalCase}}Api: each method invokes
+// its hook when set, otherwise returns a default-constructed response with no error. Deliberately
+// minimal — no built-in call recording or thread-safety; layer those per the test's own needs.
+class {{.ClientNamePascalCase}}Fake : public {{.ClientNamePascalCase}}Api {
+public:
+	{{range .ClientMethods}}std::function<std::pair<{{.MethodResponseStructName}}, scg::error::Error>(scg::context::Context&, const {{.MethodRequestStructName}}&)> on{{.MethodNamePascalCase}};
+	{{end}}{{range .ClientMethods}}
+	std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) override
+	{
+		if (on{{.MethodNamePascalCase}}) {
+			return on{{.MethodNamePascalCase}}(ctx, req);
+		}
+		return { {{.MethodResponseStructName}}{}, nullptr };
+	}
+	{{end}}
 };
 `
 
@@ -285,6 +316,7 @@ func generateClientCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		}
 
 		args.ClientMethods = append(args.ClientMethods, ClientMethodArgs{
+			MethodNamePascalCase:     util.EnsurePascalCase(name),
 			MethodNameCamelCase:      util.EnsureCamelCase(name),
 			MethodIDVarName:          methodIDVarName(svc.Name, name),
 			MethodID:                 methodID,

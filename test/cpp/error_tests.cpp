@@ -186,13 +186,14 @@ void test_error_copy_assignment_self()
 {
 	Error err1("Self assign");
 
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wself-assign-overloaded"
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wself-assign-overloaded"
+#endif
 	err1 = err1;
-#pragma GCC diagnostic pop
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
 
 	TEST_CHECK(err1);
 	TEST_CHECK(err1.message() == "Self assign");
@@ -251,13 +252,19 @@ void test_error_move_assignment_self()
 	Error err1("Self move");
 
 	// This is UB in general but our implementation should handle it
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wself-move"
+#elif defined(__GNUC__) && __GNUC__ >= 13
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wself-move"
+#endif
 	err1 = std::move(err1);
-#pragma GCC diagnostic pop
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#elif defined(__GNUC__) && __GNUC__ >= 13
+#pragma GCC diagnostic pop
+#endif
 
 	// After self-move, state is unspecified but should not crash
 	// We just check it doesn't crash

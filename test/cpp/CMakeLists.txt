@@ -43,6 +43,9 @@ add_executable(error_tests "error_tests.cpp")
 # Macro test
 add_executable(macro_test "macro_test.cpp")
 
+# Generated Api / Fake seam tests (no networking)
+add_executable(api_fake_tests "api_fake_tests.cpp")
+
 # =============================================================================
 # Unified Test Suites (run in-process server + client for full test coverage)
 # =============================================================================

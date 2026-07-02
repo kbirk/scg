@@ -446,6 +446,55 @@ if (err) {
 }
 ```
 
+### Client Interfaces and Fakes
+
+Alongside each `XxxClient`, scg generates an abstract `XxxApi` interface that mirrors the
+client's call surface one-to-one, plus an `XxxFake` test double. This gives orchestration
+logic a mockable seam without hand-writing gateway/forwarding boilerplate — it is the
+symmetric counterpart to the server-side `XxxServer` interface.
+
+Only unary rpcs are part of the interface; streaming rpcs stay on the concrete client.
+
+**C++** — `XxxClient` is `final` and derives from `XxxApi`; `XxxFake` exposes one
+`std::function` hook per rpc (`onMethodName`) and returns a default-constructed response
+with no error when a hook is unset:
+
+```cpp
+// Production code depends on the interface, not the concrete client:
+void runCheckpoint(pingpong::PingPongApi& api) {
+	pingpong::PingRequest req;
+	auto [res, err] = api.ping(scg::context::background(), req);
+	// ...
+}
+
+// Wire the real client in production:
+pingpong::PingPongClient client(transport);
+runCheckpoint(client);
+
+// Substitute a scripted fake in tests:
+pingpong::PingPongFake fake;
+fake.onPing = [](scg::context::Context& ctx, const pingpong::PingRequest& req) {
+	pingpong::PongResponse resp;
+	resp.pong.count = req.ping.count + 1;
+	return std::make_pair(resp, scg::error::Error(nullptr));
+};
+runCheckpoint(fake);
+```
+
+The fake is deliberately minimal — hooks only, no built-in call recording or thread-safety;
+tests layer those per their own needs.
+
+**Go** — `XxxApi` is an interface satisfied by `*XxxClient` (enforced with a compile-time
+`var _ XxxApi = (*XxxClient)(nil)` assertion). Depend on `XxxApi` in code you want to fake;
+since the generated `XxxServer` interface has the same unary signatures, an in-process test
+can even hand a server implementation directly to client-side code.
+
+```go
+type PingPongApi interface {
+	Ping(ctx context.Context, req *PingRequest) (*PongResponse, error)
+}
+```
+
 ### Streaming RPCs
 
 Mark a request and/or response type with the `stream` qualifier to make an RPC a

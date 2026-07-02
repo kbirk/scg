@@ -45,6 +45,7 @@ var (
 		"scg/server.h",
 		"scg/stream.h",
 		"scg/serialize.h",
+		"functional",
 	}
 )
 

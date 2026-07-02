@@ -36,9 +36,19 @@ type ClientArgs struct {
 }
 
 const clientTemplateStr = `
+// {{.ClientNamePascalCase}}Api is the abstract call surface of the {{.ClientNamePascalCase}} service,
+// mirroring the client call shape one-to-one. {{.ClientNamePascalCase}}Client is the RPC-backed
+// implementation; tests (or alternative transports) substitute their own. Only unary rpcs are part
+// of the interface; streaming rpcs stay on the concrete client.
+type {{.ClientNamePascalCase}}Api interface { {{- range .ClientMethods}}
+	{{.MethodNamePascalCase}}(ctx context.Context, req *{{.MethodRequestStructName}}) (*{{.MethodResponseStructName}}, error){{end}}
+}
+
 type {{.ClientNamePascalCase}}Client struct {
 	client *rpc.Client
 }
+
+var _ {{.ClientNamePascalCase}}Api = (*{{.ClientNamePascalCase}}Client)(nil) // compile-time conformance
 
 func New{{.ClientNamePascalCase}}Client(client *rpc.Client) *{{.ClientNamePascalCase}}Client {
 	return &{{.ClientNamePascalCase}}Client{
