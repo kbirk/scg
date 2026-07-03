@@ -37,7 +37,9 @@ public:
 		}
 	}
 
+#if defined(__GNUC__) || defined(__clang__)
 	__attribute__((format(printf, 1, 2)))
+#endif
 	static inline Error Errorf(const char* fmt, ...)
 	{
 		Error err;

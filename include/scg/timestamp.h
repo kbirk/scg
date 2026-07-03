@@ -110,7 +110,11 @@ public:
 
 	friend std::ostream& operator<<(std::ostream& os, const timestamp& value)
 	{
-		auto time_t_c = std::chrono::system_clock::to_time_t(value.timepoint_);
+		// to_time_t wants a system_clock::time_point. timepoint_ is nanosecond-precision;
+		// libstdc++'s system_clock::duration is already nanoseconds (implicit match), but
+		// MSVC's is 100ns ticks, so cast to the clock's native duration explicitly.
+		auto time_t_c = std::chrono::system_clock::to_time_t(
+			std::chrono::time_point_cast<std::chrono::system_clock::duration>(value.timepoint_));
 		auto tm = *std::localtime(&time_t_c);
 		os << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
 		return os;
