@@ -17,7 +17,7 @@ func TestGenerateMessagesGo(t *testing.T) {
 
 	for _, pkg := range parse.Packages {
 		for _, msg := range pkg.MessageDefinitions {
-			str, err := generateMessageGoCode(msg)
+			str, err := generateMessageGoCode(parse, msg)
 			require.Nil(t, err)
 
 			fmt.Println(str)
@@ -95,7 +95,8 @@ func TestGenerateSerializeContainerMethod(t *testing.T) {
 		},
 	}
 
-	str, code, err := generateSerializeContainerMethod("MyMessage", "t.SomeField", dt)
+	g := &messageGenerator{msgName: "MyMessage", helperSuffixes: map[string]string{}}
+	str, code, err := g.generateSerializeContainerMethod("t.SomeField", dt)
 	require.Nil(t, err)
 
 	fmt.Println(str)
@@ -172,7 +173,7 @@ func TestGenerateMessageSerializeMethod(t *testing.T) {
 		},
 	}
 
-	code, err := generateMessageSerializationMethod(msg)
+	code, err := generateMessageSerializationMethod(nil, msg)
 	require.Nil(t, err)
 
 	fmt.Println(code)

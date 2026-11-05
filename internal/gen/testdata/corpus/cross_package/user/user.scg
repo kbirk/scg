@@ -1,0 +1,6 @@
+package user;
+
+service Uses {
+	rpc Call (rpc.Req) returns (serialize.Payload);
+	rpc Other (another.pc.Bar) returns (rpc.Req);
+}

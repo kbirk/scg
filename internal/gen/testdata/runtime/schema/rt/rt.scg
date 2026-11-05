@@ -1,0 +1,84 @@
+package rt;
+
+# Schema for the generated-code runtime tests (internal/gen/runtime_test.go).
+
+enum Kind {
+	Zero = 0;
+	One = 1;
+	Two = 2;
+}
+
+typedef Name = string;
+typedef Count = uint32;
+typedef ID = uuid;
+
+message Empty {}
+
+message Big {
+	string s0 = 0;
+	string s1 = 1;
+	string s2 = 2;
+	string s3 = 3;
+	string s4 = 4;
+	string s5 = 5;
+	string s6 = 6;
+	string s7 = 7;
+	timestamp t0 = 8;
+	timestamp t1 = 9;
+	uuid u0 = 10;
+	uuid u1 = 11;
+}
+
+message ListBig {
+	list<Big> items = 0;
+}
+
+message MapBig {
+	map<int32, Big> items = 0;
+}
+
+message ListInt {
+	list<int32> items = 0;
+}
+
+message Bytes {
+	bool misalign = 0;
+	list<byte> data = 1;
+	list<uint8> more = 2;
+	list<list<byte>> nested = 3;
+}
+
+message Everything {
+	bool b = 0;
+	byte by = 1;
+	uint8 u8 = 2;
+	uint16 u16 = 3;
+	uint32 u32 = 4;
+	uint64 u64 = 5;
+	int8 i8 = 6;
+	int16 i16 = 7;
+	int32 i32 = 8;
+	int64 i64 = 9;
+	float32 f32 = 10;
+	float64 f64 = 11;
+	string s = 12;
+	timestamp ts = 13;
+	uuid id = 14;
+	Kind kind = 15;
+	Name name = 16;
+	Count count = 17;
+	ID typed_id = 18;
+	Empty empty = 19;
+	list<bool> bools = 20;
+	list<float64> floats = 21;
+	list<uuid> ids = 22;
+	list<Kind> kinds = 23;
+	list<Name> names = 24;
+	map<Kind, string> by_kind = 25;
+	map<Count, list<Name>> by_count = 26;
+	map<ID, Big> by_id = 27;
+	map<string, Empty> empties = 28;
+	list<map<string, list<int64>>> nested = 29;
+	list<byte> bytes = 30;
+	list<Big> bigs = 31;
+}

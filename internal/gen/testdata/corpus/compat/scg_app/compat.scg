@@ -1,0 +1,54 @@
+package scg.app;
+
+# Schemas that generated working C++ with the original generator and must
+# keep doing so.
+
+# stdin / stdout / stderr members compile with glibc and macOS (warning only)
+message ExecResult {
+	string stdout = 0;
+	string stderr = 1;
+}
+
+# C++20 keywords are ordinary identifiers in C++17 (warning only)
+message Manifest {
+	list<string> requires = 0;
+	string concept = 1;
+}
+
+# Foo.Bar's scoped name FOO_BAR_STRING is Baz.FooBar's legacy name
+enum Foo {
+	Bar = 0;
+}
+
+enum Baz {
+	FooBar = 0;
+}
+
+# Qux.BarBaz and QuxBar.Baz map to the same scoped name
+enum Qux {
+	BarBaz = 0;
+}
+
+enum QuxBar {
+	Baz = 0;
+}
+
+# A.X has no string constant at all: X_STRING is ambiguous and A_X_STRING is
+# C.aX's legacy name
+enum A {
+	X = 0;
+}
+
+enum B {
+	X = 0;
+}
+
+enum C {
+	aX = 0;
+}
+
+message UsesEnums {
+	Foo foo = 0;
+	Baz baz = 1;
+	A a = 2;
+}

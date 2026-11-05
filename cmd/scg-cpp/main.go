@@ -24,7 +24,7 @@ func main() {
 
 	flag.StringVar(&input, "input", "", "Input dir")
 	flag.StringVar(&output, "output", "", "Output dir")
-	flag.StringVar(&baseDir, "base-dir", "", "Golang base package")
+	flag.StringVar(&baseDir, "base-dir", "", "Optional include path prefix for generated #includes of other generated headers (the output directory's path relative to an include root). When empty, includes are relative to the including header.")
 
 	flag.Parse()
 

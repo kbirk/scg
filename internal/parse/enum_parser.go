@@ -3,7 +3,6 @@ package parse
 import (
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode"
 )
@@ -64,7 +63,7 @@ func parseValueDefinition(input *Token) (*EnumValueDefinition, *ParsingError) {
 	}
 
 	indexMatch := match.Captures[2]
-	index, err := strconv.Atoi(indexMatch.Content)
+	index, err := parseIndex(indexMatch.Content)
 	if err != nil {
 		return nil, &ParsingError{
 			Message: fmt.Sprintf("invalid value index `%s`", indexMatch.Content),
@@ -74,7 +73,7 @@ func parseValueDefinition(input *Token) (*EnumValueDefinition, *ParsingError) {
 
 	return &EnumValueDefinition{
 		Name:  name,
-		Index: uint32(index),
+		Index: index,
 		Value: stringValue,
 		Token: input,
 	}, nil
@@ -187,9 +186,9 @@ func parseEnumDefinitions(tokens []*Token) (map[string]*EnumDefinition, *Parsing
 			}
 
 			for _, existingValue := range enum.Values {
-				if existingValue.Name == valueDefinition.Name {
+				if existingValue.Value == valueDefinition.Value {
 					return nil, &ParsingError{
-						Message: fmt.Sprintf("duplicate enum string value definition %s", valueDefinition.Name),
+						Message: fmt.Sprintf("duplicate enum string value \"%s\" in enum %s, used by both %s and %s", valueDefinition.Value, enum.Name, existingValue.Name, valueDefinition.Name),
 						Token:   value,
 					}
 				}

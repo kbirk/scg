@@ -1,0 +1,14 @@
+package defs;
+
+# Two enums of one package (one C++ namespace) sharing value names.
+enum Color {
+	Unknown = 0;
+	Red = 1;
+	Green "verde" = 2;
+}
+
+enum Shape {
+	Unknown = 0;
+	Circle = 1;
+	Square = 2;
+}

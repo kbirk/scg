@@ -1,0 +1,5 @@
+package files;
+
+message Private {
+	Net net = 0;
+}

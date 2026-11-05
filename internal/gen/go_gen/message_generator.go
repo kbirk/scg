@@ -33,7 +33,7 @@ type {{.MessageNamePascalCase}} struct { {{- range .MessageFields}}
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ToJSON() ([]byte, error) {
 	jsonData, err := json.Marshal({{.MessageNameFirstLetter}})
 	if err != nil {
-		return nil, err
+return nil, err
 	}
 	return jsonData, nil
 }
@@ -41,7 +41,7 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) ToJSON() ([]byte,
 func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) FromJSON(data []byte) error {
 	err := json.Unmarshal(data, {{.MessageNameFirstLetter}})
 	if err != nil {
-		return err
+return err
 	}
 	return nil
 }
@@ -107,7 +107,7 @@ func ({{.MessageNameFirstLetter}} *{{.MessageNamePascalCase}}) Deserialize(reade
 	{{- if gt (len .FieldDeserializeMethodCalls) 0 }}var err error{{end}}{{range .FieldDeserializeMethodCalls}}
 	err = {{.}}
 	if err != nil {
-		return err
+return err
 	}{{end}}
 	return nil
 }`
@@ -117,6 +117,9 @@ type BitSizeContainerMethodArgs struct {
 	ArgType                    string
 	KeyTypeBitSizeMethodCall   string
 	ValueTypeBitSizeMethodCall string
+	// FixedElementBits is non-zero when every list element encodes to the same
+	// number of bits, so the size is computed without iterating.
+	FixedElementBits int
 }
 
 type SerializeContainerMethodArgs struct {
@@ -133,13 +136,16 @@ type DeserializeContainerMethodArgs struct {
 	ValueTypeDeserializeMethodCall string
 	KeyType                        string
 	ValueType                      string
+	// MinElementBits is the minimum encoded size of one element (map: one key
+	// plus one value), used to reject impossible lengths before allocating.
+	MinElementBits int
 }
 
 const mapBitSizeMethodTemplateStr = `
 func {{.FullMethodName}}(arg {{.ArgType}}) int {
 	size := serialize.BitSizeUInt32(uint32(len(arg)))
 	for k, v := range arg {
-		size += {{.KeyTypeBitSizeMethodCall}} + {{.ValueTypeBitSizeMethodCall}}
+size += {{.KeyTypeBitSizeMethodCall}} + {{.ValueTypeBitSizeMethodCall}}
 	}
 	return size
 }`
@@ -148,8 +154,8 @@ const mapSerializeMethodTemplateStr = `
 func {{.FullMethodName}}(writer *serialize.Writer, arg {{.ArgType}}) error {
 	serialize.SerializeUInt32(writer, uint32(len(arg)))
 	for k, v := range arg {
-		{{.KeyTypeSerializeMethodCall}}
-		{{.ValueTypeSerializeMethodCall}}
+{{.KeyTypeSerializeMethodCall}}
+{{.ValueTypeSerializeMethodCall}}
 	}
 	return nil
 }`
@@ -159,30 +165,28 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 	var length uint32
 	err := serialize.DeserializeUInt32(&length, reader)
 	if err != nil {
-		return err
+return err
 	}
 
-	// Bound the initial allocation hint against the bytes actually present so a
-	// hostile length cannot force a huge allocation before the entries are read;
-	// the map still grows to hold a legitimately large map as it is populated.
-	capHint := int(length)
-	if rem := reader.RemainingBytes(); capHint > rem {
-		capHint = rem
+	// Rejects a length whose entries cannot fit in the bytes remaining (each
+	// entry is at least {{.MinElementBits}} bits) and bounds the preallocation.
+	result, err := serialize.MakeMap[{{.KeyType}}, {{.ValueType}}](reader, length, {{.MinElementBits}})
+	if err != nil {
+return err
 	}
-	result := make({{.ArgType}}, capHint)
 
-	for i := 0; i < int(length); i++ {
-		var k {{.KeyType}}
-		var v {{.ValueType}}
-		err := {{.KeyTypeDeserializeMethodCall}}
-		if err != nil {
-			return err
-		}
-		err = {{.ValueTypeDeserializeMethodCall}}
-		if err != nil {
-			return err
-		}
-		result[k] = v
+	for i := uint32(0); i < length; i++ {
+var k {{.KeyType}}
+var v {{.ValueType}}
+err := {{.KeyTypeDeserializeMethodCall}}
+if err != nil {
+	return err
+}
+err = {{.ValueTypeDeserializeMethodCall}}
+if err != nil {
+	return err
+}
+result[k] = v
 	}
 	*arg = result
 	return nil
@@ -190,18 +194,22 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 
 const listBitSizeMethodTemplateStr = `
 func {{.FullMethodName}}(arg {{.ArgType}}) int {
+{{- if .FixedElementBits}}
+	return serialize.BitSizeUInt32(uint32(len(arg))) + len(arg)*{{.FixedElementBits}}
+{{- else}}
 	size := serialize.BitSizeUInt32(uint32(len(arg)))
 	for _, v := range arg {
-		size += {{.ValueTypeBitSizeMethodCall}}
+size += {{.ValueTypeBitSizeMethodCall}}
 	}
 	return size
+{{- end}}
 }`
 
 const listSerializeMethodTemplateStr = `
 func {{.FullMethodName}}(writer *serialize.Writer, arg {{.ArgType}}) error {
 	serialize.SerializeUInt32(writer, uint32(len(arg)))
 	for _, v := range arg {
-		{{.ValueTypeSerializeMethodCall}}
+{{.ValueTypeSerializeMethodCall}}
 	}
 	return nil
 }`
@@ -211,25 +219,23 @@ func {{.FullMethodName}}(arg *{{.ArgType}}, reader *serialize.Reader) error {
 	var length uint32
 	err := serialize.DeserializeUInt32(&length, reader)
 	if err != nil {
-		return err
+return err
 	}
 
-	// Bound the initial allocation against the bytes actually present so a
-	// hostile length cannot force a huge allocation before the elements are
-	// read; the slice still grows to hold a legitimately large list.
-	capHint := int(length)
-	if rem := reader.RemainingBytes(); capHint > rem {
-		capHint = rem
+	// Rejects a length whose elements cannot fit in the bytes remaining (each
+	// element is at least {{.MinElementBits}} bits) and bounds the preallocation.
+	result, err := serialize.MakeSlice[{{.ValueType}}](reader, length, {{.MinElementBits}})
+	if err != nil {
+return err
 	}
-	result := make({{.ArgType}}, 0, capHint)
 
-	for i := 0; i < int(length); i++ {
-		var v {{.ValueType}}
-		err := {{.ValueTypeDeserializeMethodCall}}
-		if err != nil {
-			return err
-		}
-		result = append(result, v)
+	for i := uint32(0); i < length; i++ {
+var v {{.ValueType}}
+err := {{.ValueTypeDeserializeMethodCall}}
+if err != nil {
+	return err
+}
+result = append(result, v)
 	}
 	*arg = result
 	return nil
@@ -307,7 +313,7 @@ func mapDataTypeDefinitionToGoType(dataType *parse.DataTypeDefinition) (string, 
 		return fmt.Sprintf("[]%s", subtype), nil
 	case parse.DataTypeCustom:
 		if dataType.ImportedFromOtherPackage {
-			return fmt.Sprintf("%s.%s", convertPackageNameToGoPackage(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
+			return fmt.Sprintf("%s.%s", goPackageQualifier(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
 		} else {
 			return util.EnsurePascalCase(dataType.CustomType), nil
 		}
@@ -350,7 +356,7 @@ func mapDataTypeComparableDefinitionToGoType(dataType *parse.DataTypeComparableD
 	switch dataType.Type {
 	case parse.DataTypeComparableCustom:
 		if dataType.ImportedFromOtherPackage {
-			return fmt.Sprintf("%s.%s", convertPackageNameToGoPackage(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
+			return fmt.Sprintf("%s.%s", goPackageQualifier(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
 		} else {
 			return util.EnsurePascalCase(dataType.CustomType), nil
 		}
@@ -579,14 +585,108 @@ func getDataTypeDefinitionMethodSuffix(dataType *parse.DataTypeDefinition) (stri
 	return getDataTypeMethodSuffix(dataType.Type)
 }
 
-func generateBitSizeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+// messageGenerator generates the serialization code of one message. It owns
+// the names of the container helper functions emitted for the message, which
+// are derived from the container's structure.
+type messageGenerator struct {
+	parse   *parse.Parse
+	msgName string
+	// helperSuffixes maps a container's structural key (its scg type string,
+	// with package-qualified custom types) to the unique suffix used in its
+	// helper function names.
+	helperSuffixes map[string]string
+}
 
-	fullTypeName, err := getDataTypeDefinitionMethodSuffix(dataType)
+func newMessageGenerator(p *parse.Parse, msg *parse.MessageDefinition) (*messageGenerator, error) {
+	g := &messageGenerator{
+		parse:          p,
+		msgName:        msg.Name,
+		helperSuffixes: map[string]string{},
+	}
+	// Assign helper names up front, in field order, so the BitSize, Serialize
+	// and Deserialize passes agree on them.
+	used := map[string]string{}
+	var assign func(dataType *parse.DataTypeDefinition) error
+	assign = func(dataType *parse.DataTypeDefinition) error {
+		if dataType.Type != parse.DataTypeList && dataType.Type != parse.DataTypeMap {
+			return nil
+		}
+		if isByteList(dataType) {
+			// handled by the bulk byte list helpers, no generated function
+			return nil
+		}
+		key := dataType.ToString()
+		if _, ok := g.helperSuffixes[key]; !ok {
+			base, err := getDataTypeDefinitionMethodSuffix(dataType)
+			if err != nil {
+				return err
+			}
+			// Concatenated type names are not unique by construction (e.g. a
+			// typedef named `Time` vs the builtin `timestamp`), so disambiguate
+			// structurally distinct containers that map to the same name.
+			suffix := base
+			for n := 2; ; n++ {
+				if _, taken := used[suffix]; !taken {
+					break
+				}
+				suffix = fmt.Sprintf("%s_%d", base, n)
+			}
+			used[suffix] = key
+			g.helperSuffixes[key] = suffix
+		}
+		return assign(dataType.SubType)
+	}
+	for _, field := range msg.FieldsByIndex() {
+		if err := assign(field.DataTypeDefinition); err != nil {
+			return nil, err
+		}
+	}
+	return g, nil
+}
+
+func (g *messageGenerator) helperName(kind string, dataType *parse.DataTypeDefinition) (string, error) {
+	suffix, ok := g.helperSuffixes[dataType.ToString()]
+	if !ok {
+		var err error
+		suffix, err = getDataTypeDefinitionMethodSuffix(dataType)
+		if err != nil {
+			return "", err
+		}
+	}
+	return fmt.Sprintf("%s_%s%s", util.EnsureCamelCase(g.msgName), kind, suffix), nil
+}
+
+func (g *messageGenerator) minBitSize(dataType *parse.DataTypeDefinition) int {
+	if g.parse == nil {
+		return 1
+	}
+	return g.parse.MinBitSize(dataType)
+}
+
+func (g *messageGenerator) minBitSizeComparable(dataType *parse.DataTypeComparableDefinition) int {
+	if g.parse == nil {
+		return 1
+	}
+	return g.parse.MinBitSizeComparable(dataType)
+}
+
+// isByteList reports whether a type is list<byte> / list<uint8>, which is
+// encoded as a count followed by raw bytes and is (de)serialized in bulk.
+func isByteList(dataType *parse.DataTypeDefinition) bool {
+	return dataType.Type == parse.DataTypeList && dataType.SubType != nil &&
+		(dataType.SubType.Type == parse.DataTypeByte || dataType.SubType.Type == parse.DataTypeUInt8)
+}
+
+func (g *messageGenerator) generateBitSizeContainerMethod(varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+
+	if isByteList(dataType) {
+		return fmt.Sprintf("serialize.BitSizeByteList(%s)", varName), nil, nil
+	}
+
+	methodFullName, err := g.helperName("BitSize", dataType)
 	if err != nil {
 		return "", nil, err
 	}
-
-	methodFullName := fmt.Sprintf("%s_BitSize%s", util.EnsureCamelCase(messageName), fullTypeName)
 
 	serializationMethodCode := map[string]string{}
 
@@ -595,7 +695,7 @@ func generateBitSizeContainerMethod(messageName string, varName string, dataType
 		return "", nil, err
 	}
 
-	valueMethodCall, methodCode, err := generateFieldBitSizeMethodCall(messageName, "v", dataType.SubType)
+	valueMethodCall, methodCode, err := g.generateFieldBitSizeMethodCall("v", dataType.SubType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -610,6 +710,10 @@ func generateBitSizeContainerMethod(messageName string, varName string, dataType
 	if dataType.Type == parse.DataTypeList {
 
 		// list
+		if fixed, ok := parse.FixedBitSize(dataType.SubType); ok {
+			args.FixedElementBits = fixed
+			methodCode = nil
+		}
 
 		err = listBitSizeMethodTemplate.Execute(buf, args)
 		if err != nil {
@@ -643,14 +747,16 @@ func generateBitSizeContainerMethod(messageName string, varName string, dataType
 	return fullMethodCall, serializationMethodCode, nil
 }
 
-func generateSerializeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func (g *messageGenerator) generateSerializeContainerMethod(varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
-	fullTypeName, err := getDataTypeDefinitionMethodSuffix(dataType)
+	if isByteList(dataType) {
+		return fmt.Sprintf("serialize.SerializeByteList(writer, %s)", varName), nil, nil
+	}
+
+	methodFullName, err := g.helperName("Serialize", dataType)
 	if err != nil {
 		return "", nil, err
 	}
-
-	methodFullName := fmt.Sprintf("%s_Serialize%s", util.EnsureCamelCase(messageName), fullTypeName)
 
 	serializationMethodCode := map[string]string{}
 
@@ -659,7 +765,7 @@ func generateSerializeContainerMethod(messageName string, varName string, dataTy
 		return "", nil, err
 	}
 
-	valueMethodCall, methodCode, err := generateFieldSerializationMethodCall(messageName, "v", dataType.SubType)
+	valueMethodCall, methodCode, err := g.generateFieldSerializationMethodCall("v", dataType.SubType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -707,14 +813,16 @@ func generateSerializeContainerMethod(messageName string, varName string, dataTy
 	return fullMethodCall, serializationMethodCode, nil
 }
 
-func generateDeserializeContainerMethod(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func (g *messageGenerator) generateDeserializeContainerMethod(varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
-	fullTypeName, err := getDataTypeDefinitionMethodSuffix(dataType)
+	if isByteList(dataType) {
+		return fmt.Sprintf("serialize.DeserializeByteList(&%s, reader)", varName), nil, nil
+	}
+
+	methodFullName, err := g.helperName("Deserialize", dataType)
 	if err != nil {
 		return "", nil, err
 	}
-
-	methodFullName := fmt.Sprintf("%s_Deserialize%s", util.EnsureCamelCase(messageName), fullTypeName)
 
 	deserializationMethodCode := map[string]string{}
 
@@ -723,7 +831,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 		return "", nil, err
 	}
 
-	valueMethodCall, methodCode, err := generateFieldDeserializationMethodCall(messageName, "v", dataType.SubType)
+	valueMethodCall, methodCode, err := g.generateFieldDeserializationMethodCall("v", dataType.SubType)
 	if err != nil {
 		return "", nil, err
 	}
@@ -738,6 +846,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 		ArgType:                        argType,
 		ValueTypeDeserializeMethodCall: valueMethodCall,
 		ValueType:                      valueType,
+		MinElementBits:                 g.minBitSize(dataType.SubType),
 	}
 
 	buf := &bytes.Buffer{}
@@ -765,6 +874,7 @@ func generateDeserializeContainerMethod(messageName string, varName string, data
 		}
 		args.KeyTypeDeserializeMethodCall = keyMethodCall
 		args.KeyType = keyType
+		args.MinElementBits += g.minBitSizeComparable(dataType.Key)
 
 		err = mapDeserializeMethodTemplate.Execute(buf, args)
 		if err != nil {
@@ -927,7 +1037,7 @@ func generateKeyFieldDeserializationMethodCall(varName string, dataType parse.Da
 	return buf.String(), nil
 }
 
-func generateFieldBitSizeMethodCall(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func (g *messageGenerator) generateFieldBitSizeMethodCall(varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -971,7 +1081,7 @@ func generateFieldBitSizeMethodCall(messageName string, varName string, dataType
 	case parse.DataTypeMap,
 		parse.DataTypeList:
 		// special case for containers
-		return generateBitSizeContainerMethod(messageName, varName, dataType)
+		return g.generateBitSizeContainerMethod(varName, dataType)
 
 	default:
 		return "", nil, fmt.Errorf("unrecognized type: %v", dataType.Type)
@@ -986,7 +1096,7 @@ func generateFieldBitSizeMethodCall(messageName string, varName string, dataType
 	return buf.String(), nil, nil
 }
 
-func generateFieldSerializationMethodCall(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func (g *messageGenerator) generateFieldSerializationMethodCall(varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -1030,7 +1140,7 @@ func generateFieldSerializationMethodCall(messageName string, varName string, da
 	case parse.DataTypeMap,
 		parse.DataTypeList:
 		// special case for containers
-		return generateSerializeContainerMethod(messageName, varName, dataType)
+		return g.generateSerializeContainerMethod(varName, dataType)
 
 	default:
 		return "", nil, fmt.Errorf("unrecognized type: %v", dataType.Type)
@@ -1045,7 +1155,7 @@ func generateFieldSerializationMethodCall(messageName string, varName string, da
 	return buf.String(), nil, nil
 }
 
-func generateFieldDeserializationMethodCall(messageName string, varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
+func (g *messageGenerator) generateFieldDeserializationMethodCall(varName string, dataType *parse.DataTypeDefinition) (string, map[string]string, error) {
 
 	args := FunctionCallArgs{
 		VariableName: varName,
@@ -1089,7 +1199,7 @@ func generateFieldDeserializationMethodCall(messageName string, varName string, 
 	case parse.DataTypeMap,
 		parse.DataTypeList:
 		// special case for containers
-		return generateDeserializeContainerMethod(messageName, varName, dataType)
+		return g.generateDeserializeContainerMethod(varName, dataType)
 
 	default:
 		return "", nil, fmt.Errorf("unrecognized type: %v", dataType.Type)
@@ -1120,7 +1230,12 @@ func valuesSortedByKey(m map[string]string) []string {
 	return values
 }
 
-func generateMessageBitSizeMethod(msg *parse.MessageDefinition) (string, error) {
+func generateMessageBitSizeMethod(p *parse.Parse, msg *parse.MessageDefinition) (string, error) {
+	g, err := newMessageGenerator(p, msg)
+	if err != nil {
+		return "", err
+	}
+
 	args := BitSizeMethodArgs{
 		MessageNameFirstLetter: util.FirstLetterAsLowercase(msg.Name),
 		MessageNamePascalCase:  util.EnsurePascalCase(msg.Name),
@@ -1132,7 +1247,7 @@ func generateMessageBitSizeMethod(msg *parse.MessageDefinition) (string, error) 
 
 		fieldName := fmt.Sprintf("%s.%s", util.FirstLetterAsLowercase(msg.Name), util.EnsurePascalCase(field.Name))
 
-		fieldBitSizeMethodCall, methodCode, err := generateFieldBitSizeMethodCall(msg.Name, fieldName, field.DataTypeDefinition)
+		fieldBitSizeMethodCall, methodCode, err := g.generateFieldBitSizeMethodCall(fieldName, field.DataTypeDefinition)
 		if err != nil {
 			return "", err
 		}
@@ -1141,7 +1256,7 @@ func generateMessageBitSizeMethod(msg *parse.MessageDefinition) (string, error) 
 	}
 
 	buf := &bytes.Buffer{}
-	err := messageBitSizeMethodTemplate.Execute(buf, args)
+	err = messageBitSizeMethodTemplate.Execute(buf, args)
 	if err != nil {
 		return "", err
 	}
@@ -1153,7 +1268,12 @@ func generateMessageBitSizeMethod(msg *parse.MessageDefinition) (string, error) 
 	return code + "\n" + buf.String(), nil
 }
 
-func generateMessageSerializationMethod(msg *parse.MessageDefinition) (string, error) {
+func generateMessageSerializationMethod(p *parse.Parse, msg *parse.MessageDefinition) (string, error) {
+	g, err := newMessageGenerator(p, msg)
+	if err != nil {
+		return "", err
+	}
+
 	args := SerializeMethodArgs{
 		MessageNameFirstLetter: util.FirstLetterAsLowercase(msg.Name),
 		MessageNamePascalCase:  util.EnsurePascalCase(msg.Name),
@@ -1165,7 +1285,7 @@ func generateMessageSerializationMethod(msg *parse.MessageDefinition) (string, e
 
 		fieldName := fmt.Sprintf("%s.%s", util.FirstLetterAsLowercase(msg.Name), util.EnsurePascalCase(field.Name))
 
-		fieldSerializeMethodCall, methodCode, err := generateFieldSerializationMethodCall(msg.Name, fieldName, field.DataTypeDefinition)
+		fieldSerializeMethodCall, methodCode, err := g.generateFieldSerializationMethodCall(fieldName, field.DataTypeDefinition)
 		if err != nil {
 			return "", err
 		}
@@ -1174,7 +1294,7 @@ func generateMessageSerializationMethod(msg *parse.MessageDefinition) (string, e
 	}
 
 	buf := &bytes.Buffer{}
-	err := messageSerializeMethodTemplate.Execute(buf, args)
+	err = messageSerializeMethodTemplate.Execute(buf, args)
 	if err != nil {
 		return "", err
 	}
@@ -1186,7 +1306,12 @@ func generateMessageSerializationMethod(msg *parse.MessageDefinition) (string, e
 	return code + "\n" + buf.String(), nil
 }
 
-func generateMessageDeserializationMethod(msg *parse.MessageDefinition) (string, error) {
+func generateMessageDeserializationMethod(p *parse.Parse, msg *parse.MessageDefinition) (string, error) {
+	g, err := newMessageGenerator(p, msg)
+	if err != nil {
+		return "", err
+	}
+
 	args := DeserializeMethodArgs{
 		MessageNameFirstLetter: util.FirstLetterAsLowercase(msg.Name),
 		MessageNamePascalCase:  util.EnsurePascalCase(msg.Name),
@@ -1198,7 +1323,7 @@ func generateMessageDeserializationMethod(msg *parse.MessageDefinition) (string,
 
 		fieldName := fmt.Sprintf("%s.%s", util.FirstLetterAsLowercase(msg.Name), util.EnsurePascalCase(field.Name))
 
-		fieldDeserializeMethodCall, methodCode, err := generateFieldDeserializationMethodCall(msg.Name, fieldName, field.DataTypeDefinition)
+		fieldDeserializeMethodCall, methodCode, err := g.generateFieldDeserializationMethodCall(fieldName, field.DataTypeDefinition)
 		if err != nil {
 			return "", err
 		}
@@ -1207,7 +1332,7 @@ func generateMessageDeserializationMethod(msg *parse.MessageDefinition) (string,
 	}
 
 	buf := &bytes.Buffer{}
-	err := messageDeserializeMethodTemplate.Execute(buf, args)
+	err = messageDeserializeMethodTemplate.Execute(buf, args)
 	if err != nil {
 		return "", err
 	}
@@ -1231,7 +1356,7 @@ func getMessageFieldArg(field *parse.MessageFieldDefinition) (MessageFieldArgs, 
 	}, nil
 }
 
-func generateMessageGoCode(msg *parse.MessageDefinition) (string, error) {
+func generateMessageGoCode(p *parse.Parse, msg *parse.MessageDefinition) (string, error) {
 
 	args := MessageArgs{
 		MessageNamePascalCase:  util.EnsurePascalCase(msg.Name),
@@ -1246,17 +1371,17 @@ func generateMessageGoCode(msg *parse.MessageDefinition) (string, error) {
 		args.MessageFields = append(args.MessageFields, fieldArg)
 	}
 
-	byteSizeCode, err := generateMessageBitSizeMethod(msg)
+	byteSizeCode, err := generateMessageBitSizeMethod(p, msg)
 	if err != nil {
 		return "", err
 	}
 
-	serializeCode, err := generateMessageSerializationMethod(msg)
+	serializeCode, err := generateMessageSerializationMethod(p, msg)
 	if err != nil {
 		return "", err
 	}
 
-	deserializeCode, err := generateMessageDeserializationMethod(msg)
+	deserializeCode, err := generateMessageDeserializationMethod(p, msg)
 	if err != nil {
 		return "", err
 	}

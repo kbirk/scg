@@ -36,10 +36,13 @@ type File struct {
 	MessageDefinitions     map[string]*MessageDefinition
 }
 
+// GetPackageDependencies returns the other packages this file depends on,
+// sorted by package name for deterministic output.
 func (f *File) GetPackageDependencies() []PackageDependency {
 	seen := make(map[string]bool)
 	pkgs := []PackageDependency{}
-	for _, dep := range f.CustomTypeDependencies {
+	for _, key := range sortedKeys(f.CustomTypeDependencies) {
+		dep := f.CustomTypeDependencies[key]
 		if dep.CustomTypePackage == f.Package.Name {
 			// don't add package dependencies for the same package
 			continue
@@ -53,23 +56,52 @@ func (f *File) GetPackageDependencies() []PackageDependency {
 			})
 		}
 	}
+	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].PackageName < pkgs[j].PackageName })
 	return pkgs
 }
 
+// GetFileDependencies returns the other files this file depends on, sorted by
+// their path for deterministic output. Files are identified by their full
+// path, so two files with the same base name in different directories are
+// distinct.
 func (f *File) GetFileDependencies() []FileDependency {
 	seen := make(map[string]bool)
 	files := []FileDependency{}
-	for _, dep := range f.CustomTypeDependencies {
-		_, ok := seen[dep.File.Name]
+	for _, key := range sortedKeys(f.CustomTypeDependencies) {
+		dep := f.CustomTypeDependencies[key]
+		if dep.File == nil {
+			continue
+		}
+		id := dep.File.ID()
+		_, ok := seen[id]
 		if !ok {
-			seen[dep.File.Name] = true
+			seen[id] = true
 			files = append(files, FileDependency{
 				File:  dep.File,
 				Token: dep.Token,
 			})
 		}
 	}
+	sort.Slice(files, func(i, j int) bool { return files[i].File.ID() < files[j].File.ID() })
 	return files
+}
+
+// ID uniquely identifies a file within a parse. The full path is unique,
+// whereas the base name is not (a/types.scg vs b/types.scg).
+func (f *File) ID() string {
+	if f.FullPath != "" {
+		return f.FullPath
+	}
+	return filepath.Join(f.RelativePath, f.Name)
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (f *File) EnumsSortedByKey() []*EnumDefinition {
@@ -149,6 +181,11 @@ func (f *File) MessagesSortedByDependenciesAndKeys() []*MessageDefinition {
 		for _, field := range msg.FieldsByIndex() {
 			elem := field.DataTypeDefinition.GetElementType()
 			if elem.Type == DataTypeCustom {
+
+				if elem.CustomTypePackage != f.Package.Name {
+					// a type from another package is never defined in this file
+					continue
+				}
 
 				_, ok := f.MessageDefinitions[elem.CustomType]
 				if !ok {
@@ -390,6 +427,17 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 	if perr != nil {
 		return nil, perr
 	}
+	if pkg == nil {
+		return nil, &ParsingError{
+			Message: "missing package declaration, every file must declare a package, e.g. `package my.pkg;`",
+			Token: &Token{
+				LineStart:                  0,
+				LineEnd:                    0,
+				LineStartCharacterPosition: 0,
+				LineEndCharacterPosition:   0,
+			},
+		}
+	}
 
 	enums, perr := parseEnumDefinitions(tokens)
 	if perr != nil {
@@ -421,7 +469,10 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 		typdef.File = f
 	}
 
-	for _, cosntDecl := range consts {
+	// Iterate in sorted order (fields by index) so the token recorded for each
+	// dependency, its first reference, is deterministic.
+	for _, constName := range sortedKeys(consts) {
+		cosntDecl := consts[constName]
 		cosntDecl.File = f
 
 		// if package is omitted, use the file's package name
@@ -437,11 +488,12 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 		}
 	}
 
-	for _, msg := range messageDefinitions {
+	for _, msgName := range sortedKeys(messageDefinitions) {
+		msg := messageDefinitions[msgName]
 
 		msg.File = f
 
-		for _, field := range msg.Fields {
+		for _, field := range msg.FieldsByIndex() {
 			// if package is omitted, use the file's package name
 			perr := populateDataTypePackageIfMissing(pkg.Name, field.DataTypeDefinition)
 			if perr != nil {
@@ -461,11 +513,12 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 		return nil, perr
 	}
 	// if package is omitted, use the file's package name
-	for _, svc := range serviceDefinitions {
+	for _, svcName := range sortedKeys(serviceDefinitions) {
+		svc := serviceDefinitions[svcName]
 
 		svc.File = f
 
-		for _, method := range svc.Methods {
+		for _, method := range svc.MethodsSortedByKey() {
 			// if package is omitted, use the file's package name
 			perr := populateDataTypePackageIfMissing(pkg.Name, method.Argument)
 			if perr != nil {
@@ -490,26 +543,26 @@ func parseFileContent(path string, relativeDir string, input string) (*File, *Pa
 		}
 	}
 
+	// Dependencies are keyed by their package-qualified name (`pkg.Type`):
+	// keying by the bare type name would merge `pa.Foo` with `pb.Foo`, and
+	// would treat `pa.Foo` as local whenever this file also defines a `Foo`.
 	externalCustomTypeDependencies := make(map[string]*CustomTypeDependency)
-	for _, dep := range dependencies {
-		// check if the custom type is defined in this file
-		_, ok := enums[dep.CustomTypeName]
-		if ok {
-			continue
+	for key, dep := range dependencies {
+		if dep.CustomTypePackage == pkg.Name {
+			// check if the custom type is defined in this file
+			if _, ok := enums[dep.CustomTypeName]; ok {
+				continue
+			}
+			if _, ok := typedefs[dep.CustomTypeName]; ok {
+				continue
+			}
+			if _, ok := messageDefinitions[dep.CustomTypeName]; ok {
+				continue
+			}
 		}
 
-		_, ok = typedefs[dep.CustomTypeName]
-		if ok {
-			continue
-		}
-
-		_, ok = messageDefinitions[dep.CustomTypeName]
-		if ok {
-			continue
-		}
-
-		// custom type depdenency is not defined in this file
-		externalCustomTypeDependencies[dep.CustomTypeName] = dep
+		// custom type dependency is not defined in this file
+		externalCustomTypeDependencies[key] = dep
 	}
 
 	f.Content = input

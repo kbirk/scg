@@ -2,6 +2,7 @@ package parse
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -498,10 +499,10 @@ func parseFieldDefinition(input *Token) (*MessageFieldDefinition, *ParsingError)
 	}
 
 	indexMatch := match.Captures[2]
-	index, err := strconv.Atoi(indexMatch.Content)
+	index, err := parseIndex(indexMatch.Content)
 	if err != nil {
 		return nil, &ParsingError{
-			Message: fmt.Sprintf("invalid field index `%s`", indexMatch.Content),
+			Message: fmt.Sprintf("invalid field index `%s`, must be an integer in the range [0, %d]", indexMatch.Content, uint32(math.MaxUint32)),
 			Token:   indexMatch,
 		}
 	}
@@ -509,9 +510,21 @@ func parseFieldDefinition(input *Token) (*MessageFieldDefinition, *ParsingError)
 	return &MessageFieldDefinition{
 		Name:               name,
 		DataTypeDefinition: dataType,
-		Index:              uint32(index),
+		Index:              index,
 		Token:              input,
 	}, nil
+}
+
+// parseIndex parses a field / enum value index. Unlike strconv.Atoi followed by
+// a uint32 conversion, it rejects negative and out-of-range values instead of
+// silently wrapping them (e.g. 4294967296 would otherwise become 0).
+func parseIndex(s string) (uint32, error) {
+	s = strings.TrimPrefix(s, "+")
+	v, err := strconv.ParseUint(s, 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(v), nil
 }
 
 func tokenizeMessageFields(input *Token) ([]*Token, *ParsingError) {

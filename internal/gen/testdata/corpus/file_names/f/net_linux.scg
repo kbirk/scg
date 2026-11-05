@@ -1,0 +1,5 @@
+package files;
+
+message Net {
+	Thing thing = 0;
+}

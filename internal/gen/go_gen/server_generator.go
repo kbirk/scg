@@ -241,7 +241,8 @@ func generateServerGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		ServerStubStructName: getServerStubStructName(svc.Name),
 	}
 
-	for name, method := range svc.Methods {
+	for _, method := range svc.MethodsSortedByKey() {
+		name := method.Name
 		methodID, err := pkg.HashStringToMethodID(svc.Name, name)
 		if err != nil {
 			return "", err

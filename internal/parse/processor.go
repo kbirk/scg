@@ -14,6 +14,8 @@ type Parse struct {
 	Version  string
 	Files    map[string]*File
 	Packages map[string]*Package
+
+	minBitsMemo map[string]int
 }
 
 func (p *Parse) ToStringPretty() string {
@@ -27,28 +29,33 @@ func (p *Parse) ToStringPretty() string {
 
 	var sb strings.Builder
 
-	for _, pkg := range p.Packages {
+	for _, pkgName := range sortedKeys(p.Packages) {
+		pkg := p.Packages[pkgName]
 		sb.WriteString(fmt.Sprintf("%s: %s\n", magenta("[package]"), white(pkg.Name)))
-		for _, enum := range pkg.Enums {
+		for _, enumName := range sortedKeys(pkg.Enums) {
+			enum := pkg.Enums[enumName]
 			sb.WriteString(fmt.Sprintf("    %s %s {\n", black("[enum]"), white(enum.Name)))
-			for _, value := range enum.Values {
+			for _, value := range enum.ValuesByIndex() {
 				sb.WriteString(fmt.Sprintf("        %s = %s\n", white(value.Name), white(value.Index)))
 			}
 			sb.WriteString("    }\n")
 		}
-		for _, typedef := range pkg.Typedefs {
+		for _, typedefName := range sortedKeys(pkg.Typedefs) {
+			typedef := pkg.Typedefs[typedefName]
 			sb.WriteString(fmt.Sprintf("    %s %s = %s\n", green("[typedef]"), white(typedef.Name), cyan(typedef.DataTypeDefinition.ToString())))
 		}
-		for _, msg := range pkg.MessageDefinitions {
+		for _, msgName := range sortedKeys(pkg.MessageDefinitions) {
+			msg := pkg.MessageDefinitions[msgName]
 			sb.WriteString(fmt.Sprintf("    %s %s {\n", blue("[message]"), white(msg.Name)))
 			for _, field := range msg.FieldsByIndex() {
 				sb.WriteString(fmt.Sprintf("        %s %s = %s\n", cyan(field.DataTypeDefinition.ToString()), white(field.Name), white(field.Index)))
 			}
 			sb.WriteString("    }\n")
 		}
-		for _, svc := range pkg.ServiceDefinitions {
+		for _, svcName := range sortedKeys(pkg.ServiceDefinitions) {
+			svc := pkg.ServiceDefinitions[svcName]
 			sb.WriteString(fmt.Sprintf("    %s %s {\n", yellow("[service]"), white(svc.Name)))
-			for _, method := range svc.Methods {
+			for _, method := range svc.MethodsSortedByKey() {
 				sb.WriteString(fmt.Sprintf("        %s (%s) %s\n", white(method.Name), cyan(method.Argument.CustomType), cyan(method.Return.CustomType)))
 			}
 			sb.WriteString("    }\n")
@@ -61,63 +68,50 @@ func (p *Parse) ToStringPretty() string {
 type PackageDependency struct {
 	PackageName string
 	Token       *Token
+	// File is the file whose reference (Token) introduced the dependency.
+	File *File
 }
 
 type Package struct {
-	Name                   string
-	Declaration            *PackageDeclaration
-	PackageDependencies    map[string]*PackageDependency
-	Enums                  map[string]*EnumDefinition
-	Typedefs               map[string]*TypedefDeclaration
-	Consts                 map[string]*ConstDeclaration
-	ServiceDefinitions     map[string]*ServiceDefinition
-	MessageDefinitions     map[string]*MessageDefinition
-	serverIDCollisionCheck map[uint64]string
-	methodIDCollisionCheck map[uint64]map[uint64]string
+	Name                string
+	Declaration         *PackageDeclaration
+	PackageDependencies map[string]*PackageDependency
+	Enums               map[string]*EnumDefinition
+	Typedefs            map[string]*TypedefDeclaration
+	Consts              map[string]*ConstDeclaration
+	ServiceDefinitions  map[string]*ServiceDefinition
+	MessageDefinitions  map[string]*MessageDefinition
 }
 
+// HashStringToServiceID returns the wire ID of a service of this package.
+// IDs are assigned (and checked for collisions across all packages) when the
+// parse is resolved; see assignRPCIDs.
 func (p *Package) HashStringToServiceID(serviceName string) (uint64, error) {
-
-	_, ok := p.ServiceDefinitions[serviceName]
+	svc, ok := p.ServiceDefinitions[serviceName]
 	if !ok {
 		return 0, fmt.Errorf("Service not found: %s", serviceName)
 	}
-
-	if p.serverIDCollisionCheck == nil {
-		p.serverIDCollisionCheck = map[uint64]string{}
+	if svc.ID == 0 {
+		return util.HashStringToUInt64(QualifiedServiceName(p.Name, serviceName)), nil
 	}
-
-	serverID := uint64(util.HashStringToUInt64(serviceName))
-	existing, ok := p.serverIDCollisionCheck[serverID]
-	if ok && existing != serviceName {
-		return 0, fmt.Errorf("ServiceID collision detected: %s and %s both hash to %d", serviceName, existing, serverID)
-	}
-	p.serverIDCollisionCheck[serverID] = serviceName
-	return serverID, nil
+	return svc.ID, nil
 }
 
+// HashStringToMethodID returns the wire ID of a method of a service of this
+// package. See HashStringToServiceID.
 func (p *Package) HashStringToMethodID(serviceName string, methodName string) (uint64, error) {
-
-	if p.methodIDCollisionCheck == nil {
-		p.methodIDCollisionCheck = map[uint64]map[uint64]string{}
-	}
-
-	serviceID, err := p.HashStringToServiceID(serviceName)
-	if err != nil {
-		return 0, err
-	}
-
-	methodID := uint64(util.HashStringToUInt64(methodName))
-	existingMethodIDs, ok := p.methodIDCollisionCheck[serviceID]
+	svc, ok := p.ServiceDefinitions[serviceName]
 	if !ok {
-		existingMethodIDs = map[uint64]string{}
+		return 0, fmt.Errorf("Service not found: %s", serviceName)
 	}
-	existing, ok := existingMethodIDs[methodID]
-	if ok && existing != methodName {
-		return 0, fmt.Errorf("MethodID collision detected: %s and %s both hash to %d", methodName, existing, methodID)
+	method, ok := svc.Methods[methodName]
+	if !ok {
+		return 0, fmt.Errorf("Method not found: %s.%s", serviceName, methodName)
 	}
-	existingMethodIDs[methodID] = methodName
-	return methodID, nil
+	if method.ID == 0 {
+		return util.HashStringToUInt64(QualifiedMethodName(p.Name, serviceName, methodName)), nil
+	}
+	return method.ID, nil
 }
 
 func NewParse(inputDir string) (*Parse, error) {
@@ -210,7 +204,8 @@ func parseFileContents(inputDir string, fileContents map[string]string) (map[str
 
 	files := make(map[string]*File)
 
-	for path, fileContent := range fileContents {
+	for _, path := range sortedKeys(fileContents) {
+		fileContent := fileContents[path]
 
 		fileContent = strings.Replace(fileContent, "\t", "    ", -1)
 
@@ -247,7 +242,8 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 		Packages: make(map[string]*Package),
 	}
 
-	for relativePathAndFile, f := range files {
+	for _, relativePathAndFile := range sortedKeys(files) {
+		f := files[relativePathAndFile]
 
 		parse.Files[relativePathAndFile] = f
 
@@ -265,14 +261,22 @@ func resolveFilesIntoParse(files map[string]*File) (*Parse, *ParsingError) {
 			}
 		}
 		// append definitions from the file to the package
-		for _, v := range f.CustomTypeDependencies {
+		// Iterate in sorted order and keep the first reference to each package,
+		// so errors about a dependency point at a deterministic location.
+		for _, key := range sortedKeys(f.CustomTypeDependencies) {
+			v := f.CustomTypeDependencies[key]
 			if f.Package.Name == v.CustomTypePackage {
 				// type exists in the same package, this is fine
 				continue
 			}
-			parse.Packages[f.Package.Name].PackageDependencies[v.CustomTypePackage] = &PackageDependency{
+			deps := parse.Packages[f.Package.Name].PackageDependencies
+			if _, ok := deps[v.CustomTypePackage]; ok {
+				continue
+			}
+			deps[v.CustomTypePackage] = &PackageDependency{
 				PackageName: v.CustomTypePackage,
 				Token:       v.Token,
+				File:        f,
 			}
 		}
 		for k, v := range f.Enums {

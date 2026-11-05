@@ -12,8 +12,11 @@ import (
 
 type MessageFieldArgs struct {
 	FieldNameCamelCase string
-	FieldType          string
-	FieldDefaultValue  string
+	// FieldJSONKey is the field's JSON key: the snake_case field name, the same
+	// key the Go generator uses in its json struct tags.
+	FieldJSONKey      string
+	FieldType         string
+	FieldDefaultValue string
 }
 
 type MessageArgs struct {
@@ -31,19 +34,37 @@ struct {{.MessageNamePascalCase}} : scg::type::Message { {{- range .MessageField
 {{- end}}{{- end}}
 
 	inline std::vector<uint8_t> toJSON() const;
-	inline void fromJSON(const std::vector<uint8_t>& data);
+	inline void fromJSON(const std::vector<uint8_t>& json_bytes_);
 
 	inline std::vector<uint8_t> toBytes() const;
-	inline scg::error::Error fromBytes(const std::vector<uint8_t>& data);
-	inline scg::error::Error fromBytes(const uint8_t* data, uint32_t size);
+	inline scg::error::Error fromBytes(const std::vector<uint8_t>& bytes_);
+	inline scg::error::Error fromBytes(const uint8_t* bytes_, uint32_t size_);
 
 };{{if gt (len .MessageFields) 0}}
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE({{.MessageNamePascalCase}}, {{.MessageFieldsCommaSeparated}}){{else}}
+
 inline void to_json(nlohmann::json& j, const {{.MessageNamePascalCase}}& m) {
-	j = nlohmann::json::object();
+	j = nlohmann::json::object();{{range .MessageFields}}
+	j["{{.FieldJSONKey}}"] = scg::json::encode(m.{{.FieldNameCamelCase}});{{end}}
 }
 
 inline void from_json(const nlohmann::json& j, {{.MessageNamePascalCase}}& m) {
+	// null leaves the message unchanged; absent keys leave their field
+	// unchanged (as Go does, so JSON from an older schema still decodes)
+	if (!scg::json::expect_object(j)) {
+		return;
+	}{{range .MessageFields}}
+	if (auto it = j.find("{{.FieldJSONKey}}"); it != j.end()) {
+		scg::json::decode(*it, m.{{.FieldNameCamelCase}});
+	}{{end}}
+}
+{{else}}
+inline void to_json(nlohmann::json& j, const {{.MessageNamePascalCase}}&) {
+	j = nlohmann::json::object();
+}
+
+inline void from_json(const nlohmann::json& j, {{.MessageNamePascalCase}}&) {
+	// an object (or null) is required, as Go rejects arrays and scalars
+	scg::json::expect_object(j);
 }
 {{end}}
 
@@ -77,68 +98,76 @@ inline uint32_t bit_size(const {{.MessageNamePascalCase}}& value)
 
 std::vector<uint8_t> {{.MessageNamePascalCase}}::toJSON() const
 {
-	nlohmann::json j({ {{- range $index, $element := .MessageFields}}{{if $index}}, {{end}}
-		{"{{$element.FieldNameCamelCase}}", {{$element.FieldNameCamelCase}} }{{end}} });
-	auto str = j.dump();
-	return std::vector<uint8_t>(str.begin(), str.end());
+	// locals and parameters of member functions contain an underscore, so they
+	// can never hide a (camelCase) field
+	nlohmann::json json_;
+	to_json(json_, *this);
+	// invalid UTF-8 is replaced with U+FFFD, as Go does
+	auto text_ = json_.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+	return std::vector<uint8_t>(text_.begin(), text_.end());
 }
 
-void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& data)
+void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& json_bytes_)
 {
-	nlohmann::json j = nlohmann::json::parse(std::string(data.begin(), data.end()));
-	{{range .MessageFields}}j.at("{{.FieldNameCamelCase}}").get_to({{.FieldNameCamelCase}});
-	{{end}}
+	nlohmann::json json_ = scg::json::parse(std::string(json_bytes_.begin(), json_bytes_.end()));
+	from_json(json_, *this);
 }
 
 std::vector<uint8_t> {{.MessageNamePascalCase}}::toBytes() const
 {
 	// Use view for copy elision
-	std::vector<uint8_t> data;
-	data.resize(scg::serialize::bits_to_bytes(bit_size(*this)), 0);
-	scg::serialize::WriterView writer(data);
-	serialize(writer, *this);
-	return data;
+	std::vector<uint8_t> bytes_;
+	const uint32_t num_bits_ = bit_size(*this);
+	if (num_bits_ == 0) {
+		// only zero-bit fields (e.g. empty messages): nothing to write
+		return bytes_;
+	}
+	bytes_.resize(scg::serialize::bits_to_bytes(num_bits_), 0);
+	scg::serialize::WriterView writer_(bytes_);
+	serialize(writer_, *this);
+	return bytes_;
 }
 
-scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const std::vector<uint8_t>& data)
+scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const std::vector<uint8_t>& bytes_)
 {
-	scg::serialize::ReaderView reader(data);
-	return deserialize(*this, reader);
+	scg::serialize::ReaderView reader_(bytes_);
+	return deserialize(*this, reader_);
 }
 
-scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const uint8_t* data, uint32_t size)
+scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const uint8_t* bytes_, uint32_t size_)
 {
-	scg::serialize::ReaderView reader(data, size);
-	return deserialize(*this, reader);
+	scg::serialize::ReaderView reader_(bytes_, size_);
+	return deserialize(*this, reader_);
 }
 
 {{else}}
 
 template <typename WriterType>
-inline void serialize(WriterType& writer, const {{.MessageNamePascalCase}}& value)
+inline void serialize(WriterType&, const {{.MessageNamePascalCase}}&)
 {
 }
 
 template <typename ReaderType>
-inline scg::error::Error deserialize({{.MessageNamePascalCase}}& value, ReaderType& reader)
+inline scg::error::Error deserialize({{.MessageNamePascalCase}}&, ReaderType&)
 {
 	return nullptr;
 }
 
-inline uint32_t bit_size(const {{.MessageNamePascalCase}}& value)
+inline uint32_t bit_size(const {{.MessageNamePascalCase}}&)
 {
 	return 0;
 }
 
 std::vector<uint8_t> {{.MessageNamePascalCase}}::toJSON() const
 {
-	nlohmann::json j;
-	auto str = j.dump();
-	return std::vector<uint8_t>(str.begin(), str.end());
+	// an empty object, as Go encodes a struct without fields
+	return std::vector<uint8_t>{'{', '}'};
 }
 
-void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& data)
+void {{.MessageNamePascalCase}}::fromJSON(const std::vector<uint8_t>& json_bytes_)
 {
+	nlohmann::json json_ = scg::json::parse(std::string(json_bytes_.begin(), json_bytes_.end()));
+	from_json(json_, *this);
 }
 
 std::vector<uint8_t> {{.MessageNamePascalCase}}::toBytes() const
@@ -146,12 +175,12 @@ std::vector<uint8_t> {{.MessageNamePascalCase}}::toBytes() const
 	return std::vector<uint8_t>();
 }
 
-scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const std::vector<uint8_t>& data)
+scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const std::vector<uint8_t>&)
 {
 	return nullptr;
 }
 
-scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const uint8_t* data, uint32_t size)
+scg::error::Error {{.MessageNamePascalCase}}::fromBytes(const uint8_t*, uint32_t)
 {
 	return nullptr;
 }
@@ -200,13 +229,22 @@ func mapDataTypeComparableToCppType(dataType parse.DataTypeComparable) (string, 
 	return "", fmt.Errorf("unrecognized type: %v", dataType)
 }
 
+// qualifiedCppTypeName returns the fully qualified name of a custom type. Every
+// reference is qualified, also within the type's own package: inside a
+// namespace a::b, `b::c::T` would resolve `b` to the enclosing a::b, and inside
+// a message (which derives from scg::type::Message) an unqualified `Message`
+// would resolve to the base class's injected class name.
+func qualifiedCppTypeName(pkgName string, typeName string) string {
+	if pkgName == "" {
+		return util.EnsurePascalCase(typeName)
+	}
+	return fmt.Sprintf("::%s::%s", convertPackageNameToCppNamespacePrefix(pkgName), util.EnsurePascalCase(typeName))
+}
+
 func mapDataTypeComparableDefinitionToCppType(dataType *parse.DataTypeComparableDefinition) (string, error) {
 	switch dataType.Type {
 	case parse.DataTypeComparableCustom:
-		if dataType.ImportedFromOtherPackage {
-			return fmt.Sprintf("%s::%s", convertPackageNameToCppNamespacePrefix(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
-		}
-		return util.EnsurePascalCase(dataType.CustomType), nil
+		return qualifiedCppTypeName(dataType.CustomTypePackage, dataType.CustomType), nil
 	}
 	return mapDataTypeComparableToCppType(dataType.Type)
 }
@@ -294,10 +332,7 @@ func mapDataTypeDefinitionToCppType(dataType *parse.DataTypeDefinition) (string,
 		}
 		return fmt.Sprintf("std::vector<%s>", subtype), nil
 	case parse.DataTypeCustom:
-		if dataType.ImportedFromOtherPackage {
-			return fmt.Sprintf("%s::%s", convertPackageNameToCppNamespacePrefix(dataType.CustomTypePackage), util.EnsurePascalCase(dataType.CustomType)), nil
-		}
-		return util.EnsurePascalCase(dataType.CustomType), nil
+		return qualifiedCppTypeName(dataType.CustomTypePackage, dataType.CustomType), nil
 	}
 
 	return mapDataTypeToCppType(dataType.Type)
@@ -318,27 +353,49 @@ func mapDataTypeDefinitionToDefaultValue(dataType *parse.DataTypeDefinition) (st
 	return mapDataTypeToCppDefaultValue(dataType.Type)
 }
 
-func getMessageFieldArg(field *parse.MessageFieldDefinition) (MessageFieldArgs, error) {
+// isEnumType reports whether a custom type refers to an enum.
+func isEnumType(p *parse.Parse, dataType *parse.DataTypeDefinition) bool {
+	if p == nil || dataType.Type != parse.DataTypeCustom {
+		return false
+	}
+	pkg, ok := p.Packages[dataType.CustomTypePackage]
+	if !ok {
+		return false
+	}
+	_, ok = pkg.Enums[dataType.CustomType]
+	return ok
+}
+
+func getMessageFieldArg(p *parse.Parse, field *parse.MessageFieldDefinition) (MessageFieldArgs, error) {
 	cppType, err := mapDataTypeDefinitionToCppType(field.DataTypeDefinition)
 	if err != nil {
 		return MessageFieldArgs{}, err
 	}
 	defaultValue, err := mapDataTypeDefinitionToDefaultValue(field.DataTypeDefinition)
+	if err != nil {
+		return MessageFieldArgs{}, err
+	}
+	if isEnumType(p, field.DataTypeDefinition) {
+		// enum class members are otherwise left indeterminate when a message is
+		// default-initialized; zero them like every other scalar field
+		defaultValue = "{}"
+	}
 	return MessageFieldArgs{
 		FieldNameCamelCase: util.EnsureCamelCase(field.Name),
+		FieldJSONKey:       util.EnsureSnakeCase(field.Name),
 		FieldType:          cppType,
 		FieldDefaultValue:  defaultValue,
 	}, nil
 }
 
-func generateMessageCppCode(msg *parse.MessageDefinition) (string, error) {
+func generateMessageCppCode(p *parse.Parse, msg *parse.MessageDefinition) (string, error) {
 	args := MessageArgs{
 		MessageNamePascalCase: util.EnsurePascalCase(msg.Name),
 		MessageFields:         []MessageFieldArgs{},
 	}
 	fields := []string{}
 	for _, field := range msg.FieldsByIndex() {
-		fieldArg, err := getMessageFieldArg(field)
+		fieldArg, err := getMessageFieldArg(p, field)
 		if err != nil {
 			return "", err
 		}

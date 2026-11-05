@@ -4,40 +4,51 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/kbirk/scg/internal/parse"
 )
 
 func GenerateCppCode(baseDir string, outputDir string, p *parse.Parse) error {
-	for path, file := range p.Files {
+
+	enumStrings, err := validateCpp(p)
+	if err != nil {
+		return err
+	}
+
+	ctx := &cppContext{
+		parse:       p,
+		baseDir:     baseDir,
+		enumStrings: enumStrings,
+	}
+
+	paths := make([]string, 0, len(p.Files))
+	for path := range p.Files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		file := p.Files[path]
 
 		pkg, ok := p.Packages[file.Package.Name]
 		if !ok {
 			return fmt.Errorf("package not found: %s", file.Package.Name)
 		}
 
-		code, err := generateFileCppCode(baseDir, pkg, file)
+		code, err := generateFileCppCodeWithContext(ctx, pkg, file)
 		if err != nil {
 			return err
 		}
 
-		_, filename := filepath.Split(path)
-		filename = filename[:len(filename)-len(filepath.Ext(filename))]
-
-		outputFileAndPath := filepath.Join(outputDir, file.RelativePath, getOutputFileName(filename))
+		outputFileAndPath := filepath.Join(outputDir, file.RelativePath, getOutputFileName(path))
 
 		err = os.MkdirAll(filepath.Dir(outputFileAndPath), 0755)
 		if err != nil {
 			return err
 		}
 
-		outputFile, err := os.Create(outputFileAndPath)
-		if err != nil {
-			return err
-		}
-		defer outputFile.Close()
-
-		_, err = outputFile.WriteString(code)
+		err = os.WriteFile(outputFileAndPath, []byte(code), 0644)
 		if err != nil {
 			return err
 		}

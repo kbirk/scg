@@ -294,11 +294,14 @@ type ConstDeclarationParser struct {
 }
 
 func (p *ConstDeclarationParser) isThisQuoteEscaped(state *ParseState) bool {
-	// if previous character is a `\` and the one before that is not a `\`, it is escaped
-	if state.currentToken.Content[len(state.currentToken.Content)-2] == '\\' && state.currentToken.Content[len(state.currentToken.Content)-3] != '\\' {
-		return true
+	// The quote has already been appended to the token content. It is escaped
+	// iff it is preceded by an odd number of consecutive backslashes.
+	content := state.currentToken.Content
+	numBackslashes := 0
+	for i := len(content) - 2; i >= 0 && content[i] == '\\'; i-- {
+		numBackslashes++
 	}
-	return false
+	return numBackslashes%2 == 1
 }
 
 func (p *ConstDeclarationParser) Consume(c rune, state *ParseState) (TokenParser, error) {
@@ -309,6 +312,23 @@ func (p *ConstDeclarationParser) Consume(c rune, state *ParseState) (TokenParser
 	} else {
 		state.character++
 	}
+
+	if p.insideAQuote {
+		// Inside a string literal everything is literal content: a comment
+		// delimiter or a semi-colon does not terminate anything.
+		if c == '\n' {
+			return nil, fmt.Errorf("unterminated string literal")
+		}
+		state.currentToken.Content += string(c)
+		if c == '"' && !p.isThisQuoteEscaped(state) {
+			p.insideAQuote = false
+			// treat the closing quote as the end of the value word
+			state.word += string(c)
+			state.inWord = true
+		}
+		return p, nil
+	}
+
 	breakWord := false
 	if unicode.IsSpace(c) {
 		// whitespace
@@ -494,33 +514,21 @@ func (p *KeywordTokenParser) Consume(c rune, state *ParseState) (TokenParser, er
 	return p, nil
 }
 
+// getErrorTokenBasedOnState returns a zero-width token at the tokenizer's
+// current position, used to point error messages at the offending character.
 func getErrorTokenBasedOnState(content string, state *ParseState) *Token {
-
-	token := &Token{
-		Content:                    content,
-		LineStart:                  0,
-		LineEnd:                    state.line,
-		LineStartCharacterPosition: 0,
-		LineEndCharacterPosition:   state.character,
+	// state.character has already been advanced past the current character,
+	// so the current character's 0-based column is one less.
+	col := state.character - 1
+	if col < 0 {
+		col = 0
 	}
-
-	if len(state.tokens) > 0 {
-		lastToken := state.tokens[len(state.tokens)-1]
-		token.LineStart = lastToken.LineEnd
-		token.LineStartCharacterPosition = lastToken.LineEndCharacterPosition
-	} else {
-		if state.currentToken != nil {
-			token.LineStart = state.currentToken.LineStart
-			token.LineStartCharacterPosition = state.currentToken.LineStartCharacterPosition
-		}
-	}
-
 	return &Token{
 		Content:                    "",
 		LineStart:                  state.line,
 		LineEnd:                    state.line,
-		LineStartCharacterPosition: state.character,
-		LineEndCharacterPosition:   state.character,
+		LineStartCharacterPosition: col,
+		LineEndCharacterPosition:   col,
 	}
 }
 

@@ -198,7 +198,8 @@ func generateClientGoCode(pkg *parse.Package, svc *parse.ServiceDefinition) (str
 		ClientStreamMethods:  []ClientStreamMethodArgs{},
 	}
 
-	for name, method := range svc.Methods {
+	for _, method := range svc.MethodsSortedByKey() {
+		name := method.Name
 		methodID, err := pkg.HashStringToMethodID(svc.Name, name)
 		if err != nil {
 			return "", err

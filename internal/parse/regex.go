@@ -47,15 +47,17 @@ func createSubMatchToken(input *Token, startChar int, endChar int) (*Token, *Par
 	line := input.LineStart
 	character := input.LineStartCharacterPosition
 
-	count := 0
-	for _, c := range input.Content {
+	// startChar / endChar are byte offsets (as returned by the regexp
+	// package), while line / character positions count runes. Iterate by byte
+	// offset so that multi-byte UTF-8 content does not desynchronize the two.
+	for byteIndex, c := range input.Content {
 
-		if count == startChar {
+		if byteIndex == startChar {
 			res.LineStart = line
 			res.LineStartCharacterPosition = character
 		}
 
-		if count == endChar {
+		if byteIndex == endChar {
 			res.LineEnd = line
 			res.LineEndCharacterPosition = character
 		}
@@ -66,11 +68,9 @@ func createSubMatchToken(input *Token, startChar int, endChar int) (*Token, *Par
 		} else {
 			character++
 		}
-
-		count++
 	}
 
-	if count == endChar {
+	if len(input.Content) == endChar {
 		res.LineEnd = line
 		res.LineEndCharacterPosition = character
 	}

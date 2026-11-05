@@ -1,0 +1,450 @@
+package harness
+
+// Runtime tests for scg-generated Go code. internal/gen/runtime_test.go
+// generates testdata/runtime/schema into a temporary module, copies this file
+// next to it and runs `go test` there.
+//
+// To fuzz manually: copy the module the test prints with -v, then run
+// `go test -fuzz FuzzFromBytes`.
+
+import (
+	"bytes"
+	"encoding/json"
+	"math/rand"
+	"reflect"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/kbirk/scg/pkg/serialize"
+
+	"scgharness/gen/rt"
+)
+
+type message interface {
+	BitSize() int
+	Serialize(*serialize.Writer)
+	Deserialize(*serialize.Reader) error
+	ToBytes() []byte
+	FromBytes([]byte) error
+}
+
+// allocated returns the bytes allocated while running f. TotalAlloc is
+// monotonic, so no GC is needed.
+func allocated(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+func hostileFrame(count uint32, payload []byte) []byte {
+	w := serialize.NewWriter(8)
+	serialize.SerializeUInt32(w, count)
+	w.WriteBytes(payload)
+	return w.Bytes()
+}
+
+// A list<Big> frame declaring as many elements as it has bytes: each Big is at
+// least 268 bits (8 strings, 2 timestamps, 2 uuids), so the length is impossible and must be rejected before the
+// ~208 bytes per element are preallocated (previously 1 MiB -> 208 MiB).
+func TestHostileListLengthIsRejectedBeforeAllocating(t *testing.T) {
+	payload := make([]byte, 1<<20)
+	frame := hostileFrame(uint32(len(payload)+5), payload)
+
+	var err error
+	n := allocated(func() {
+		var m rt.ListBig
+		err = m.FromBytes(frame)
+	})
+	if err == nil {
+		t.Fatal("expected an error for an impossible list length")
+	}
+	if n > 1<<20 {
+		t.Fatalf("decoding a 1 MiB frame allocated %d bytes", n)
+	}
+
+	n = allocated(func() {
+		var m rt.MapBig
+		err = m.FromBytes(frame)
+	})
+	if err == nil {
+		t.Fatal("expected an error for an impossible map length")
+	}
+	if n > 1<<20 {
+		t.Fatalf("decoding a 1 MiB frame allocated %d bytes", n)
+	}
+}
+
+// A plausible length followed by garbage: the length passes the minimum-size
+// check, so the preallocation must stay within the budget (16x the frame).
+func TestPlausibleListLengthPreallocationIsBounded(t *testing.T) {
+	payload := make([]byte, 256<<10)
+	rand.New(rand.NewSource(1)).Read(payload)
+	count := uint32(len(payload) * 8 / 268)
+	frame := hostileFrame(count, payload)
+
+	n := allocated(func() {
+		var m rt.ListBig
+		_ = m.FromBytes(frame)
+	})
+	if limit := uint64(16*len(frame) + (1 << 20)); n > limit {
+		t.Fatalf("decoding a %d byte frame allocated %d bytes (limit %d)", len(frame), n, limit)
+	}
+}
+
+func TestLargeLegitimateListsRoundTrip(t *testing.T) {
+	big := rt.ListBig{}
+	for i := 0; i < 10000; i++ {
+		big.Items = append(big.Items, rt.Big{S0: "x", U0: uuid.New(), T0: time.Unix(int64(i), 0)})
+	}
+	var decoded rt.ListBig
+	if err := decoded.FromBytes(big.ToBytes()); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Items) != 10000 || decoded.Items[9999].U0 != big.Items[9999].U0 {
+		t.Fatal("list<Big> did not round trip")
+	}
+
+	ints := rt.ListInt{Items: make([]int32, 200000)}
+	for i := range ints.Items {
+		ints.Items[i] = int32(i * 7)
+	}
+	var decodedInts rt.ListInt
+	if err := decodedInts.FromBytes(ints.ToBytes()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ints.Items, decodedInts.Items) {
+		t.Fatal("list<int32> did not round trip")
+	}
+}
+
+// list<byte> / list<uint8> are (de)serialized in bulk; the encoding must be
+// identical to the element-by-element encoding of a uint32 count followed by
+// one SerializeUInt8 per element, including at an unaligned bit offset.
+func TestByteListsAreWireIdenticalToElementwiseEncoding(t *testing.T) {
+	for _, n := range []int{0, 1, 7, 8, 9, 300, 4096} {
+		data := make([]byte, n)
+		rand.New(rand.NewSource(int64(n))).Read(data)
+		m := rt.Bytes{Misalign: true, Data: data, More: data, Nested: [][]byte{data, {}, data}}
+
+		w := serialize.NewWriter(0)
+		serialize.SerializeBool(w, true)
+		elementwise := func(bs []byte) {
+			serialize.SerializeUInt32(w, uint32(len(bs)))
+			for _, b := range bs {
+				serialize.SerializeUInt8(w, b)
+			}
+		}
+		elementwise(data)
+		elementwise(data)
+		serialize.SerializeUInt32(w, 3)
+		elementwise(data)
+		elementwise([]byte{})
+		elementwise(data)
+
+		if !bytes.Equal(m.ToBytes(), w.Bytes()) {
+			t.Fatalf("n=%d: bulk byte list encoding differs from the elementwise encoding", n)
+		}
+		if serialize.BitsToBytes(m.BitSize()) != len(w.Bytes()) {
+			t.Fatalf("n=%d: BitSize disagrees with the encoded length", n)
+		}
+
+		var decoded rt.Bytes
+		if err := decoded.FromBytes(w.Bytes()); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(decoded.Data, data) || !bytes.Equal(decoded.More, data) || len(decoded.Nested) != 3 {
+			t.Fatalf("n=%d: byte lists did not round trip", n)
+		}
+		if decoded.Nested[1] == nil {
+			t.Fatal("an empty byte list must decode to a non-nil slice, as before")
+		}
+	}
+}
+
+func TestByteListLengthIsBounded(t *testing.T) {
+	w := serialize.NewWriter(0)
+	serialize.SerializeBool(w, true) // misalign
+	serialize.SerializeUInt32(w, 1<<30)
+	w.WriteBytes(make([]byte, 64))
+	frame := w.Bytes()
+	var m rt.Bytes
+	n := allocated(func() {
+		if err := m.FromBytes(frame); err == nil {
+			t.Fatal("expected an error")
+		}
+	})
+	if n > 1<<20 {
+		t.Fatalf("allocated %d bytes", n)
+	}
+}
+
+// randomFill populates v with random data, recursively.
+func randomFill(r *rand.Rand, v reflect.Value, depth int) {
+	switch v.Kind() {
+	case reflect.Bool:
+		v.SetBool(r.Intn(2) == 1)
+	case reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		bits := v.Type().Bits()
+		x := r.Int63()
+		if r.Intn(2) == 0 {
+			x = -x
+		}
+		if r.Intn(3) == 0 {
+			x = int64(r.Intn(5)) - 2
+		}
+		v.SetInt(x >> (64 - bits))
+	case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		bits := v.Type().Bits()
+		x := r.Uint64()
+		if r.Intn(3) == 0 {
+			x = uint64(r.Intn(3))
+		}
+		if v.Type().Name() == "Kind" {
+			v.SetUint(uint64(r.Intn(3)))
+			return
+		}
+		v.SetUint(x >> (64 - bits))
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(r.NormFloat64() * 1e6)
+	case reflect.String:
+		b := make([]byte, r.Intn(12))
+		r.Read(b)
+		v.SetString(string(b))
+	case reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			randomFill(r, v.Index(i), depth+1)
+		}
+	case reflect.Slice:
+		if depth > 3 {
+			v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+			return
+		}
+		n := r.Intn(5)
+		s := reflect.MakeSlice(v.Type(), n, n)
+		for i := 0; i < n; i++ {
+			randomFill(r, s.Index(i), depth+1)
+		}
+		v.Set(s)
+	case reflect.Map:
+		n := r.Intn(4)
+		if depth > 3 {
+			n = 0
+		}
+		m := reflect.MakeMapWithSize(v.Type(), n)
+		for i := 0; i < n; i++ {
+			k := reflect.New(v.Type().Key()).Elem()
+			randomFill(r, k, depth+1)
+			e := reflect.New(v.Type().Elem()).Elem()
+			randomFill(r, e, depth+1)
+			m.SetMapIndex(k, e)
+		}
+		v.Set(m)
+	case reflect.Struct:
+		if v.Type() == reflect.TypeOf(time.Time{}) {
+			sec := r.Int63n(4_000_000_000) - 2_000_000_000
+			v.Set(reflect.ValueOf(time.Unix(sec, r.Int63n(1_000_000_000))))
+			return
+		}
+		for i := 0; i < v.NumField(); i++ {
+			if v.Field(i).CanSet() {
+				randomFill(r, v.Field(i), depth+1)
+			}
+		}
+	}
+}
+
+// equal compares decoded values, treating times by instant.
+func equal(a, b reflect.Value) bool {
+	if a.Type() == reflect.TypeOf(time.Time{}) {
+		return a.Interface().(time.Time).Equal(b.Interface().(time.Time))
+	}
+	switch a.Kind() {
+	case reflect.Struct:
+		for i := 0; i < a.NumField(); i++ {
+			if !equal(a.Field(i), b.Field(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Slice, reflect.Array:
+		if a.Len() != b.Len() {
+			return false
+		}
+		for i := 0; i < a.Len(); i++ {
+			if !equal(a.Index(i), b.Index(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if a.Len() != b.Len() {
+			return false
+		}
+		for _, k := range a.MapKeys() {
+			bv := b.MapIndex(k)
+			if !bv.IsValid() || !equal(a.MapIndex(k), bv) {
+				return false
+			}
+		}
+		return true
+	case reflect.Float32, reflect.Float64:
+		return a.Float() == b.Float()
+	}
+	return reflect.DeepEqual(a.Interface(), b.Interface())
+}
+
+// BitSize must equal the number of bits Serialize writes. Serializing after k
+// leading bits (k = 0..7) and checking the byte length catches any off-by-n,
+// and decoding checks that Deserialize consumes exactly those bits.
+func TestBitSizeEqualsBitsWritten(t *testing.T) {
+	r := rand.New(rand.NewSource(42))
+	for iter := 0; iter < 300; iter++ {
+		var m rt.Everything
+		randomFill(r, reflect.ValueOf(&m).Elem(), 0)
+		size := m.BitSize()
+		for k := 0; k < 8; k++ {
+			w := serialize.NewWriter(0)
+			for i := 0; i < k; i++ {
+				serialize.SerializeBool(w, true)
+			}
+			m.Serialize(w)
+			serialize.SerializeBool(w, true) // trailing marker
+			if got, want := len(w.Bytes()), serialize.BitsToBytes(k+size+1); got != want {
+				t.Fatalf("iteration %d, offset %d: wrote %d bytes, BitSize %d implies %d", iter, k, got, size, want)
+			}
+
+			reader := serialize.NewReader(w.Bytes())
+			for i := 0; i < k; i++ {
+				var b bool
+				if err := serialize.DeserializeBool(&b, reader); err != nil || !b {
+					t.Fatal("bad prefix")
+				}
+			}
+			var decoded rt.Everything
+			if err := decoded.Deserialize(reader); err != nil {
+				t.Fatalf("iteration %d: %v", iter, err)
+			}
+			var marker bool
+			if err := serialize.DeserializeBool(&marker, reader); err != nil || !marker {
+				t.Fatalf("iteration %d, offset %d: Deserialize did not consume exactly the bits written", iter, k)
+			}
+			if k == 0 && !equal(reflect.ValueOf(m), reflect.ValueOf(decoded)) {
+				t.Fatalf("iteration %d: round trip mismatch", iter)
+			}
+		}
+	}
+}
+
+func decodeTargets() []func() message {
+	return []func() message{
+		func() message { return &rt.Everything{} },
+		func() message { return &rt.ListBig{} },
+		func() message { return &rt.MapBig{} },
+		func() message { return &rt.Bytes{} },
+		func() message { return &rt.ListInt{} },
+	}
+}
+
+// checkDecode decodes arbitrary input into every message type: it must never
+// panic, and must stay within an allocation budget proportional to the input.
+func checkDecode(t *testing.T, input []byte) {
+	for _, newMsg := range decodeTargets() {
+		m := newMsg()
+		n := allocated(func() {
+			_ = m.FromBytes(input)
+		})
+		if limit := uint64(64*len(input) + (1 << 20)); n > limit {
+			t.Fatalf("%T: decoding %d bytes allocated %d (limit %d)", m, len(input), n, limit)
+		}
+	}
+}
+
+func seedInputs() [][]byte {
+	r := rand.New(rand.NewSource(7))
+	var seeds [][]byte
+	for i := 0; i < 20; i++ {
+		var m rt.Everything
+		randomFill(r, reflect.ValueOf(&m).Elem(), 0)
+		bs := m.ToBytes()
+		seeds = append(seeds, bs, bs[:len(bs)/2])
+	}
+	seeds = append(seeds, []byte{}, []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
+	return seeds
+}
+
+func TestRandomInputsDoNotPanicOrOverAllocate(t *testing.T) {
+	r := rand.New(rand.NewSource(99))
+	for _, seed := range seedInputs() {
+		checkDecode(t, seed)
+		// mutate valid encodings, the most interesting inputs
+		for i := 0; i < 20 && len(seed) > 0; i++ {
+			mutated := append([]byte(nil), seed...)
+			for j := 0; j < 1+r.Intn(4); j++ {
+				mutated[r.Intn(len(mutated))] = byte(r.Intn(256))
+			}
+			checkDecode(t, mutated)
+		}
+	}
+	for i := 0; i < 200; i++ {
+		b := make([]byte, r.Intn(64))
+		r.Read(b)
+		checkDecode(t, b)
+	}
+}
+
+func FuzzFromBytes(f *testing.F) {
+	for _, seed := range seedInputs() {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, input []byte) {
+		checkDecode(t, input)
+	})
+}
+
+// uuid typedefs encode like uuid.UUID: a canonical string, usable as a JSON
+// map key, while still accepting the array of 16 numbers that earlier
+// generated code wrote.
+func TestUUIDTypedefJSON(t *testing.T) {
+	id := rt.ID(uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8"))
+
+	bs, err := json.Marshal(id)
+	if err != nil || string(bs) != `"6ba7b810-9dad-11d1-80b4-00c04fd430c8"` {
+		t.Fatalf("Marshal: %s %v", bs, err)
+	}
+
+	m := rt.Everything{TypedID: id, ByID: map[rt.ID]rt.Big{id: {S0: "x"}}}
+	text, err := m.ToJSON()
+	if err != nil {
+		t.Fatalf("ToJSON with a uuid typedef map key: %v", err)
+	}
+	if !bytes.Contains(text, []byte(`"by_id":{"6ba7b810-9dad-11d1-80b4-00c04fd430c8":`)) {
+		t.Fatalf("unexpected JSON: %s", text)
+	}
+	var decoded rt.Everything
+	if err := decoded.FromJSON(text); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.TypedID != id || decoded.ByID[id].S0 != "x" {
+		t.Fatal("uuid typedef did not round trip through JSON")
+	}
+
+	// the legacy encoding: an array of 16 numbers
+	legacy, _ := json.Marshal([16]byte(id))
+	var fromLegacy rt.ID
+	if err := json.Unmarshal(legacy, &fromLegacy); err != nil || fromLegacy != id {
+		t.Fatalf("legacy array form: %v", err)
+	}
+
+	// null is a no-op, as for other types
+	keep := id
+	if err := json.Unmarshal([]byte("null"), &keep); err != nil || keep != id {
+		t.Fatalf("null: %v", err)
+	}
+	if err := json.Unmarshal([]byte(`"not-a-uuid"`), &keep); err == nil {
+		t.Fatal("expected an error")
+	}
+}

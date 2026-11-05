@@ -151,23 +151,37 @@ public:
 
 class {{.ClientNamePascalCase}}Client final : public {{.ClientNamePascalCase}}Api {
 public:
+	// Takes ownership of client and deletes it when the last copy of this
+	// object is destroyed. Deprecated because that is easy to misuse (passing a
+	// pointer owned elsewhere double-deletes it).
+	[[deprecated("takes ownership of the raw pointer; pass a std::shared_ptr<scg::rpc::Client>, or a scg::rpc::Client& for a non-owning client")]]
 	inline explicit
 	{{.ClientNamePascalCase}}Client(scg::rpc::Client* client) : client_(client) {}
 
+	// Non-owning: the caller must keep client alive for the lifetime of this object.
 	inline explicit
-	{{.ClientNamePascalCase}}Client(std::shared_ptr<scg::rpc::Client> client) : client_(client) {}
+	{{.ClientNamePascalCase}}Client(scg::rpc::Client& client) : client_(std::shared_ptr<scg::rpc::Client>(), &client) {}
+
+	inline explicit
+	{{.ClientNamePascalCase}}Client(std::shared_ptr<scg::rpc::Client> client) : client_(std::move(client)) {}
 	{{range .ClientMethods}}
 	inline std::pair<{{.MethodResponseStructName}}, scg::error::Error> {{.MethodNameCamelCase}}(scg::context::Context& ctx, const {{.MethodRequestStructName}}& req) override
 	{
 		{{.MethodResponseStructName}} resp;
 		auto err = {{.MethodNameCamelCase}}(&resp, ctx, req);
-		return std::pair(resp, err);
+		return std::pair(std::move(resp), err);
 	}
 
 	inline scg::error::Error {{.MethodNameCamelCase}}({{.MethodResponseStructName}}* resp, scg::context::Context& c, const {{.MethodRequestStructName}}& req) const
 	{
-		auto handler = [this, req, resp](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
-			auto [reader, err] = client_->call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, req);
+		auto handler = [this, resp](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
+			// send the request passed down the middleware chain, which a
+			// middleware may have replaced
+			const auto* typedReq = dynamic_cast<const {{.MethodRequestStructName}}*>(&r);
+			if (!typedReq) {
+				return std::make_pair(nullptr, scg::error::Error("Invalid request type"));
+			}
+			auto [reader, err] = client_->call(ctx, {{$.ServiceIDVarName}}, {{.MethodIDVarName}}, *typedReq);
 			if (err) {
 				return std::make_pair(nullptr, err);
 			}
@@ -292,7 +306,8 @@ func generateClientCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		ClientStreamMethods:  []ClientStreamMethodArgs{},
 	}
 
-	for name, method := range svc.Methods {
+	for _, method := range svc.MethodsSortedByKey() {
+		name := method.Name
 		methodID, err := pkg.HashStringToMethodID(svc.Name, name)
 		if err != nil {
 			return "", err

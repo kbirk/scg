@@ -13,6 +13,9 @@ var (
 )
 
 type ServiceMethodDefinition struct {
+	// ID is the wire method ID, assigned after resolution as the FNV-1a hash
+	// of the package-qualified "pkg.Service/Method" name.
+	ID             uint64
 	Name           string
 	Argument       *DataTypeDefinition
 	ArgumentStream bool
@@ -27,10 +30,23 @@ func (m *ServiceMethodDefinition) IsStreaming() bool {
 }
 
 type ServiceDefinition struct {
+	// ID is the wire service ID, assigned after resolution as the FNV-1a hash
+	// of the package-qualified "pkg.Service" name.
+	ID      uint64
 	Name    string
 	Methods map[string]*ServiceMethodDefinition
 	File    *File
 	Token   *Token
+}
+
+// MethodsSortedByKey returns the service's methods sorted by name, for
+// deterministic output.
+func (s *ServiceDefinition) MethodsSortedByKey() []*ServiceMethodDefinition {
+	res := make([]*ServiceMethodDefinition, 0, len(s.Methods))
+	for _, k := range sortedKeys(s.Methods) {
+		res = append(res, s.Methods[k])
+	}
+	return res
 }
 
 func tokenizeServiceMethods(input *Token) ([]*Token, *ParsingError) {

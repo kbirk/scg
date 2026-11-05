@@ -1,0 +1,5 @@
+package serialize;
+
+message Payload {
+	string s = 0;
+}

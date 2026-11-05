@@ -16,7 +16,7 @@ func TestGenerateMessagesCpp(t *testing.T) {
 
 	for _, pkg := range p.Packages {
 		for _, msg := range pkg.MessageDefinitions {
-			str, err := generateMessageCppCode(msg)
+			str, err := generateMessageCppCode(p, msg)
 			require.Nil(t, err)
 
 			fmt.Println(str)

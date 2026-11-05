@@ -54,6 +54,42 @@ func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) Scan(src inte
 {{end}}
 }
 
+{{- if .IsUUID}}
+
+// MarshalText encodes the ID as a canonical UUID string, like uuid.UUID. It
+// also makes the type usable as a JSON map key.
+func ({{.TypedefNameNameFirstLetter}} {{.TypedefNamePascalCase}}) MarshalText() ([]byte, error) {
+	return uuid.UUID({{.TypedefNameNameFirstLetter}}).MarshalText()
+}
+
+// UnmarshalText decodes a UUID string, like uuid.UUID.
+func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) UnmarshalText(data []byte) error {
+	return (*uuid.UUID)({{.TypedefNameNameFirstLetter}}).UnmarshalText(data)
+}
+
+// MarshalJSON encodes the ID as a JSON string, like uuid.UUID.
+func ({{.TypedefNameNameFirstLetter}} {{.TypedefNamePascalCase}}) MarshalJSON() ([]byte, error) {
+	return json.Marshal(uuid.UUID({{.TypedefNameNameFirstLetter}}))
+}
+
+// UnmarshalJSON decodes a JSON string, and also the array of 16 numbers that
+// earlier generated code wrote for this type.
+func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
+	if len(data) > 0 && data[0] == '[' {
+		var legacy [16]byte
+		if err := json.Unmarshal(data, &legacy); err != nil {
+			return err
+		}
+		*{{.TypedefNameNameFirstLetter}} = {{.TypedefNamePascalCase}}(legacy)
+		return nil
+	}
+	return json.Unmarshal(data, (*uuid.UUID)({{.TypedefNameNameFirstLetter}}))
+}
+{{- end}}
+
 func ({{.TypedefNameNameFirstLetter}} *{{.TypedefNamePascalCase}}) BitSize() int {
 	return serialize.BitSize{{.TypedefUnderlyingTypePascalCase}}(*(*{{.TypedefUnderlyingType}})({{.TypedefNameNameFirstLetter}}))
 }

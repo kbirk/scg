@@ -124,12 +124,18 @@ public:
 			return scg::rpc::respondWithError(requestID, err);
 		}
 
-		auto handler = [this, &req](scg::context::Context& ctx, const scg::type::Message& r) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
-			auto [resp, err] = impl_->{{.MethodNameCamelCase}}(ctx, req);
-			if (err) {
-				return std::make_pair(nullptr, err);
+		auto handler = [this](scg::context::Context& handlerCtx, const scg::type::Message& r) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
+			// handle the request passed down the middleware chain, which a
+			// middleware may have replaced
+			const auto* typedReq = dynamic_cast<const {{.MethodRequestStructName}}*>(&r);
+			if (!typedReq) {
+				return std::make_pair(nullptr, scg::error::Error("Invalid request type"));
 			}
-			return std::make_pair(std::make_shared<{{.MethodResponseStructName}}>(resp), nullptr);
+			auto [resp, handlerErr] = impl_->{{.MethodNameCamelCase}}(handlerCtx, *typedReq);
+			if (handlerErr) {
+				return std::make_pair(nullptr, handlerErr);
+			}
+			return std::make_pair(std::make_shared<{{.MethodResponseStructName}}>(std::move(resp)), nullptr);
 		};
 
 		auto result = scg::middleware::applyHandlerChain(const_cast<scg::context::Context&>(ctx), req, middleware, handler);
@@ -153,15 +159,24 @@ public:
 			return scg::rpc::respondWithError(requestID, err);
 		}
 
+{{- if .ServerMethods}}
 		switch (methodID) { {{- range .ServerMethods}}
 		case {{.MethodIDVarName}}:
 			return handle{{.MethodNamePascalCase}}(ctx, middleware, requestID, reader);{{end}}
 		default:
 			return scg::rpc::respondWithError(requestID, scg::error::Error("Unrecognized method ID: " + std::to_string(methodID)));
 		}
+{{- else}}
+		// no unary methods
+		(void)ctx;
+		(void)middleware;
+		return scg::rpc::respondWithError(requestID, scg::error::Error("Unrecognized method ID: " + std::to_string(methodID)));
+{{- end}}
 	}
 
 	scg::error::Error handleStreamWrapper(const scg::context::Context& ctx, std::shared_ptr<scg::rpc::ServerStream> stream, uint64_t methodID) {
+		(void)ctx;
+{{- if .ServerStreamMethods}}
 		switch (methodID) { {{- range .ServerStreamMethods}}
 		case {{.MethodIDVarName}}: {
 			{{if eq .Kind "bidi"}}return impl_->{{.MethodNameCamelCase}}(std::make_shared<{{.StreamTypeName}}>(stream));{{else if eq .Kind "server"}}scg::serialize::Reader reader({});
@@ -184,6 +199,11 @@ public:
 		default:
 			return scg::error::Error("Unrecognized stream method ID: " + std::to_string(methodID));
 		}
+{{- else}}
+		// no streaming methods
+		(void)stream;
+		return scg::error::Error("Unrecognized stream method ID: " + std::to_string(methodID));
+{{- end}}
 	}
 
 private:
@@ -249,7 +269,8 @@ func generateServerCppCode(pkg *parse.Package, svc *parse.ServiceDefinition) (st
 		ServerStubClassName:  getServerStubClassName(svc.Name),
 	}
 
-	for name, method := range svc.Methods {
+	for _, method := range svc.MethodsSortedByKey() {
+		name := method.Name
 		methodID, err := pkg.HashStringToMethodID(svc.Name, name)
 		if err != nil {
 			return "", err

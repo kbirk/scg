@@ -1,0 +1,5 @@
+package files;
+
+message Thing {
+	int32 x = 0;
+}

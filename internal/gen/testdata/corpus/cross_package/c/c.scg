@@ -1,0 +1,13 @@
+package another.pc;
+
+# A local Foo alongside pa.Foo and pb.Foo.
+message Foo {
+	string z = 0;
+}
+
+message Bar {
+	pa.Foo a = 0;
+	pb.Foo b = 1;
+	Foo local = 2;
+	map<pa.Kind, list<pb.Foo>> nested = 3;
+}

@@ -3,6 +3,7 @@ package go_gen
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"text/template"
 
 	"github.com/kbirk/scg/internal/parse"
@@ -43,16 +44,27 @@ func getConstPrefix(typ *parse.DataTypeComparableDefinition, underlyingType *par
 
 func getConstValue(typ *parse.DataTypeComparableDefinition, underlyingType *parse.DataTypeComparableDefinition, value string) (string, error) {
 	switch typ.Type {
-	case parse.DataTypeComparableUInt8, parse.DataTypeComparableUInt16, parse.DataTypeComparableUInt32, parse.DataTypeComparableUInt64:
-		return value, nil
-	case parse.DataTypeComparableInt8, parse.DataTypeComparableInt16, parse.DataTypeComparableInt32, parse.DataTypeComparableInt64:
-		return value, nil
-	case parse.DataTypeComparableFloat32, parse.DataTypeComparableFloat64:
+	case parse.DataTypeComparableUInt8, parse.DataTypeComparableUInt16, parse.DataTypeComparableUInt32, parse.DataTypeComparableUInt64,
+		parse.DataTypeComparableInt8, parse.DataTypeComparableInt16, parse.DataTypeComparableInt32, parse.DataTypeComparableInt64,
+		parse.DataTypeComparableFloat32, parse.DataTypeComparableFloat64:
+		// validated literals (decimal without leading zeros, 0x hex, plain
+		// floats) mean the same thing in Go as in the schema
+		if err := parse.ValidateConstValues(typ.Type, value); err != nil {
+			return "", err
+		}
 		return value, nil
 	case parse.DataTypeComparableString:
-		return value, nil
+		str, err := parse.ConstStringValue(value)
+		if err != nil {
+			return "", err
+		}
+		return strconv.Quote(str), nil
 	case parse.DataTypeComparableUUID:
-		return fmt.Sprintf("uuid.MustParse(%s)", value), nil
+		id, err := parse.ConstUUIDValue(value)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("uuid.MustParse(%q)", id.String()), nil
 	case parse.DataTypeComparableCustom:
 		if underlyingType == nil {
 			return "", fmt.Errorf("underlying type is nil")

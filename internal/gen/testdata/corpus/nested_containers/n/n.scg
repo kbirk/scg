@@ -1,0 +1,31 @@
+package n;
+
+enum E {
+	A = 0;
+	B = 1;
+}
+
+typedef Time = int64;
+
+message Inner {
+	bool flag = 0;
+	list<bool> bits = 1;
+}
+
+message Empty {}
+
+message Nested {
+	list<map<string, int32>> list_of_maps = 0;
+	map<string, list<map<int32, list<E>>>> deep = 1;
+	list<list<byte>> byte_lists = 2;
+	list<list<uint8>> uint8_lists = 3;
+	map<E, list<Inner>> by_enum = 4;
+	map<string, Empty> empties = 5;
+	list<Time> typedef_times = 6;
+	list<timestamp> timestamps = 7;
+	list<uuid> ids = 8;
+	map<uuid, list<float64>> floats = 9;
+	list<list<list<string>>> strings = 10;
+	map<string, list<byte>> blobs = 11;
+	map<string, list<list<uint8>>> blob_lists = 12;
+}

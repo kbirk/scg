@@ -1,0 +1,5 @@
+package defs;
+
+typedef MyString = string;
+typedef MyID = uuid;
+typedef MyInt = int32;

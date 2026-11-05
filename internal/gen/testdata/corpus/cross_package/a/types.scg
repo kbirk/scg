@@ -1,0 +1,9 @@
+package pa;
+
+message Foo {
+	int32 x = 0;
+}
+
+enum Kind {
+	One = 0;
+}

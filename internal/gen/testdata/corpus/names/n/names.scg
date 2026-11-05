@@ -1,0 +1,48 @@
+package names;
+
+# Identifiers that used to clash with generated locals / members, but are
+# valid now.
+message Message {
+	int32 size = 0;
+	string value = 1;
+	string type = 2;
+	string data = 3;
+	string j = 4;
+	string str = 5;
+	string writer = 6;
+	string reader = 7;
+	string m = 8;
+	list<string> ids = 9;
+	string url = 10;
+}
+
+message Error {
+	string message = 0;
+}
+
+# A message named Message used as a field type: inside another message (which
+# derives from scg::type::Message) the unqualified name would resolve to the
+# base class, so generated C++ fully qualifies custom types.
+message Holder {
+	Message msg = 0;
+	list<Message> msgs = 1;
+	map<string, Message> by_name = 2;
+	Error error = 3;
+}
+
+message Time {
+	timestamp at = 0;
+}
+
+enum Method {
+	Get = 0;
+	Post = 1;
+	Put = 2;
+}
+
+service Names {
+	rpc Fetch (Message) returns (Error);
+	rpc Stream (stream Message) returns (stream Time);
+	rpc Upload (stream Message) returns (Error);
+	rpc Download (Message) returns (stream Time);
+}

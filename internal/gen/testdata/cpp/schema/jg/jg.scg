@@ -1,0 +1,20 @@
+package jg;
+
+# Schema for testdata/cpp/json_generated_test.cpp (TestCppGeneratedJSON).
+
+message Empty {}
+
+enum Kind {
+	A = 0;
+	B = 1;
+}
+
+message Fields {
+	int32 a = 0;
+	string b = 1;
+	list<timestamp> stamps = 2;
+	Empty empty = 3;
+	Kind kind = 4;
+	uint32 count = 5;
+	float32 ratio = 6;
+}

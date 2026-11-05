@@ -1,0 +1,18 @@
+package defs;
+
+# A const-only file: needs its own includes / imports.
+const string Hash = "a#b"; # the first '#' is part of the string
+const string Escapes = "quote \" backslash \\ tab \t newline \n hex \x41 unicode é 世界";
+const uuid ID = "12345678-1234-5678-1234-567812345678";
+const uuid UpperID = "123E4567-E89B-12D3-A456-426614174000";
+const uint64 MaxU64 = 18446744073709551615;
+const int64 MinI64 = -9223372036854775808;
+const int64 MaxI64 = 9223372036854775807;
+const uint32 HexValue = 0xFFFFFFFF;
+const int32 Positive = +5;
+const string Apostrophe = "it\'s \"quoted\" \?\?= done";
+const float64 Sci = -2.5e-3;
+const float32 Half = .5;
+const MyString TypedString = "typed";
+const MyID TypedID = "123e4567-e89b-12d3-a456-426614174000";
+const MyInt TypedInt = 42;

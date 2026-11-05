@@ -38,7 +38,49 @@ var (
 	fileTemplate = template.Must(template.New("fileTemplate").Parse(fileTemplateStr))
 )
 
+// goContext carries generation-wide state.
+type goContext struct {
+	parse       *parse.Parse
+	basePackage string
+	// pkgDirs maps each scg package to the directory (relative to the input /
+	// output root) holding its files, which determines its Go import path.
+	pkgDirs map[string]string
+}
+
+func newGoContext(basePackage string, p *parse.Parse) *goContext {
+	return &goContext{
+		parse:       p,
+		basePackage: basePackage,
+		pkgDirs:     packageDirectories(p),
+	}
+}
+
+// packageDirectories maps every package to the directory of its files. When a
+// package spans several directories (rejected by validateGo), the
+// lexicographically first one is used.
+func packageDirectories(p *parse.Parse) map[string]string {
+	dirs := map[string]string{}
+	if p == nil {
+		return dirs
+	}
+	for _, file := range p.Files {
+		dir := file.RelativePath
+		if dir == "" {
+			dir = "."
+		}
+		existing, ok := dirs[file.Package.Name]
+		if !ok || dir < existing {
+			dirs[file.Package.Name] = dir
+		}
+	}
+	return dirs
+}
+
 func generateFileGoCode(basePackage string, pkg *parse.Package, file *parse.File) (string, error) {
+	return generateFileGoCodeWithContext(&goContext{basePackage: basePackage}, pkg, file)
+}
+
+func generateFileGoCodeWithContext(ctx *goContext, pkg *parse.Package, file *parse.File) (string, error) {
 
 	headerCode, err := generateHeaderGo(file)
 	if err != nil {
@@ -50,7 +92,7 @@ func generateFileGoCode(basePackage string, pkg *parse.Package, file *parse.File
 		return "", err
 	}
 
-	importCode, err := generateImportsGoCode(basePackage, file)
+	importCode, err := generateImportsGoCodeWithDirs(ctx.basePackage, file, ctx.pkgDirs)
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +126,7 @@ func generateFileGoCode(basePackage string, pkg *parse.Package, file *parse.File
 
 	var messageCode []string
 	for _, msg := range file.MessagesSortedByKey() {
-		message, err := generateMessageGoCode(msg)
+		message, err := generateMessageGoCode(ctx.parse, msg)
 		if err != nil {
 			return "", err
 		}
@@ -101,7 +143,7 @@ func generateFileGoCode(basePackage string, pkg *parse.Package, file *parse.File
 	}
 
 	var clientCode []string
-	for _, svc := range file.ServiceDefinitions {
+	for _, svc := range file.ServicesSortedByKey() {
 		client, err := generateClientGoCode(pkg, svc)
 		if err != nil {
 			return "", err

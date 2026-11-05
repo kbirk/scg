@@ -42,7 +42,22 @@ var (
 	fileTemplate = template.Must(template.New("fileTemplate").Parse(fileTemplateStr))
 )
 
+// cppContext carries generation-wide state.
+type cppContext struct {
+	parse   *parse.Parse
+	baseDir string
+	// enumStrings holds, per package, which enum string constants to emit
+	// (see planEnumStringNames).
+	enumStrings map[string]*enumStringNames
+}
+
 func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (string, error) {
+	return generateFileCppCodeWithContext(&cppContext{baseDir: baseDir}, pkg, file)
+}
+
+func generateFileCppCodeWithContext(ctx *cppContext, pkg *parse.Package, file *parse.File) (string, error) {
+
+	baseDir := ctx.baseDir
 
 	headerCode, err := generateHeaderCpp(file)
 	if err != nil {
@@ -58,7 +73,7 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 
 	var enumCode []string
 	for _, msg := range file.EnumsSortedByKey() {
-		enum, err := generateEnumCppCode(msg)
+		enum, err := generateEnumCppCodeWithNames(msg, ctx.enumStrings[pkg.Name])
 		if err != nil {
 			return "", err
 		}
@@ -85,7 +100,7 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 
 	var messageCode []string
 	for _, msg := range file.MessagesSortedByDependenciesAndKeys() {
-		message, err := generateMessageCppCode(msg)
+		message, err := generateMessageCppCode(ctx.parse, msg)
 		if err != nil {
 			return "", err
 		}
@@ -93,7 +108,7 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 	}
 
 	var serverCode []string
-	for _, svc := range file.ServiceDefinitions {
+	for _, svc := range file.ServicesSortedByKey() {
 		service, err := generateServerCppCode(pkg, svc)
 		if err != nil {
 			return "", err
@@ -102,7 +117,7 @@ func generateFileCppCode(baseDir string, pkg *parse.Package, file *parse.File) (
 	}
 
 	var clientCode []string
-	for _, svc := range file.ServiceDefinitions {
+	for _, svc := range file.ServicesSortedByKey() {
 		client, err := generateClientCppCode(pkg, svc)
 		if err != nil {
 			return "", err

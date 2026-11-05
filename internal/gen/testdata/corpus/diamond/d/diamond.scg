@@ -1,0 +1,105 @@
+package diamond;
+
+message M0 {
+	M1 a = 0;
+	M1 b = 1;
+}
+
+message M1 {
+	M2 a = 0;
+	M2 b = 1;
+}
+
+message M2 {
+	M3 a = 0;
+	M3 b = 1;
+}
+
+message M3 {
+	M4 a = 0;
+	M4 b = 1;
+}
+
+message M4 {
+	M5 a = 0;
+	M5 b = 1;
+}
+
+message M5 {
+	M6 a = 0;
+	M6 b = 1;
+}
+
+message M6 {
+	M7 a = 0;
+	M7 b = 1;
+}
+
+message M7 {
+	M8 a = 0;
+	M8 b = 1;
+}
+
+message M8 {
+	M9 a = 0;
+	M9 b = 1;
+}
+
+message M9 {
+	M10 a = 0;
+	M10 b = 1;
+}
+
+message M10 {
+	M11 a = 0;
+	M11 b = 1;
+}
+
+message M11 {
+	M12 a = 0;
+	M12 b = 1;
+}
+
+message M12 {
+	M13 a = 0;
+	M13 b = 1;
+}
+
+message M13 {
+	M14 a = 0;
+	M14 b = 1;
+}
+
+message M14 {
+	M15 a = 0;
+	M15 b = 1;
+}
+
+message M15 {
+	M16 a = 0;
+	M16 b = 1;
+}
+
+message M16 {
+	M17 a = 0;
+	M17 b = 1;
+}
+
+message M17 {
+	M18 a = 0;
+	M18 b = 1;
+}
+
+message M18 {
+	M19 a = 0;
+	M19 b = 1;
+}
+
+message M19 {
+	M20 a = 0;
+	M20 b = 1;
+}
+
+message M20 {
+	int32 x = 0;
+}

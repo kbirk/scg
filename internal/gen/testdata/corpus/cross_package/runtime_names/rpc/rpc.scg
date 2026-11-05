@@ -1,0 +1,7 @@
+package rpc;
+
+# Go package names that clash with identifiers used by generated code are
+# imported under an alias.
+message Req {
+	int32 x = 0;
+}

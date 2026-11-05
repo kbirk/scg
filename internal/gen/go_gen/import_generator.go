@@ -3,6 +3,8 @@ package go_gen
 import (
 	"bytes"
 	"fmt"
+	"path"
+	"path/filepath"
 	"text/template"
 
 	"github.com/kbirk/scg/internal/parse"
@@ -19,7 +21,7 @@ const importTemplateStr = `
 import ( {{ range .STDPackages }}
 	"{{.}}"{{end}}
 	{{ range .CustomPackages }}
-	"{{.}}"{{end}}
+	{{.}}{{end}}
 	{{ range .SCGPackages }}
 	"{{.}}"{{end}}
 )
@@ -93,7 +95,47 @@ func hasUUIDType(dataType *parse.DataTypeDefinition) bool {
 	return dataType.Type == parse.DataTypeUUID
 }
 
+func hasUUIDConst(file *parse.File) bool {
+	for _, c := range file.Consts {
+		if c.DataTypeDefinition.Type == parse.DataTypeComparableUUID {
+			return true
+		}
+		if c.UnderlyingDataTypeDefinition != nil && c.UnderlyingDataTypeDefinition.Type == parse.DataTypeComparableUUID {
+			return true
+		}
+	}
+	return false
+}
+
+// goImportPath returns the import path of the Go package generated for an scg
+// package. Generated files are written next to their .scg source (relative to
+// the input root), so the import path follows the source directory, not the
+// scg package name.
+func goImportPath(basePackage string, dir string) string {
+	return path.Join(basePackage, filepath.ToSlash(dir))
+}
+
+// goImportSpec renders an import spec for a dependency package, aliased when
+// the qualifier used in generated code differs from the last import path
+// element.
+func goImportSpec(basePackage string, pkgName string, dir string) string {
+	importPath := goImportPath(basePackage, dir)
+	qualifier := goPackageQualifier(pkgName)
+	if path.Base(importPath) == qualifier {
+		return fmt.Sprintf("%q", importPath)
+	}
+	return fmt.Sprintf("%s %q", qualifier, importPath)
+}
+
 func generateImportsGoCode(basePackage string, file *parse.File) (string, error) {
+	return generateImportsGoCodeWithDirs(basePackage, file, nil)
+}
+
+// generateImportsGoCodeWithDirs generates the import block. pkgDirs maps each
+// scg package name to the directory (relative to the input / output root)
+// holding its files; when a package is missing from it, the directory is
+// assumed to be the package name with '.' replaced by '_'.
+func generateImportsGoCodeWithDirs(basePackage string, file *parse.File, pkgDirs map[string]string) (string, error) {
 
 	args := ImportArgs{}
 
@@ -125,10 +167,11 @@ func generateImportsGoCode(basePackage string, file *parse.File) (string, error)
 		args.STDPackages = append(args.STDPackages, typedefImportsSTD...)
 		args.SCGPackages = append(args.SCGPackages, typedefImportsSCG...)
 
-		// check if uuid type
+		// check if uuid type (uuid typedefs also implement json.Marshaler)
 		for _, typedef := range file.Typedefs {
 			if typedef.DataTypeDefinition.Type == parse.DataTypeComparableUUID {
 				args.STDPackages = append(args.STDPackages, uuidImports...)
+				args.STDPackages = append(args.STDPackages, "encoding/json")
 			}
 		}
 	}
@@ -143,11 +186,19 @@ func generateImportsGoCode(basePackage string, file *parse.File) (string, error)
 		args.SCGPackages = append(args.SCGPackages, serviceImportsSCG...)
 	}
 
+	if hasUUIDConst(file) {
+		args.STDPackages = append(args.STDPackages, uuidImports...)
+	}
+
 	args.STDPackages = util.RemoveDuplicates(args.STDPackages)
 	args.SCGPackages = util.RemoveDuplicates(args.SCGPackages)
 
 	for _, dep := range file.GetPackageDependencies() {
-		args.CustomPackages = append(args.CustomPackages, fmt.Sprintf("%s/%s", basePackage, convertPackageNameToGoPackage(dep.PackageName)))
+		dir, ok := pkgDirs[dep.PackageName]
+		if !ok {
+			dir = convertPackageNameToGoPackage(dep.PackageName)
+		}
+		args.CustomPackages = append(args.CustomPackages, goImportSpec(basePackage, dep.PackageName, dir))
 	}
 
 	buf := &bytes.Buffer{}
