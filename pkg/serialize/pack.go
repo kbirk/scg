@@ -3,52 +3,92 @@ package serialize
 import (
 	"encoding/binary"
 	"math"
+	"math/bits"
 )
 
 func BitsToBytes(x int) int {
-	return int(math.Ceil(float64(x) / 8.0))
+	return (x + 7) >> 3
 }
 
 func BytesToBits(x int) int {
 	return x << 3 // same as (x * 8)
 }
 
+// varSigBytes returns how many 9-bit units (continuation bit + data byte) the
+// varint encoding of val emits when limited to numBytes units.
+func varSigBytes(val uint64, numBytes uint32) uint32 {
+	k := uint32(bits.Len64(val)+7) >> 3
+	if k > numBytes {
+		k = numBytes
+	}
+	return k
+}
+
 func varUintBitSize(val uint64, numBytes uint32) uint32 {
-	size := uint32(0)
-	for i := uint32(0); i < numBytes; i++ {
-		if val != 0 {
-			size += 9
-		} else {
-			size += 1
-			break
-		}
-		val >>= 8
+	k := varSigBytes(val, numBytes)
+	size := 9 * k
+	if k < numBytes {
+		size++ // terminating zero continuation bit
 	}
 	return size
 }
 
-func varEncodeUint(writer *Writer, val uint64, numBytes uint32) {
-	for i := uint32(0); i < numBytes; i++ {
-		if val != 0 {
-			writer.WriteBits(1, 1)
-			writer.WriteBits(uint8(val), 8)
-		} else {
-			writer.WriteBits(0, 1)
-			return
-		}
+// varBits builds the bit pattern of a varint (optionally preceded by prefixLen
+// prefix bits, used for the sign bit of signed varints) into a 128-bit value
+// (lo, hi) and returns the total bit count. The encoding is: for each
+// significant byte a 1 continuation bit followed by the 8 data bits, then a 0
+// bit unless all numBytes units were used. Bit-identical to the original
+// per-bit encoder.
+func varBits(val uint64, numBytes uint32, prefix uint64, prefixLen uint) (lo, hi uint64, n uint) {
+	k := varSigBytes(val, numBytes)
+	lo = prefix
+	pos := prefixLen
+	for j := uint32(0); j < k; j++ {
+		chunk := 1 | (val&0xFF)<<1 // 9 bits
 		val >>= 8
+		switch {
+		case pos+9 <= 64:
+			lo |= chunk << pos
+		case pos >= 64:
+			hi |= chunk << (pos - 64)
+		default:
+			lo |= chunk << pos
+			hi |= chunk >> (64 - pos)
+		}
+		pos += 9
 	}
+	if k < numBytes {
+		pos++ // terminating 0 bit (already zero)
+	}
+	return lo, hi, pos
+}
+
+func varEncodeUint(writer *Writer, val uint64, numBytes uint32) {
+	if val == 0 {
+		// Single 0 continuation bit. The writer invariant guarantees the bit is
+		// already zero, so only capacity and the cursor need updating.
+		pos := writer.numBitsWritten + 1
+		if need := (pos + 7) >> 3; need > uint64(len(writer.bytes)) {
+			writer.grow(need)
+		}
+		writer.numBitsWritten = pos
+		return
+	}
+	lo, hi, n := varBits(val, numBytes, 0, 0)
+	if n <= 64 {
+		writer.writeBits64(lo, n)
+		return
+	}
+	writer.writeBits64(lo, 64)
+	writer.writeBits64(hi, n-64)
 }
 
 func varDecodeUint(reader *Reader, val *uint64, numBytes uint32) error {
 	// Hot path: each unit is a 1-bit continuation flag followed (if set) by 8
-	// data bits, bit-packed and usually unaligned. Reading those through the
-	// ReadBits method per bit/byte dominates deserialization (it is called for
-	// every integer field, enum, length prefix, and collection count), so the bit
-	// extraction is inlined here against the backing slice. The wire format is
-	// unchanged — this only removes ~18 non-inlined calls per decode.
+	// data bits, bit-packed and usually unaligned. The bit extraction is
+	// inlined against the backing slice rather than calling ReadBits per unit.
 	data := reader.bytes
-	n := uint32(len(data))
+	n := uint64(len(data))
 	pos := reader.numBitsRead
 	var result uint64
 
@@ -105,28 +145,35 @@ func varIntBitSize(val int64, numBytes uint32) uint32 {
 }
 
 func varEncodeInt(writer *Writer, val int64, numBytes uint32) {
+	// Sign bit first (1 = negative, zigzag-encoded magnitude follows), folded
+	// into the same multi-bit write as the varint body.
+	var sign uint64
 	unsignedVal := uint64(val)
 	if val < 0 {
-		writer.WriteBits(1, 1)
+		sign = 1
 		unsignedVal = zigzagEncode(val)
-	} else {
-		writer.WriteBits(0, 1)
 	}
-
-	varEncodeUint(writer, unsignedVal, numBytes)
+	lo, hi, n := varBits(unsignedVal, numBytes, sign, 1)
+	if n <= 64 {
+		writer.writeBits64(lo, n)
+		return
+	}
+	writer.writeBits64(lo, 64)
+	writer.writeBits64(hi, n-64)
 }
 
 func varDecodeInt(reader *Reader, val *int64, numBytes uint32) error {
-
-	var sign byte
-	if err := reader.ReadBits(&sign, 1); err != nil {
-		return err
+	pos := reader.numBitsRead
+	bi := pos >> 3
+	if bi >= uint64(len(reader.bytes)) {
+		return errInsufficientData(len(reader.bytes), int(bi)+1)
 	}
+	sign := (reader.bytes[bi] >> (pos & 7)) & 1
+	reader.numBitsRead = pos + 1
 
 	unsignedVal := uint64(0)
-
-	err := varDecodeUint(reader, &unsignedVal, numBytes)
-	if err != nil {
+	if err := varDecodeUint(reader, &unsignedVal, numBytes); err != nil {
+		reader.numBitsRead = pos
 		return err
 	}
 

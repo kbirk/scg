@@ -119,15 +119,16 @@ func TestServerRejectsDuplicateStreamID(t *testing.T) {
 	server.RegisterServer(serviceID, "fake", svc)
 
 	conn := &recordingConn{}
-	cs := newConnStreams()
+	sc := newServerConn(conn, 0)
+	cs := sc.streams
 	defer cs.terminateAll(errors.New("test done"))
 
 	// First OPEN registers the stream (its handler blocks, keeping it live).
-	server.handleStreamFrame(conn, cs, openFrameReader(t, 1, serviceID, methodID))
+	server.handleStreamFrame(sc, openFrameReader(t, 1, serviceID, methodID))
 	require.NotNil(t, cs.get(1), "first OPEN should register the stream")
 
 	// Second OPEN reusing id 1 must be rejected and must not displace the first.
-	server.handleStreamFrame(conn, cs, openFrameReader(t, 1, serviceID, methodID))
+	server.handleStreamFrame(sc, openFrameReader(t, 1, serviceID, methodID))
 	require.NotNil(t, cs.get(1), "duplicate OPEN must not orphan the existing stream")
 	require.True(t, conn.sentCloseWith("duplicate stream id"),
 		"server should reject a duplicate stream id with a CLOSE(error)")
@@ -145,14 +146,15 @@ func TestServerEnforcesMaxConcurrentStreams(t *testing.T) {
 	server.RegisterServer(serviceID, "fake", svc)
 
 	conn := &recordingConn{}
-	cs := newConnStreams()
+	sc := newServerConn(conn, 0)
+	cs := sc.streams
 	defer cs.terminateAll(errors.New("test done"))
 
-	server.handleStreamFrame(conn, cs, openFrameReader(t, 1, serviceID, methodID))
+	server.handleStreamFrame(sc, openFrameReader(t, 1, serviceID, methodID))
 	require.NotNil(t, cs.get(1))
 
 	// Second distinct stream exceeds the cap of 1.
-	server.handleStreamFrame(conn, cs, openFrameReader(t, 2, serviceID, methodID))
+	server.handleStreamFrame(sc, openFrameReader(t, 2, serviceID, methodID))
 	require.Nil(t, cs.get(2), "stream beyond the cap must not be registered")
 	require.True(t, conn.sentCloseWith("max concurrent streams exceeded"),
 		"server should reject an over-cap stream with a CLOSE(error)")

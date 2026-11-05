@@ -67,18 +67,9 @@ func BitSizePrefix() int {
 }
 
 func SerializePrefix(writer *serialize.Writer, data [16]byte) {
-	for _, b := range data {
-		writer.WriteBits(b, 8)
-	}
+	writer.WriteBytes(data[:])
 }
 
 func DeserializePrefix(data *[16]byte, reader *serialize.Reader) error {
-	for i := 0; i < 16; i++ {
-		var b byte
-		if err := reader.ReadBits(&b, 8); err != nil {
-			return err
-		}
-		data[i] = b
-	}
-	return nil
+	return reader.ReadBytes(data[:])
 }

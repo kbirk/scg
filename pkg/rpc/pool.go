@@ -24,10 +24,12 @@ func getWriter(size int) *serialize.Writer {
 
 // putWriter returns a writer to the pool after resetting it
 func putWriter(w *serialize.Writer) {
-	w.Reset()
-	// Only return to pool if capacity is reasonable (< 256KB)
-	// This prevents memory bloat from very large messages
-	if w.Capacity() < 262144 {
-		writerPool.Put(w)
+	// Only return to pool if capacity is reasonable (< 256KB). This prevents
+	// memory bloat from very large messages; oversized writers are dropped
+	// without paying to clear them.
+	if w.Capacity() >= 262144 {
+		return
 	}
+	w.Reset()
+	writerPool.Put(w)
 }

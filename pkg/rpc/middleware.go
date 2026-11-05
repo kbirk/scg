@@ -31,6 +31,13 @@ func buildHandlerFunction(middleware []Middleware, final Handler) Handler {
 }
 
 func ApplyHandlerChain(ctx context.Context, req Message, middleware []Middleware, final Handler) (Message, error) {
+	switch len(middleware) {
+	case 0:
+		// Common case: no closures to build.
+		return final(ctx, req)
+	case 1:
+		return middleware[0](ctx, req, final)
+	}
 	fn := buildHandlerFunction(middleware, final)
 	return fn(ctx, req)
 }

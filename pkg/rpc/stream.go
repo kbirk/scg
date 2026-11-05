@@ -31,6 +31,101 @@ func streamRecvBufferSizeOrDefault(size int) int {
 	return size
 }
 
+// recvQueue is a stream's bounded inbound message queue. It grows lazily (a
+// stream that exchanges a handful of messages never allocates the full bound)
+// while keeping the overflow semantics of a channel with capacity `limit`:
+// deliver fails once `limit` messages are buffered. Buffered messages are always
+// returned before the terminal status.
+type recvQueue struct {
+	mu     sync.Mutex
+	items  []*serialize.Reader
+	head   int
+	limit  int
+	closed bool          // terminal status set (no further deliveries)
+	err    error         // terminal status (io.EOF or an error)
+	notify chan struct{} // capacity 1: "items may be available"
+	done   chan struct{} // closed when the terminal status is set
+}
+
+func newRecvQueue(limit int) recvQueue {
+	return recvQueue{
+		limit:  streamRecvBufferSizeOrDefault(limit),
+		notify: make(chan struct{}, 1),
+		done:   make(chan struct{}),
+	}
+}
+
+func (q *recvQueue) signal() {
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+}
+
+// push enqueues r. It returns false if the queue is closed (the message is
+// dropped) and overflow=true if the bound is reached.
+func (q *recvQueue) push(r *serialize.Reader) (accepted bool, overflow bool) {
+	q.mu.Lock()
+	if q.closed {
+		q.mu.Unlock()
+		return false, false
+	}
+	if len(q.items)-q.head >= q.limit {
+		q.mu.Unlock()
+		return false, true
+	}
+	if q.head > 0 && q.head >= len(q.items)/2 && len(q.items) == cap(q.items) {
+		// Compact before growing so a consumer that trails the producer does
+		// not grow the backing array without bound.
+		n := copy(q.items, q.items[q.head:])
+		clear(q.items[n:])
+		q.items = q.items[:n]
+		q.head = 0
+	}
+	q.items = append(q.items, r)
+	q.mu.Unlock()
+	q.signal()
+	return true, false
+}
+
+// pop returns the next buffered message, or the terminal status once the queue
+// is closed and drained. ok=false means nothing is available yet.
+func (q *recvQueue) pop() (r *serialize.Reader, err error, ok bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.head < len(q.items) {
+		r = q.items[q.head]
+		q.items[q.head] = nil
+		q.head++
+		if q.head == len(q.items) {
+			q.items = q.items[:0]
+			q.head = 0
+		} else {
+			// More remain: keep the wake-up token for other consumers.
+			q.signal()
+		}
+		return r, nil, true
+	}
+	if q.closed {
+		return nil, q.err, true
+	}
+	return nil, nil, false
+}
+
+// close sets the terminal status if not already set. Returns true if it did.
+func (q *recvQueue) close(err error) bool {
+	q.mu.Lock()
+	if q.closed {
+		q.mu.Unlock()
+		return false
+	}
+	q.closed = true
+	q.err = err
+	close(q.done)
+	q.mu.Unlock()
+	return true
+}
+
 // emptyStreamMessage is a zero-size sentinel passed through the middleware chain
 // when a stream is opened, so that message-oriented middleware (e.g. auth) can
 // gate the stream from the OPEN context metadata.
@@ -195,28 +290,26 @@ func serializeStreamClose(streamID uint64, status uint8, message string) []byte 
 
 type ClientStream struct {
 	client    *Client
+	conn      Connection // the connection the stream was opened on
 	streamID  uint64
 	serviceID uint64
 	ctx       context.Context
 
-	recvCh   chan *serialize.Reader
-	recvDone chan struct{}
+	recv recvQueue
 
 	mu         sync.Mutex
-	recvClosed bool // recv direction is terminal (io.EOF or error in recvErr)
-	recvErr    error
 	dead       bool // whole stream is dead (Send fails)
 	sendClosed bool // local CloseSend has been issued
 }
 
-func newClientStream(client *Client, ctx context.Context, streamID uint64, serviceID uint64, bufferSize int) *ClientStream {
+func newClientStream(client *Client, conn Connection, ctx context.Context, streamID uint64, serviceID uint64, bufferSize int) *ClientStream {
 	return &ClientStream{
 		client:    client,
+		conn:      conn,
 		streamID:  streamID,
 		serviceID: serviceID,
 		ctx:       ctx,
-		recvCh:    make(chan *serialize.Reader, streamRecvBufferSizeOrDefault(bufferSize)),
-		recvDone:  make(chan struct{}),
+		recv:      newRecvQueue(bufferSize),
 	}
 }
 
@@ -240,34 +333,28 @@ func (s *ClientStream) Send(msg Message) error {
 	}
 	s.mu.Unlock()
 
-	conn := s.client.connection()
-	if conn == nil {
-		return ErrStreamClosed
-	}
-	return sendStreamMessage(conn, s.serviceID, s.streamID, msg)
+	return sendStreamMessage(s.conn, s.serviceID, s.streamID, msg)
 }
 
 // Recv blocks until the next message arrives, the stream is cleanly closed
 // (io.EOF), or an error terminates it. Buffered messages are always delivered
 // before the terminal status.
 func (s *ClientStream) Recv() (*serialize.Reader, error) {
-	select {
-	case r := <-s.recvCh:
-		return r, nil
-	case <-s.recvDone:
-		select {
-		case r := <-s.recvCh:
-			return r, nil
-		default:
-			s.mu.Lock()
-			err := s.recvErr
-			s.mu.Unlock()
+	for {
+		if err := s.ctx.Err(); err != nil {
+			// Caller cancelled; tear the stream down and notify the server.
+			// Checked first so a fast producer cannot starve cancellation.
+			s.cancel(err)
 			return nil, err
 		}
-	case <-s.ctx.Done():
-		// Caller cancelled; tear the stream down and notify the server.
-		s.cancel(s.ctx.Err())
-		return nil, s.ctx.Err()
+		if r, err, ok := s.recv.pop(); ok {
+			return r, err
+		}
+		select {
+		case <-s.recv.notify:
+		case <-s.recv.done:
+		case <-s.ctx.Done():
+		}
 	}
 }
 
@@ -281,41 +368,24 @@ func (s *ClientStream) CloseSend() error {
 	s.sendClosed = true
 	s.mu.Unlock()
 
-	return s.client.sendStreamFrame(serializeStreamHalfClose(s.streamID), s.serviceID)
+	return s.conn.Send(serializeStreamHalfClose(s.streamID), s.serviceID)
 }
 
 // deliver enqueues an inbound message; called by the client demux on the I/O
 // goroutine in arrival order. It returns true if the bounded buffer overflowed,
 // in which case the stream is now dead and the caller must notify the peer.
 func (s *ClientStream) deliver(r *serialize.Reader) (overflowed bool) {
-	s.mu.Lock()
-	if s.recvClosed {
-		s.mu.Unlock()
-		return false
-	}
-	s.mu.Unlock()
-
-	select {
-	case s.recvCh <- r:
-		return false
-	default:
+	if _, overflow := s.recv.push(r); overflow {
 		s.die(errStreamOverflow)
 		return true
 	}
+	return false
 }
 
 // closeRecv marks the recv direction terminal (server done sending). The client
 // may still Send. Idempotent.
 func (s *ClientStream) closeRecv(err error) {
-	s.mu.Lock()
-	if s.recvClosed {
-		s.mu.Unlock()
-		return
-	}
-	s.recvClosed = true
-	s.recvErr = err
-	close(s.recvDone)
-	s.mu.Unlock()
+	s.recv.close(err)
 }
 
 // die marks the whole stream dead: Send fails and a pending Recv unblocks with
@@ -323,12 +393,8 @@ func (s *ClientStream) closeRecv(err error) {
 func (s *ClientStream) die(err error) {
 	s.mu.Lock()
 	s.dead = true
-	if !s.recvClosed {
-		s.recvClosed = true
-		s.recvErr = err
-		close(s.recvDone)
-	}
 	s.mu.Unlock()
+	s.recv.close(err)
 }
 
 // cancel kills the stream locally and best-effort notifies the server.
@@ -340,7 +406,7 @@ func (s *ClientStream) cancel(err error) {
 	s.die(err)
 	s.client.removeStream(s.streamID)
 	if !already {
-		_ = s.client.sendStreamFrame(serializeStreamClose(s.streamID, StreamStatusError, "stream cancelled by client"), s.serviceID)
+		_ = s.conn.Send(serializeStreamClose(s.streamID, StreamStatusError, "stream cancelled by client"), s.serviceID)
 	}
 }
 
@@ -355,13 +421,10 @@ type ServerStream struct {
 	ctx       context.Context
 	cancel    context.CancelCauseFunc
 
-	recvCh   chan *serialize.Reader
-	recvDone chan struct{}
+	recv recvQueue
 
-	mu         sync.Mutex
-	recvClosed bool // recv direction is terminal (client half-closed or cancelled)
-	recvErr    error
-	dead       bool // whole stream is dead (Send fails)
+	mu   sync.Mutex
+	dead bool // whole stream is dead (Send fails)
 }
 
 func newServerStream(conn Connection, ctx context.Context, streamID uint64, serviceID uint64, bufferSize int) *ServerStream {
@@ -378,8 +441,7 @@ func newServerStream(conn Connection, ctx context.Context, streamID uint64, serv
 		serviceID: serviceID,
 		ctx:       ctx,
 		cancel:    cancel,
-		recvCh:    make(chan *serialize.Reader, streamRecvBufferSizeOrDefault(bufferSize)),
-		recvDone:  make(chan struct{}),
+		recv:      newRecvQueue(bufferSize),
 	}
 }
 
@@ -393,18 +455,13 @@ func (s *ServerStream) Context() context.Context {
 // Recv blocks for the next client message. It returns io.EOF when the client
 // half-closes, or an error if the client cancelled / the connection dropped.
 func (s *ServerStream) Recv() (*serialize.Reader, error) {
-	select {
-	case r := <-s.recvCh:
-		return r, nil
-	case <-s.recvDone:
+	for {
+		if r, err, ok := s.recv.pop(); ok {
+			return r, err
+		}
 		select {
-		case r := <-s.recvCh:
-			return r, nil
-		default:
-			s.mu.Lock()
-			err := s.recvErr
-			s.mu.Unlock()
-			return nil, err
+		case <-s.recv.notify:
+		case <-s.recv.done:
 		}
 	}
 }
@@ -426,33 +483,16 @@ func (s *ServerStream) Send(msg Message) error {
 // overflowed, in which case the stream is now dead and the caller must notify
 // the peer.
 func (s *ServerStream) deliver(r *serialize.Reader) (overflowed bool) {
-	s.mu.Lock()
-	if s.recvClosed {
-		s.mu.Unlock()
-		return false
-	}
-	s.mu.Unlock()
-
-	select {
-	case s.recvCh <- r:
-		return false
-	default:
+	if _, overflow := s.recv.push(r); overflow {
 		s.die(errStreamOverflow)
 		return true
 	}
+	return false
 }
 
 // closeRecv marks the recv direction terminal. The handler may still Send.
 func (s *ServerStream) closeRecv(err error) {
-	s.mu.Lock()
-	if s.recvClosed {
-		s.mu.Unlock()
-		return
-	}
-	s.recvClosed = true
-	s.recvErr = err
-	close(s.recvDone)
-	s.mu.Unlock()
+	s.recv.close(err)
 }
 
 // die marks the whole stream dead (connection dropped / client cancelled) and
@@ -460,14 +500,17 @@ func (s *ServerStream) closeRecv(err error) {
 func (s *ServerStream) die(err error) {
 	s.mu.Lock()
 	s.dead = true
-	if !s.recvClosed {
-		s.recvClosed = true
-		s.recvErr = err
-		close(s.recvDone)
-	}
 	s.mu.Unlock()
-
+	s.recv.close(err)
 	s.cancel(err)
+}
+
+// markDone marks the stream dead once its handler has returned so a goroutine
+// the handler leaked cannot keep sending frames after the terminal CLOSE.
+func (s *ServerStream) markDone() {
+	s.mu.Lock()
+	s.dead = true
+	s.mu.Unlock()
 }
 
 // halfClose is called when the client signals it is done sending; the handler's

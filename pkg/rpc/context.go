@@ -72,17 +72,23 @@ func NewContextWithMetadata(ctx context.Context, metadata *Metadata) context.Con
 	return context.WithValue(ctx, metadataKey{}, metadata)
 }
 
+// AppendMetadataToContext returns a context carrying the union of the
+// metadata already on ctx and metadata (entries in metadata win). The existing
+// Metadata is never mutated: it may be shared with the parent context and with
+// requests in flight on other goroutines. A nil metadata clears the metadata
+// on the returned context (as in earlier releases).
 func AppendMetadataToContext(ctx context.Context, metadata *Metadata) context.Context {
-	i := ctx.Value(metadataKey{})
-	if i == nil {
+	if metadata == nil {
 		return context.WithValue(ctx, metadataKey{}, metadata)
 	}
-	existing, ok := i.(Metadata)
-	if !ok {
+	existing := GetMetadataFromContext(ctx)
+	if existing == nil {
 		return context.WithValue(ctx, metadataKey{}, metadata)
 	}
-	existing.Append(metadata)
-	return context.WithValue(ctx, metadataKey{}, existing)
+	merged := &Metadata{vals: make(map[string][]byte, len(existing.vals)+len(metadata.vals))}
+	merged.Append(existing)
+	merged.Append(metadata)
+	return context.WithValue(ctx, metadataKey{}, merged)
 }
 
 func GetMetadataFromContext(ctx context.Context) *Metadata {
@@ -123,9 +129,7 @@ func SerializeContext(writer *serialize.Writer, ctx context.Context) {
 		serialize.SerializeString(writer, k)
 
 		serialize.SerializeUInt32(writer, uint32(len(v)))
-		for _, b := range v {
-			writer.WriteBits(b, 8)
-		}
+		writer.WriteBytes(v)
 	}
 }
 
@@ -164,11 +168,8 @@ func DeserializeContext(ctx *context.Context, reader *serialize.Reader) error {
 				return err
 			}
 			val := make([]byte, size)
-			for i := 0; i < int(size); i++ {
-				err := reader.ReadBits(&val[i], 8)
-				if err != nil {
-					return err
-				}
+			if err := reader.ReadBytes(val); err != nil {
+				return err
 			}
 
 			md.PutBytes(k, val)

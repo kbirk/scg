@@ -1,7 +1,10 @@
 package serialize
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math"
+	"math/bits"
 	"time"
 	"unsafe"
 
@@ -102,8 +105,8 @@ func DeserializeString(data *string, reader *Reader) error {
 		if int(byteIndex)+int(length) > len(reader.bytes) {
 			return fmt.Errorf("Reader does not contain enough data to fill the argument")
 		}
-		*data = string(reader.bytes[byteIndex : byteIndex+uint32(length)])
-		reader.numBitsRead += length * 8
+		*data = string(reader.bytes[byteIndex : byteIndex+uint64(length)])
+		reader.numBitsRead += uint64(length) * 8
 		return nil
 	}
 
@@ -123,11 +126,11 @@ func BitSizeBool(bool) int {
 }
 
 func SerializeBool(writer *Writer, data bool) {
-	ui := uint8(0)
+	ui := uint64(0)
 	if data {
 		ui = 1
 	}
-	writer.WriteBits(ui, 1)
+	writer.writeBits64(ui, 1)
 }
 
 func DeserializeBool(data *bool, reader *Reader) error {
@@ -274,8 +277,16 @@ func BitSizeFloat32(data float32) int {
 	return BytesToBits(4)
 }
 
+// Floats are encoded as their IEEE-754 bits in big-endian byte order. Byte-
+// reversing lets the LSB-first bit writer emit that order in one multi-bit write.
 func SerializeFloat32(writer *Writer, data float32) {
-	writer.WriteBytes(PackFloat32(data))
+	if pos := writer.numBitsWritten; pos&7 == 0 && (pos>>3)+4 <= uint64(len(writer.bytes)) {
+		// Aligned with room: plain big-endian store (bytes past the cursor are zero).
+		binary.BigEndian.PutUint32(writer.bytes[pos>>3:], math.Float32bits(data))
+		writer.numBitsWritten = pos + 32
+		return
+	}
+	writer.writeBits64(uint64(bits.ReverseBytes32(math.Float32bits(data))), 32)
 }
 
 func DeserializeFloat32(data *float32, reader *Reader) error {
@@ -293,7 +304,12 @@ func BitSizeFloat64(data float64) int {
 }
 
 func SerializeFloat64(writer *Writer, data float64) {
-	writer.WriteBytes(PackFloat64(data))
+	if pos := writer.numBitsWritten; pos&7 == 0 && (pos>>3)+8 <= uint64(len(writer.bytes)) {
+		binary.BigEndian.PutUint64(writer.bytes[pos>>3:], math.Float64bits(data))
+		writer.numBitsWritten = pos + 64
+		return
+	}
+	writer.writeBits64(bits.ReverseBytes64(math.Float64bits(data)), 64)
 }
 
 func DeserializeFloat64(data *float64, reader *Reader) error {

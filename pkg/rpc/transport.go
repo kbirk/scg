@@ -1,5 +1,7 @@
 package rpc
 
+import "context"
+
 // Connection represents a bidirectional communication channel
 type Connection interface {
 	// Send sends a message to the remote peer
@@ -29,6 +31,15 @@ type ServerTransport interface {
 type ClientTransport interface {
 	// Connect establishes a connection to the server
 	Connect() (Connection, error)
+}
+
+// ContextClientTransport is an optional interface for client transports whose
+// connection establishment can be bounded by a context. The client uses it when
+// available so a call's deadline also bounds the dial (and any TLS/websocket
+// handshake); otherwise it falls back to Connect.
+type ContextClientTransport interface {
+	ClientTransport
+	ConnectContext(ctx context.Context) (Connection, error)
 }
 
 // ServiceAwareTransport is an optional interface that transports can implement
