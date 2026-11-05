@@ -5,6 +5,13 @@
 #include <string>
 
 #include "scg/uuid.h"
+#include "scg/reader.h"
+#include "scg/writer.h"
+#include "nlohmann/json.hpp"
+
+#include <sstream>
+#include <map>
+#include <unordered_map>
 
 void test_uuid_is_valid()
 {
@@ -24,8 +31,6 @@ void test_uuid_is_valid()
 		"12345678-1234-1234-1234-123456789abcz",
 		"12345678-1234-1234-1234-123456789ab",
 		"12345678-1234-1234-1234-123456789abcde",
-		"12345678-1234-2234-1234-123456789abc",
-		"12345678-1234-4234-1234-123456789abc",
 		"123456781234-4234-1234-123456789abc",
 		"12345678-1234-4234-1234-123456789abc-",
 		"12345678-1234-4234-1234-123456789abc ",
@@ -56,8 +61,6 @@ void test_uuid_from_string_to_string()
 		"12345678-1234-1234-1234-123456789abcz",
 		"12345678-1234-1234-1234-123456789ab",
 		"12345678-1234-1234-1234-123456789abcde",
-		"12345678-1234-2234-1234-123456789abc",
-		"12345678-1234-4234-1234-123456789abc",
 		"123456781234-4234-1234-123456789abc",
 		"12345678-1234-4234-1234-123456789abc-",
 		"12345678-1234-4234-1234-123456789abc ",
@@ -144,6 +147,80 @@ void test_map_usage()
 	}
 }
 
+
+// Every UUID version and variant is accepted (matching Go's uuid.Parse): v1,
+// v2, v7, the nil UUID and non-RFC variants.
+void test_uuid_accepts_all_versions()
+{
+	auto valid = std::vector<std::string>{
+		"6ba7b810-9dad-11d1-80b4-00c04fd430c8", // v1
+		"12345678-1234-2234-1234-123456789abc", // v2, variant 0
+		"017f22e2-79b0-7cc3-98c4-dc0c0c07398f", // v7
+		"00000000-0000-0000-0000-000000000000", // nil
+		"FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"  // max, uppercase
+	};
+	for (auto& s : valid) {
+		TEST_CHECK(scg::type::uuid::isValid(s));
+		auto [u, err] = scg::type::uuid::fromString(s);
+		TEST_CHECK(err == nullptr);
+		std::string lower = s;
+		for (auto& c : lower) {
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		}
+		TEST_CHECK(u.toString() == lower);
+
+		// Binary round trip: the decoder no longer rejects non-v4 values.
+		scg::serialize::Writer writer(16);
+		serialize(writer, u);
+		scg::serialize::Reader reader(writer.bytes());
+		scg::type::uuid out;
+		TEST_CHECK(deserialize(out, reader) == nullptr);
+		TEST_CHECK(out == u);
+	}
+}
+
+// operator>> parses into the target (it used to discard the result) and sets
+// failbit on bad input.
+void test_uuid_stream_extraction()
+{
+	{
+		std::istringstream is("6ba7b810-9dad-41d1-80b4-00c04fd430c8");
+		scg::type::uuid u;
+		is >> u;
+		TEST_CHECK(!is.fail());
+		TEST_CHECK(u.toString() == "6ba7b810-9dad-41d1-80b4-00c04fd430c8");
+	}
+	{
+		std::istringstream is("not-a-uuid");
+		scg::type::uuid u;
+		is >> u;
+		TEST_CHECK(is.fail());
+		TEST_CHECK(u.isNull());
+	}
+}
+
+// Non-ASCII bytes must be rejected without passing negative chars to isxdigit
+// (undefined behaviour; caught by UBSan builds).
+void test_uuid_rejects_high_bit_chars()
+{
+	std::string s = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
+	s[0] = static_cast<char>(0xE9);
+	s[35] = static_cast<char>(0xFF);
+	TEST_CHECK(!scg::type::uuid::isValid(s));
+	auto [u, err] = scg::type::uuid::fromString(s);
+	TEST_CHECK(err != nullptr);
+}
+
+void test_uuid_json_round_trip()
+{
+	auto [u, err] = scg::type::uuid::fromString("017f22e2-79b0-7cc3-98c4-dc0c0c07398f");
+	TEST_CHECK(err == nullptr);
+	nlohmann::json j = u;
+	TEST_CHECK(j.get<std::string>() == "017f22e2-79b0-7cc3-98c4-dc0c0c07398f");
+	auto back = j.get<scg::type::uuid>();
+	TEST_CHECK(back == u);
+}
+
 // helper method to reduce redundant test typing
 #define TEST(x) {#x, x}
 
@@ -154,6 +231,10 @@ TEST_LIST = {
 	TEST(test_uuid_random),
 	TEST(test_uuid_is_null),
 	TEST(test_map_usage),
+	TEST(test_uuid_accepts_all_versions),
+	TEST(test_uuid_stream_extraction),
+	TEST(test_uuid_rejects_high_bit_chars),
+	TEST(test_uuid_json_round_trip),
 
 	{ NULL, NULL }
 };

@@ -12,7 +12,11 @@
 #include <atomic>
 #include <chrono>
 #include <map>
+
+#ifndef SCG_MINIMAL_INCLUDES
+// Kept for source compatibility with code relying on the transitive include.
 #include <iostream>
+#endif
 
 #include "scg/error.h"
 #include "scg/serialize.h"
@@ -40,20 +44,26 @@ struct ClientConfig {
 	size_t streamRecvBufferSize = 0;
 	// keepaliveInterval, if > 0, enables connection-level keepalive: a PING is
 	// sent after this much idle time. keepaliveTimeout is the max idle time before
-	// the connection is declared dead (defaults to 2*keepaliveInterval).
+	// the connection is declared dead (defaults to 2*keepaliveInterval; a value
+	// not greater than keepaliveInterval is raised to 2*keepaliveInterval, as in
+	// the Go client, so a ping always has time to be answered).
 	std::chrono::milliseconds keepaliveInterval{0};
 	std::chrono::milliseconds keepaliveTimeout{0};
+	// connectTimeout bounds an implicit or explicit connect when the call has no
+	// deadline (0 = no timeout). A call with a deadline connects within the
+	// earlier of that deadline and connectTimeout.
+	std::chrono::milliseconds connectTimeout{10000};
 };
 
-// Client owns its transport exclusively. The connection callbacks installed in
-// connectUnsafe() (fail/close/message handlers) capture the raw `this` pointer
-// and fire on the transport's background I/O thread, so `this` must outlive that
+// Client owns its transport exclusively. The connection callbacks installed when
+// connecting (fail/close/message handlers) capture the raw `this` pointer and
+// fire on the transport's background I/O thread, so `this` must outlive that
 // thread. The destructor guarantees this by stopping/joining the I/O thread
 // (via transport->shutdown(), which the destructor calls last) before the Client
 // members are torn down — therefore the transport must not be shared with, or
-// outlive into, anything else. (Per-stream send paths capture the connection
-// shared_ptr instead of `this`, so streams may safely outlive the Client; this
-// `this`-capture contract is specific to the Client's own connection handlers.)
+// outlive into, anything else. Streams capture the connection (not the Client),
+// and the built-in connections keep their I/O resources alive, so a stream may
+// outlive the Client: once the Client is gone its sends fail with an error.
 class Client {
 public:
 
@@ -81,9 +91,8 @@ public:
 
 	error::Error connect()
 	{
-		std::lock_guard<std::mutex> lock(mu_);
-
-		return connectUnsafe();
+		std::unique_lock<std::mutex> lock(mu_);
+		return ensureConnectedLocked(lock, deadlineAfter(config_.connectTimeout));
 	}
 
 	error::Error disconnect()
@@ -104,35 +113,39 @@ public:
 	// frame is sent, so no inbound frame can be missed.
 	std::pair<std::shared_ptr<ClientStream>, error::Error> openStream(const context::Context& ctx, uint64_t serviceID, uint64_t methodID)
 	{
-		std::lock_guard<std::mutex> lock(mu_);
+		std::unique_lock<std::mutex> lock(mu_);
 
-		auto err = connectUnsafe();
+		auto err = ensureConnectedLocked(lock, connectDeadline(ctx));
 		if (err) {
 			return std::make_pair(nullptr, err);
 		}
 
 		uint64_t streamID = requestID_++;
 
-		// Capture the connection (a shared_ptr that internally uses
-		// shared_from_this for async safety) rather than the Client. This binds
-		// the stream's send path to the connection's lifetime instead of the
-		// Client's, so the stream can safely outlive the Client, and avoids a
-		// Client<->stream reference cycle. The connection is closed when the
-		// Client disconnects, after which send() returns an error.
+		// Capture the connection rather than the Client: the stream's send path is
+		// bound to the connection's lifetime, so the stream can outlive the
+		// Client, and there is no Client<->stream reference cycle. The connection
+		// is closed when the Client disconnects, after which send() returns an
+		// error.
 		auto conn = connection_;
 		auto stream = std::make_shared<ClientStream>(
 			ctx,
 			streamID,
-			[conn](const std::vector<uint8_t>& bs) -> error::Error {
-				return conn->send(bs);
+			[conn](std::vector<uint8_t> bs) -> error::Error {
+				return conn->sendOwned(std::move(bs));
 			},
 			config_.streamRecvBufferSize);
 
+		pruneStreamsUnsafe();
 		streams_[streamID] = stream;
+		lock.unlock();
 
-		err = sendBytesUnsafe(serializeStreamOpen(ctx, streamID, serviceID, methodID));
+		err = conn->sendOwned(serializeStreamOpen(ctx, streamID, serviceID, methodID));
 		if (err) {
+			lock.lock();
 			streams_.erase(streamID);
+			lock.unlock();
+			stream->die(err); // registered nowhere; don't send an abandon CLOSE
 			return std::make_pair(nullptr, err);
 		}
 
@@ -172,6 +185,29 @@ public:
 
 protected:
 
+	// connectDeadline converts a call's (system_clock) deadline into the
+	// steady_clock deadline used to bound connecting; without one the configured
+	// connectTimeout applies (0 = no timeout). Every conversion saturates, so
+	// extreme deadlines (time_point::max(), MSVC's 100 ns system_clock) cannot
+	// overflow.
+	std::chrono::steady_clock::time_point connectDeadline(const context::Context& ctx) const
+	{
+		auto fallback = deadlineAfter(config_.connectTimeout);
+		if (!ctx.hasDeadline()) {
+			return fallback;
+		}
+		auto sysNow = std::chrono::system_clock::now();
+		auto deadline = ctx.getDeadline();
+		if (deadline <= sysNow) {
+			return std::chrono::steady_clock::now();
+		}
+		// Positive, so this cannot overflow; ms granularity keeps the later
+		// conversion to steady_clock ticks in range.
+		auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - sysNow);
+		auto bounded = remaining.count() <= 0 ? std::chrono::steady_clock::now() : deadlineAfter(remaining);
+		return bounded < fallback ? bounded : fallback;
+	}
+
 	void failPendingRequestsUnsafe(const std::string& error)
 	{
 		for (auto& pair : requests_) {
@@ -183,9 +219,27 @@ protected:
 	void failStreamsUnsafe(const error::Error& err)
 	{
 		for (auto& pair : streams_) {
-			pair.second->die(err);
+			if (auto stream = pair.second.lock()) {
+				stream->die(err);
+			}
 		}
 		streams_.clear();
+	}
+
+	// pruneStreamsUnsafe drops registry entries whose handles were released.
+	void pruneStreamsUnsafe()
+	{
+		if (streams_.size() < nextStreamPrune_) {
+			return;
+		}
+		for (auto it = streams_.begin(); it != streams_.end();) {
+			if (it->second.expired()) {
+				it = streams_.erase(it);
+			} else {
+				++it;
+			}
+		}
+		nextStreamPrune_ = streams_.size() * 2 + 64;
 	}
 
 	void removeStream(uint64_t streamID)
@@ -215,7 +269,7 @@ protected:
 				conn = connection_;
 			}
 			if (conn) {
-				conn->send(serializeStreamControl(STREAM_FRAME_PONG));
+				conn->sendOwned(serializeStreamControl(STREAM_FRAME_PONG));
 			}
 			return;
 		}
@@ -224,24 +278,27 @@ protected:
 		}
 
 		std::shared_ptr<ClientStream> stream;
+		std::shared_ptr<Connection> conn;
 		{
 			std::lock_guard<std::mutex> lock(mu_);
 			auto it = streams_.find(streamID);
 			if (it == streams_.end()) {
 				return; // unknown / already-closed stream
 			}
-			stream = it->second;
+			stream = it->second.lock();
+			if (!stream) {
+				streams_.erase(it); // handle dropped (its destructor cancelled it)
+				return;
+			}
+			conn = connection_;
 		}
 
 		switch (frameKind) {
 			case STREAM_FRAME_MESSAGE:
 				if (stream->deliver(std::move(reader))) {
 					// Bounded buffer overflowed: notify the server and drop the stream.
-					{
-						std::lock_guard<std::mutex> lock(mu_);
-						if (connection_) {
-							connection_->send(serializeStreamClose(streamID, STREAM_STATUS_ERROR, "stream receive buffer overflow"));
-						}
+					if (conn) {
+						conn->sendOwned(serializeStreamClose(streamID, STREAM_STATUS_ERROR, "stream receive buffer overflow"));
 					}
 					removeStream(streamID);
 				}
@@ -271,28 +328,86 @@ protected:
 		}
 	}
 
-	error::Error connectUnsafe()
+	// ensureConnectedLocked connects if needed. It is called with mu_ held but
+	// releases it while the transport connects, so other threads (and the I/O
+	// thread's callbacks) are not blocked behind a slow connect; concurrent
+	// callers wait for the in-flight attempt instead of starting another.
+	error::Error ensureConnectedLocked(std::unique_lock<std::mutex>& lock, std::chrono::steady_clock::time_point deadline)
 	{
-		if (status_ != ConnectionStatus::FAILED && status_ != ConnectionStatus::NOT_CONNECTED) {
+		for (;;) {
+			if (status_ == ConnectionStatus::CONNECTED && connection_) {
+				return nullptr;
+			}
+			if (!config_.transport) {
+				return error::Error("No transport configured");
+			}
+			if (connecting_) {
+				auto done = [this]() { return !connecting_; };
+				if (deadline == std::chrono::steady_clock::time_point::max()) {
+					connectCv_.wait(lock, done);
+				} else if (!connectCv_.wait_until(lock, deadline, done)) {
+					return error::Error("Connection timed out");
+				}
+				continue;
+			}
+
+			// Whatever happens below (including an exception from the
+			// transport), the in-flight marker is cleared and waiters are woken
+			// with mu_ held again, so later callers retry instead of waiting.
+			struct ConnectingGuard {
+				Client* client;
+				std::unique_lock<std::mutex>& lock;
+				~ConnectingGuard()
+				{
+					if (!lock.owns_lock()) {
+						lock.lock();
+					}
+					client->connecting_ = false;
+					client->connectCv_.notify_all();
+				}
+			};
+
+			std::pair<std::shared_ptr<Connection>, error::Error> result;
+			{
+				connecting_ = true;
+				ConnectingGuard guard{this, lock};
+				auto transport = config_.transport;
+				lock.unlock();
+				// Transports report failures as errors; an exception (e.g.
+				// bad_alloc, or a third-party transport) becomes one too.
+				try {
+					result = transport->connectWithDeadline(deadline);
+				} catch (const std::exception& e) {
+					result = std::make_pair(nullptr, error::Error(std::string("Connection failed: ") + e.what()));
+				} catch (...) {
+					result = std::make_pair(nullptr, error::Error("Connection failed: unknown exception"));
+				}
+			}
+
+			if (result.second) {
+				status_ = ConnectionStatus::FAILED;
+				return result.second;
+			}
+			if (!result.first) {
+				status_ = ConnectionStatus::FAILED;
+				return error::Error("Transport returned no connection");
+			}
+			installConnectionUnsafe(result.first);
 			return nullptr;
 		}
+	}
 
-		if (!config_.transport) {
-			return error::Error("No transport configured");
+	void installConnectionUnsafe(std::shared_ptr<Connection> conn)
+	{
+		if (connection_) {
+			connection_->close();
 		}
-
-		auto result = config_.transport->connect();
-		if (result.second) {
-			status_ = ConnectionStatus::FAILED;
-			return result.second;
-		}
-
-		connection_ = result.first;
+		connection_ = std::move(conn);
 		status_ = ConnectionStatus::CONNECTED;
 
 		// Each connection gets a generation; a fail/close handler from a connection
-		// that has since been replaced (e.g. after a reconnect) must not tear down
-		// the streams/requests of the new connection.
+		// that has since been replaced (e.g. after a reconnect or disconnect) must
+		// not tear down the streams/requests of the new connection.
 		uint64_t gen = ++connectionGeneration_;
 
 		// Set up handlers
@@ -318,17 +433,21 @@ protected:
 			failStreamsUnsafe(error::Error("connection closed"));
 		});
 
-		connection_->setMessageHandler([this](const std::vector<uint8_t>& data) {
-			onMessage(data);
+		// Installed last: this starts the read loop.
+		connection_->setOwnedMessageHandler([this](std::vector<uint8_t>&& data) {
+			onMessage(std::move(data));
 		});
 
 		startKeepaliveUnsafe();
-
-		return nullptr;
 	}
 
+	// disconnectUnsafe closes the current connection and resets the state so the
+	// next call reconnects. Bumping the generation makes the closed connection's
+	// late fail/close callbacks no-ops.
 	error::Error disconnectUnsafe()
 	{
+		status_ = ConnectionStatus::NOT_CONNECTED;
+		++connectionGeneration_;
 		if (connection_) {
 			auto err = connection_->close();
 			connection_.reset();
@@ -337,21 +456,7 @@ protected:
 		return nullptr;
 	}
 
-	error::Error sendBytesUnsafe(const std::vector<uint8_t>& msg)
-	{
-		auto err = connectUnsafe();
-		if (err) {
-			return err;
-		}
-
-		if (status_ == ConnectionStatus::CONNECTED && connection_) {
-			return connection_->send(msg);
-		}
-
-		return error::Error("Connection not available");
-	}
-
-	serialize::Reader createErrorReader(std::string err)
+	serialize::Reader createErrorReader(const std::string& err)
 	{
 		using scg::serialize::bit_size; // adl trickery
 
@@ -359,8 +464,10 @@ protected:
 			scg::serialize::bits_to_bytes(
 				bit_size(ERROR_RESPONSE) +
 				bit_size(err)));
+		writer.write(ERROR_RESPONSE);
+		writer.write(err);
 
-		return serialize::Reader(writer.bytes());
+		return serialize::Reader(std::move(writer).take());
 	}
 
 	static int64_t steadyNowNs()
@@ -387,7 +494,9 @@ protected:
 		}
 		keepaliveRunning_.store(true);
 		auto interval = config_.keepaliveInterval;
-		auto timeout = config_.keepaliveTimeout.count() > 0 ? config_.keepaliveTimeout : interval * 2;
+		// As in the Go client: a timeout not greater than the interval (or
+		// unset) is raised to twice the interval.
+		auto timeout = config_.keepaliveTimeout > interval ? config_.keepaliveTimeout : interval * 2;
 		keepaliveThread_ = std::thread([this, interval, timeout]() {
 			keepaliveLoop(interval, timeout);
 		});
@@ -425,8 +534,12 @@ protected:
 				onKeepaliveTimeout(conn);
 				continue; // stay alive to keep probing future (re)connections
 			}
-			if (idleNs >= intervalNs) {
-				conn->send(serializeStreamControl(STREAM_FRAME_PING));
+			// Ping once idle for half an interval: an idle connection then gets a
+			// ping every tick, so idle time stays near one interval. (Pinging
+			// only after a full interval lets idle time approach two intervals
+			// between pings, and tick jitter then trips a 2x-interval timeout.)
+			if (idleNs >= intervalNs / 2) {
+				conn->sendOwned(serializeStreamControl(STREAM_FRAME_PING));
 			}
 		}
 	}
@@ -443,9 +556,8 @@ protected:
 		}
 		failPendingRequestsUnsafe("keepalive timeout");
 		failStreamsUnsafe(error::Error("keepalive timeout"));
+		disconnectUnsafe();
 		status_ = ConnectionStatus::FAILED;
-		connection_->close();
-		connection_.reset();
 	}
 
 	void stopKeepalive()
@@ -462,9 +574,15 @@ protected:
 
 	void onMessage(const std::vector<uint8_t>& data)
 	{
+		std::vector<uint8_t> copy(data);
+		onMessage(std::move(copy));
+	}
+
+	void onMessage(std::vector<uint8_t>&& data)
+	{
 		lastActivityNs_.store(steadyNowNs());
 
-		serialize::Reader reader(data);
+		serialize::Reader reader(std::move(data));
 
 		using scg::serialize::deserialize;
 
@@ -496,19 +614,22 @@ protected:
 			return;
 		}
 
-		std::lock_guard<std::mutex> lock(mu_);
+		std::shared_ptr<std::promise<serialize::Reader>> promise;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
 
-		auto iter = requests_.find(requestID);
-		if (iter != requests_.end()) {
-			iter->second->set_value(reader);
-		} else {
-			// Response for an unknown request ID — this can happen when a context
-			// timeout cleaned up the request before the server's response arrived.
-			// Just discard the response.
-			return;
+			auto iter = requests_.find(requestID);
+			if (iter == requests_.end()) {
+				// Response for an unknown request ID — this can happen when a context
+				// timeout cleaned up the request before the server's response arrived.
+				// Just discard the response.
+				return;
+			}
+			promise = std::move(iter->second);
+			requests_.erase(iter);
 		}
-
-		requests_.erase(requestID);
+		// Fulfil outside the lock (the waiting caller wakes immediately).
+		promise->set_value(std::move(reader));
 	}
 
 
@@ -541,18 +662,30 @@ protected:
 		writer.write(msg);
 
 		auto promise = std::make_shared<std::promise<serialize::Reader>>();
+		auto future = promise->get_future();
 
-		std::lock_guard<std::mutex> lock(mu_);
+		std::shared_ptr<Connection> conn;
+		{
+			std::unique_lock<std::mutex> lock(mu_);
+			auto err = ensureConnectedLocked(lock, connectDeadline(ctx));
+			if (err) {
+				return std::make_tuple(std::future<serialize::Reader>(), 0, err);
+			}
+			// Register before sending so the response cannot beat the
+			// registration.
+			requests_[requestID] = promise;
+			conn = connection_;
+		}
 
-		requests_[requestID] = promise;
-
-		auto err = sendBytesUnsafe(writer.bytes());
+		// Send without holding mu_: the I/O thread needs it to deliver responses.
+		auto err = conn->sendOwned(std::move(writer).take());
 		if (err) {
+			std::lock_guard<std::mutex> lock(mu_);
 			requests_.erase(requestID);
 			return std::make_tuple(std::future<serialize::Reader>(), 0, err);
 		}
 
-		return std::make_tuple(promise->get_future(), requestID, nullptr);
+		return std::make_tuple(std::move(future), requestID, nullptr);
 	}
 
 	std::pair<serialize::Reader, error::Error> receiveMessage(std::future<serialize::Reader>& future)
@@ -563,7 +696,7 @@ protected:
 		serialize::deserialize(responseType, reader);
 
 		if (responseType == MESSAGE_RESPONSE) {
-			return std::make_pair(reader, nullptr);
+			return std::make_pair(std::move(reader), nullptr);
 		}
 
 		std::string errMsg;
@@ -577,6 +710,8 @@ protected:
 
 private:
 	std::mutex mu_;
+	std::condition_variable connectCv_;
+	bool connecting_ = false;
 	ClientConfig config_;
 	std::shared_ptr<Connection> connection_;
 
@@ -586,9 +721,13 @@ private:
 
 	uint64_t requestID_;
 	std::map<uint64_t, std::shared_ptr<std::promise<serialize::Reader>>> requests_;
-	std::map<uint64_t, std::shared_ptr<ClientStream>> streams_;
+	// Streams are held weakly: dropping the last user handle cancels the stream
+	// (see ClientStream::~ClientStream) instead of leaking it here.
+	std::map<uint64_t, std::weak_ptr<ClientStream>> streams_;
+	size_t nextStreamPrune_ = 64;
 
-	// Bumped on each (re)connect so stale connection handlers can be ignored.
+	// Bumped on each (re)connect and disconnect so stale connection handlers can
+	// be ignored.
 	uint64_t connectionGeneration_ = 0;
 
 	// Keepalive state.

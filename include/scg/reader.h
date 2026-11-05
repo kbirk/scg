@@ -26,7 +26,7 @@ public:
 	{
 	}
 
-	inline ReaderView(const uint8_t* data, uint32_t size)
+	inline ReaderView(const uint8_t* data, size_t size)
 		: bytes_(data)
 		, size_(size)
 	{
@@ -43,8 +43,30 @@ public:
 	// against the data actually present.
 	inline uint32_t remainingBytes() const
 	{
-		uint32_t consumed = numBitsRead_ >> 3;
-		return consumed >= size_ ? 0 : size_ - consumed;
+		size_t consumed = numBitsRead_ >> 3;
+		if (consumed >= size_) {
+			return 0;
+		}
+		size_t rem = size_ - consumed;
+		return rem > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(rem);
+	}
+
+	// bitsRead returns the current read position in bits (for callers that need
+	// to measure how much input a decode consumed).
+	inline uint64_t bitsRead() const
+	{
+		return numBitsRead_;
+	}
+
+	// readVarUint decodes a variable-length unsigned integer (see
+	// detail::decodeVarUint); used by var_decode_uint as its fast path.
+	error::Error readVarUint(uint64_t& val, uint32_t num_bytes)
+	{
+		val = 0;
+		if (!detail::decodeVarUint(bytes_, size_, numBitsRead_, val, num_bytes)) {
+			return error::Error("Reader does not contain enough data to fill the argument");
+		}
+		return nullptr;
 	}
 
 	error::Error readBits(uint8_t& val, uint32_t num_bits_to_read)
@@ -56,7 +78,7 @@ public:
 			return nullptr;
 		}
 
-		uint32_t srcByteIndex = numBitsRead_ >> 3;
+		size_t srcByteIndex = numBitsRead_ >> 3;
 		uint8_t srcBitOffset = numBitsRead_ & 7;
 
 		uint8_t bitsInFirstByte = 8 - srcBitOffset;
@@ -93,7 +115,7 @@ public:
 	error::Error readByte(uint8_t& val)
 	{
 		if ((numBitsRead_ & 7) == 0) {
-			uint32_t srcByteIndex = numBitsRead_ >> 3;
+			size_t srcByteIndex = numBitsRead_ >> 3;
 			if (srcByteIndex >= size_) {
 				return error::Error("Reader does not contain enough data to fill the argument");
 			}
@@ -110,12 +132,12 @@ public:
 			return nullptr;
 		}
 		if ((numBitsRead_ & 7) == 0) {
-			uint32_t startByte = numBitsRead_ >> 3;
+			size_t startByte = numBitsRead_ >> 3;
 			if (startByte + size > size_) {
 				return error::Error("Reader does not contain enough data to fill the argument");
 			}
 			std::copy(bytes_ + startByte, bytes_ + startByte + size, data);
-			numBitsRead_ += size * 8;
+			numBitsRead_ += uint64_t(size) * 8;
 			return nullptr;
 		}
 
@@ -123,7 +145,7 @@ public:
 		if (err) {
 			return err;
 		}
-		numBitsRead_ += size * 8;
+		numBitsRead_ += uint64_t(size) * 8;
 		return nullptr;
 	}
 
@@ -131,7 +153,7 @@ private:
 
 	error::Error readBytesUnaligned(uint8_t* data, uint32_t size, uint8_t bitOffset)
 	{
-		uint32_t byteIndex = numBitsRead_ >> 3;
+		size_t byteIndex = numBitsRead_ >> 3;
 		if (byteIndex + size >= size_) {
 			return error::Error("Reader does not contain enough data to fill the argument");
 		}
@@ -162,8 +184,9 @@ private:
 	}
 
 	const uint8_t* bytes_;
-	uint32_t size_;
-	uint32_t numBitsRead_ = 0;
+	size_t size_;
+	// 64-bit: a 32-bit bit position wraps at 512 MiB.
+	uint64_t numBitsRead_ = 0;
 };
 
 // Reader that owns the buffer
@@ -191,8 +214,30 @@ public:
 	// against the data actually present.
 	inline uint32_t remainingBytes() const
 	{
-		uint32_t consumed = numBitsRead_ >> 3;
-		return consumed >= bytes_.size() ? 0 : static_cast<uint32_t>(bytes_.size()) - consumed;
+		size_t consumed = numBitsRead_ >> 3;
+		if (consumed >= bytes_.size()) {
+			return 0;
+		}
+		size_t rem = bytes_.size() - consumed;
+		return rem > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(rem);
+	}
+
+	// bitsRead returns the current read position in bits (for callers that need
+	// to measure how much input a decode consumed).
+	inline uint64_t bitsRead() const
+	{
+		return numBitsRead_;
+	}
+
+	// readVarUint decodes a variable-length unsigned integer (see
+	// detail::decodeVarUint); used by var_decode_uint as its fast path.
+	error::Error readVarUint(uint64_t& val, uint32_t num_bytes)
+	{
+		val = 0;
+		if (!detail::decodeVarUint(bytes_.data(), bytes_.size(), numBitsRead_, val, num_bytes)) {
+			return error::Error("Reader does not contain enough data to fill the argument");
+		}
+		return nullptr;
 	}
 
 	error::Error readBits(uint8_t& val, uint32_t num_bits_to_read)
@@ -204,7 +249,7 @@ public:
 			return nullptr;
 		}
 
-		uint32_t srcByteIndex = numBitsRead_ >> 3;
+		size_t srcByteIndex = numBitsRead_ >> 3;
 		uint8_t srcBitOffset = numBitsRead_ & 7;
 
 		uint8_t bitsInFirstByte = 8 - srcBitOffset;
@@ -241,7 +286,7 @@ public:
 	error::Error readByte(uint8_t& val)
 	{
 		if ((numBitsRead_ & 7) == 0) {
-			uint32_t srcByteIndex = numBitsRead_ >> 3;
+			size_t srcByteIndex = numBitsRead_ >> 3;
 			if (srcByteIndex >= bytes_.size()) {
 				return error::Error("Reader does not contain enough data to fill the argument");
 			}
@@ -258,12 +303,12 @@ public:
 			return nullptr;
 		}
 		if ((numBitsRead_ & 7) == 0) {
-			uint32_t startByte = numBitsRead_ >> 3;
+			size_t startByte = numBitsRead_ >> 3;
 			if (startByte + size > bytes_.size()) {
 				return error::Error("Reader does not contain enough data to fill the argument");
 			}
 			std::copy(bytes_.begin() + startByte, bytes_.begin() + startByte + size, data);
-			numBitsRead_ += size * 8;
+			numBitsRead_ += uint64_t(size) * 8;
 			return nullptr;
 		}
 
@@ -271,7 +316,7 @@ public:
 		if (err) {
 			return err;
 		}
-		numBitsRead_ += size * 8;
+		numBitsRead_ += uint64_t(size) * 8;
 		return nullptr;
 	}
 
@@ -279,7 +324,7 @@ private:
 
 	error::Error readBytesUnaligned(uint8_t* data, uint32_t size, uint8_t bitOffset)
 	{
-		uint32_t byteIndex = numBitsRead_ >> 3;
+		size_t byteIndex = numBitsRead_ >> 3;
 		if (byteIndex + size >= bytes_.size()) {
 			return error::Error("Reader does not contain enough data to fill the argument");
 		}
@@ -310,7 +355,8 @@ private:
 	}
 
 	std::vector<uint8_t> bytes_;
-	uint32_t numBitsRead_ = 0;
+	// 64-bit: a 32-bit bit position wraps at 512 MiB.
+	uint64_t numBitsRead_ = 0;
 };
 
 }

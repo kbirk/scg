@@ -22,10 +22,11 @@ public:
 
 	inline Writer() = default;
 
+	// Writer pre-sizes its buffer to `size` bytes (normally bits_to_bytes of the
+	// value's bit_size). A zero size is allowed (zero-bit messages); the buffer
+	// grows on demand either way.
 	inline explicit Writer(uint32_t size)
 	{
-		assert(size > 0 && "Writer must be created with non-zero size");
-
 		bytes_.resize(size, 0);
 	}
 
@@ -50,7 +51,7 @@ public:
 		// Mask val to ensure we only write numBitsToWrite bits
 		val &= (1 << num_bits_to_write) - 1;
 
-		uint32_t dstByteIndex = numBitsWritten_ >> 3;
+		size_t dstByteIndex = numBitsWritten_ >> 3;
 		uint8_t dstBitOffset = numBitsWritten_ & 7;
 
 		// Ensure capacity
@@ -73,7 +74,7 @@ public:
 	void writeByte(uint8_t val)
 	{
 		if ((numBitsWritten_ & 7) == 0) {
-			uint32_t byteIndex = numBitsWritten_ >> 3;
+			size_t byteIndex = numBitsWritten_ >> 3;
 			ensureCapacity(byteIndex + 1);
 			bytes_[byteIndex] = val;
 			numBitsWritten_ += 8;
@@ -89,13 +90,13 @@ public:
 		}
 		if ((numBitsWritten_ & 7) == 0) {
 			ensureCapacity((numBitsWritten_ >> 3) + size);
-			uint32_t startByte = numBitsWritten_ >> 3;
+			size_t startByte = numBitsWritten_ >> 3;
 			std::copy(data, data + size, bytes_.begin() + startByte);
-			numBitsWritten_ += size * 8;
+			numBitsWritten_ += uint64_t(size) * 8;
 		} else {
-			ensureCapacity((numBitsWritten_ + size * 8 + 7) / 8);
+			ensureCapacity((numBitsWritten_ + uint64_t(size) * 8 + 7) / 8);
 			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
-			numBitsWritten_ += size * 8;
+			numBitsWritten_ += uint64_t(size) * 8;
 		}
 	}
 
@@ -104,19 +105,32 @@ public:
 		return bytes_;
 	}
 
+	// take moves the serialized buffer out of the writer without copying, e.g.
+	// `return std::move(writer).take();`. The writer is left empty.
+	inline std::vector<uint8_t> take() &&
+	{
+		numBitsWritten_ = 0;
+		return std::move(bytes_);
+	}
+
 private:
 
-	inline void ensureCapacity(uint32_t neededBytes)
+	inline void ensureCapacity(size_t neededBytes)
 	{
 		if (neededBytes > bytes_.size()) {
-			bytes_.reserve(std::max(neededBytes, uint32_t(bytes_.capacity() * 2)));
+			// Grow geometrically, but only when the capacity is actually
+			// exceeded (reserving on every size increase would reallocate on
+			// every write).
+			if (neededBytes > bytes_.capacity()) {
+				bytes_.reserve((std::max)(neededBytes, bytes_.capacity() * 2));
+			}
 			bytes_.resize(neededBytes, 0);
 		}
 	}
 
 	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
 	{
-		uint32_t byteIndex = numBitsWritten_ >> 3;
+		size_t byteIndex = numBitsWritten_ >> 3;
 		uint8_t shift = bitOffset;
 		uint8_t invShift = 64 - shift;
 
@@ -147,16 +161,18 @@ private:
 	}
 
 	std::vector<uint8_t> bytes_;
-	uint32_t numBitsWritten_ = 0;
+	// 64-bit: a 32-bit bit position wraps at 512 MiB.
+	uint64_t numBitsWritten_ = 0;
 };
 
 class WriterView {
 public:
 
+	// WriterView writes into a caller-owned buffer, growing it on demand. An empty
+	// buffer is allowed (zero-bit messages serialize to zero bytes).
 	inline explicit WriterView(std::vector<uint8_t>& data)
 		: bytes_(data)
 	{
-		assert(!data.empty() && "WriterView must be created with non-zero size");
 	}
 
 	template <typename T>
@@ -174,7 +190,7 @@ public:
 		// Mask val to ensure we only write numBitsToWrite bits
 		val &= (1 << num_bits_to_write) - 1;
 
-		uint32_t dstByteIndex = numBitsWritten_ >> 3;
+		size_t dstByteIndex = numBitsWritten_ >> 3;
 		uint8_t dstBitOffset = numBitsWritten_ & 7;
 
 		// Ensure capacity
@@ -197,7 +213,7 @@ public:
 	void writeByte(uint8_t val)
 	{
 		if ((numBitsWritten_ & 7) == 0) {
-			uint32_t byteIndex = numBitsWritten_ >> 3;
+			size_t byteIndex = numBitsWritten_ >> 3;
 			ensureCapacity(byteIndex + 1);
 			bytes_[byteIndex] = val;
 			numBitsWritten_ += 8;
@@ -213,13 +229,13 @@ public:
 		}
 		if ((numBitsWritten_ & 7) == 0) {
 			ensureCapacity((numBitsWritten_ >> 3) + size);
-			uint32_t startByte = numBitsWritten_ >> 3;
+			size_t startByte = numBitsWritten_ >> 3;
 			std::copy(data, data + size, bytes_.begin() + startByte);
-			numBitsWritten_ += size * 8;
+			numBitsWritten_ += uint64_t(size) * 8;
 		} else {
-			ensureCapacity((numBitsWritten_ + size * 8 + 7) / 8);
+			ensureCapacity((numBitsWritten_ + uint64_t(size) * 8 + 7) / 8);
 			writeBytesUnaligned(data, size, numBitsWritten_ & 7);
-			numBitsWritten_ += size * 8;
+			numBitsWritten_ += uint64_t(size) * 8;
 		}
 	}
 
@@ -230,17 +246,22 @@ public:
 
 private:
 
-	inline void ensureCapacity(uint32_t neededBytes)
+	inline void ensureCapacity(size_t neededBytes)
 	{
 		if (neededBytes > bytes_.size()) {
-			bytes_.reserve(std::max(neededBytes, uint32_t(bytes_.capacity() * 2)));
+			// Grow geometrically, but only when the capacity is actually
+			// exceeded (reserving on every size increase would reallocate on
+			// every write).
+			if (neededBytes > bytes_.capacity()) {
+				bytes_.reserve((std::max)(neededBytes, bytes_.capacity() * 2));
+			}
 			bytes_.resize(neededBytes, 0);
 		}
 	}
 
 	void writeBytesUnaligned(const uint8_t* data, uint32_t size, uint8_t bitOffset)
 	{
-		uint32_t byteIndex = numBitsWritten_ >> 3;
+		size_t byteIndex = numBitsWritten_ >> 3;
 		uint8_t shift = bitOffset;
 		uint8_t invShift = 64 - shift;
 
@@ -271,7 +292,7 @@ private:
 	}
 
 	std::vector<uint8_t>& bytes_;
-	uint32_t numBitsWritten_ = 0;
+	uint64_t numBitsWritten_ = 0;
 };
 
 }

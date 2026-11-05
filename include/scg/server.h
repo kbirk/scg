@@ -11,9 +11,21 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <exception>
+#include <stdexcept>
+#include <string>
+#include <system_error>
 
+#ifndef ASIO_STANDALONE
 #define ASIO_STANDALONE
+#endif
+#include <asio/post.hpp>
+#include <asio/thread_pool.hpp>
+#ifndef SCG_MINIMAL_INCLUDES
+// Kept for source compatibility with code relying on the transitive include;
+// define SCG_MINIMAL_INCLUDES to skip it (saves ~0.5 s per translation unit).
 #include <asio.hpp>
+#endif
 
 #include "scg/error.h"
 #include "scg/serialize.h"
@@ -70,11 +82,23 @@ struct ServerConfig {
 	// keepaliveInterval, if > 0, enables server-initiated connection keepalive: a
 	// PING is sent after this much idle time. keepaliveTimeout is the max idle
 	// time before a connection is declared dead and closed (defaults to
-	// 2*keepaliveInterval). This detects a client that vanished without a clean
-	// close (e.g. a dropped mobile connection) and prevents leaked stream-handler
-	// threads and connection objects.
+	// 2*keepaliveInterval; a value not greater than keepaliveInterval is raised
+	// to 2*keepaliveInterval, as in the Go server). This
+	// detects a client that vanished without a clean close (e.g. a dropped mobile
+	// connection) and prevents leaked stream-handler threads and connection
+	// objects.
 	std::chrono::milliseconds keepaliveInterval{0};
 	std::chrono::milliseconds keepaliveTimeout{0};
+	// maxPendingRequests / maxPendingRequestBytes bound the unary requests that
+	// are queued or running on the worker pool (0 = unlimited). A request over
+	// either bound is answered immediately with a "server overloaded" error
+	// instead of queueing without limit. The defaults are far above normal
+	// concurrency; the byte bound is 8x the default maximum frame size.
+	size_t maxPendingRequests = 10000;
+	size_t maxPendingRequestBytes = size_t(256) << 20;
+	// workerThreads sizes the unary worker pool (0 = hardware concurrency, at
+	// least 1).
+	size_t workerThreads = 0;
 };
 
 // Server group for organizing services and middleware
@@ -136,7 +160,7 @@ public:
 		, transport_(config.transport)
 		, running_(false)
 		, nextConnectionID_(1)
-		, threadPool_(std::thread::hardware_concurrency())
+		, threadPool_(workerCount(config))
 	{
 		rootGroup_ = std::make_shared<ServerGroup>();
 		activeGroup_ = rootGroup_;
@@ -145,6 +169,9 @@ public:
 	~Server()
 	{
 		shutdown();
+		// Every handler has finished; join the (now idle) worker threads before
+		// any member they could touch is destroyed.
+		threadPool_.join();
 	}
 
 	// Start the server in a background thread (non-blocking)
@@ -170,59 +197,74 @@ public:
 		return nullptr;
 	}
 
-	// Stop the server and wait for thread to finish
+	// shutdown stops the server:
+	//  1. stops accepting and closes every connection (peers see the close
+	//     promptly, so their in-flight calls fail fast instead of hanging);
+	//  2. fails every live stream and waits for the stream handlers to return;
+	//  3. waits for unary handlers that already started to return (their
+	//     responses can no longer be delivered). Requests still queued on the
+	//     worker pool never reach their handler: they are answered with a
+	//     "server shutting down" error.
+	// When it returns no handler is running, so service implementations may be
+	// destroyed. Calling it from inside a handler is supported: that handler is
+	// not waited for, and if another shutdown is already in progress the call
+	// returns immediately instead of waiting (which could deadlock, since the
+	// other shutdown waits for this handler).
 	error::Error shutdown()
 	{
-		// Check if already stopped
-		if (!running_) {
-			// Join threads if they're still running
-			keepaliveCv_.notify_all();
-			if (keepaliveThread_.joinable()) {
-				keepaliveThread_.join();
+		std::unique_lock<std::mutex> shutdownLock(shutdownMu_, std::defer_lock);
+		if (currentHandlerKind() != HandlerKind::None) {
+			if (!shutdownLock.try_lock()) {
+				// Another shutdown is in progress and waits for this handler.
+				// Make sure no new work starts, then let the handler finish.
+				std::lock_guard<std::mutex> lock(keepaliveMu_);
+				running_ = false;
+				return nullptr;
 			}
-			if (transportThread_.joinable()) {
-				transportThread_.join();
-			}
-			return nullptr;
+		} else {
+			shutdownLock.lock();
 		}
 
-		// Signal shutdown
-		running_ = false;
-
-		// Stop the keepalive scanner.
+		bool wasRunning = false;
+		{
+			std::lock_guard<std::mutex> lock(keepaliveMu_);
+			wasRunning = running_.exchange(false);
+		}
 		keepaliveCv_.notify_all();
-		if (keepaliveThread_.joinable()) {
-			keepaliveThread_.join();
-		}
+		joinUnlessSelf(keepaliveThread_);
 
-		// Stop the transport
-		if (transport_) {
+		// Stop the transport: closes the listener and every connection.
+		if (wasRunning && transport_) {
 			transport_->stop();
 		}
-
-		// Wait for threads to finish
-		if (transportThread_.joinable()) {
-			transportThread_.join();
-		}
+		joinUnlessSelf(transportThread_);
 
 		// Fail all live streams so their handler threads unblock and exit, then
 		// wait for every (detached) handler to finish before tearing down state.
+		std::vector<std::shared_ptr<ServerStream>> streams;
 		{
-			std::unique_lock<std::mutex> lock(mu_);
+			std::lock_guard<std::mutex> lock(mu_);
 			for (auto& cp : connStreams_) {
 				for (auto& sp : cp.second) {
-					sp.second->die(error::Error("server shutting down"));
+					streams.push_back(sp.second);
 				}
 			}
 			connStreams_.clear();
-			streamHandlersDone_.wait(lock, [this]() { return activeStreamHandlers_ == 0; });
 		}
+		for (auto& stream : streams) {
+			stream->die(error::Error("server shutting down"));
+		}
+		streams.clear();
 
-		// Now clean up (thread is stopped, no more concurrent access)
-		std::lock_guard<std::mutex> lock(mu_);
-
-		// Just clear connections - their destructors will call close()
-		connections_.clear();
+		{
+			std::unique_lock<std::mutex> lock(mu_);
+			int selfStream = currentHandlerKind() == HandlerKind::Stream ? 1 : 0;
+			size_t selfUnary = currentHandlerKind() == HandlerKind::Unary ? 1 : 0;
+			handlersDone_.wait(lock, [this, selfStream, selfUnary]() {
+				return activeStreamHandlers_ <= selfStream && runningUnary_ <= selfUnary;
+			});
+			connections_.clear();
+		}
 
 		return nullptr;
 	}
@@ -236,6 +278,7 @@ public:
 	// Register a service with the server
 	void registerService(uint64_t serviceID, const std::string& serviceName, ServiceHandler handler)
 	{
+		(void)serviceName; // informational
 		std::lock_guard<std::mutex> lock(mu_);
 
 		if (groupByServiceID_.find(serviceID) != groupByServiceID_.end()) {
@@ -246,6 +289,7 @@ public:
 			activeGroup_->registerService(serviceID, handler);
 			groupByServiceID_[serviceID] = activeGroup_;
 		}
+		registry_.reset();
 	}
 
 	// Register a streaming handler for a service. The service must also be
@@ -254,6 +298,7 @@ public:
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		streamServices_[serviceID] = handler;
+		registry_.reset();
 	}
 
 	// Add middleware to the current group
@@ -263,31 +308,128 @@ public:
 		if (activeGroup_) {
 			activeGroup_->addMiddleware(m);
 		}
+		registry_.reset();
 	}
 
-	// Create a new service group
+	// Create a new service group. Registrations made inside fn belong to it;
+	// the previous group is restored afterwards even if fn throws.
 	void group(std::function<void(Server*)> fn)
 	{
-		std::lock_guard<std::mutex> lock(mu_);
-
-		auto newGroup = std::make_shared<ServerGroup>();
-		newGroup->setParent(activeGroup_);
-		if (activeGroup_) {
-			activeGroup_->addChild(newGroup);
+		std::shared_ptr<ServerGroup> newGroup;
+		std::shared_ptr<ServerGroup> prevGroup;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			newGroup = std::make_shared<ServerGroup>();
+			newGroup->setParent(activeGroup_);
+			if (activeGroup_) {
+				activeGroup_->addChild(newGroup);
+			}
+			prevGroup = activeGroup_;
+			activeGroup_ = newGroup;
+			ownedGroups_.push_back(newGroup);
 		}
 
-		auto prevGroup = activeGroup_;
-		activeGroup_ = newGroup;
+		struct Restore {
+			Server* server;
+			std::shared_ptr<ServerGroup> prev;
+			~Restore()
+			{
+				std::lock_guard<std::mutex> lock(server->mu_);
+				server->activeGroup_ = prev;
+			}
+		} restore{this, prevGroup};
 
-		mu_.unlock(); // Unlock before calling user function
-		fn(this);
-		mu_.lock();
-
-		activeGroup_ = prevGroup;
-		ownedGroups_.push_back(newGroup);
+		fn(this); // called without mu_ held: it registers services
 	}
 
 private:
+	enum class HandlerKind { None, Unary, Stream };
+
+	// ServiceEntry is a snapshot of everything needed to dispatch one service:
+	// its handlers and its fully resolved (root-to-leaf) middleware chain.
+	struct ServiceEntry {
+		ServiceHandler handler;
+		StreamHandler streamHandler;
+		std::vector<middleware::Middleware> middleware;
+	};
+	using Registry = std::map<uint64_t, ServiceEntry>;
+
+	// ConnState is the per-connection state. Liveness is an atomic so the hot
+	// inbound-frame path records it without a lock.
+	struct ConnState {
+		std::shared_ptr<Connection> conn;
+		std::shared_ptr<std::atomic<int64_t>> lastActivityNs;
+	};
+
+	static size_t workerCount(const ServerConfig& config)
+	{
+		if (config.workerThreads > 0) {
+			return config.workerThreads;
+		}
+		unsigned hc = std::thread::hardware_concurrency();
+		return hc > 0 ? hc : 1;
+	}
+
+	static int64_t steadyNowNs()
+	{
+		return std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+	}
+
+	static HandlerKind& handlerKindSlot()
+	{
+		static thread_local HandlerKind kind = HandlerKind::None;
+		return kind;
+	}
+
+	static HandlerKind currentHandlerKind()
+	{
+		return handlerKindSlot();
+	}
+
+	struct HandlerScope {
+		explicit HandlerScope(HandlerKind kind) : prev(handlerKindSlot()) { handlerKindSlot() = kind; }
+		~HandlerScope() { handlerKindSlot() = prev; }
+		HandlerKind prev;
+	};
+
+	static void joinUnlessSelf(std::thread& t)
+	{
+		if (t.joinable() && t.get_id() != std::this_thread::get_id()) {
+			t.join();
+		}
+	}
+
+	// registrySnapshot returns the current dispatch snapshot, rebuilding it after
+	// a registration change. Caller holds mu_.
+	std::shared_ptr<const Registry> registrySnapshotUnsafe()
+	{
+		if (!registry_) {
+			auto reg = std::make_shared<Registry>();
+			for (auto& pair : groupByServiceID_) {
+				ServiceEntry entry;
+				entry.handler = pair.second->getService(pair.first);
+				entry.middleware = getMiddlewareStack(pair.first);
+				(*reg)[pair.first] = std::move(entry);
+			}
+			for (auto& pair : streamServices_) {
+				auto& entry = (*reg)[pair.first];
+				entry.streamHandler = pair.second;
+				if (groupByServiceID_.find(pair.first) != groupByServiceID_.end()) {
+					entry.middleware = getMiddlewareStack(pair.first);
+				}
+			}
+			registry_ = reg;
+		}
+		return registry_;
+	}
+
+	std::shared_ptr<const Registry> registrySnapshot()
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		return registrySnapshotUnsafe();
+	}
+
 	// Start the server (internal helper)
 	error::Error initialize()
 	{
@@ -301,6 +443,12 @@ private:
 			return error::Error("No transport configured");
 		}
 
+		// The previous run's threads must be gone before restarting.
+		joinUnlessSelf(transportThread_);
+		joinUnlessSelf(keepaliveThread_);
+
+		registrySnapshotUnsafe();
+
 		transport_->setOnConnection([this](std::shared_ptr<Connection> conn) {
 			handleNewConnection(conn);
 		});
@@ -310,63 +458,29 @@ private:
 			return err;
 		}
 
-		running_ = true;
+		{
+			std::lock_guard<std::mutex> kaLock(keepaliveMu_);
+			running_ = true;
+		}
 		return nullptr;
 	}
 
-	// Handle new connection
+	// Handle new connection (on the transport I/O thread)
 	void handleNewConnection(std::shared_ptr<Connection> conn)
 	{
 		if (!running_) {
+			conn->close();
 			return;
 		}
 
 		uint64_t connID = nextConnectionID_++;
+		auto activity = std::make_shared<std::atomic<int64_t>>(steadyNowNs());
 
 		// Store the connection first
 		{
 			std::lock_guard<std::mutex> lock(mu_);
-			connections_[connID] = conn;
+			connections_[connID] = ConnState{conn, activity};
 		}
-		{
-			std::lock_guard<std::mutex> lock(activityMu_);
-			lastActivity_[connID] = std::chrono::steady_clock::now();
-		}
-
-		// Process messages using thread pool to avoid blocking io_context.
-		// Stream frames are routed inline on the I/O thread to preserve per-stream
-		// order; unary requests are dispatched to the pool.
-		conn->setMessageHandler([this, connID](const std::vector<uint8_t>& data) {
-			if (!running_) {
-				return;
-			}
-
-			// Record liveness for the keepalive scanner: any inbound frame
-			// (including a client's PONG reply) keeps the connection alive.
-			{
-				std::lock_guard<std::mutex> lock(activityMu_);
-				lastActivity_[connID] = std::chrono::steady_clock::now();
-			}
-
-			serialize::Reader reader(data);
-			std::array<uint8_t, 16> prefix;
-			if (serialize::deserialize(prefix, reader)) {
-				return;
-			}
-
-			if (prefix == STREAM_PREFIX) {
-				handleStreamFrame(connID, reader);
-				return;
-			}
-
-			// Dispatch the unary request to the worker pool so the single io thread
-			// stays free to read more frames, and handlers run concurrently across
-			// cores (and may block without stalling the event loop). Stream frames
-			// are routed inline above to preserve per-stream order.
-			asio::post(threadPool_, [this, connID, data]() {
-				handleMessage(connID, data);
-			});
-		});
 
 		conn->setCloseHandler([this, connID]() {
 			onConnectionClose(connID);
@@ -375,6 +489,134 @@ private:
 		conn->setFailHandler([this, connID](const error::Error& err) {
 			onConnectionFail(connID, err);
 		});
+
+		// Installed last: this starts the read loop. Stream frames are routed
+		// inline on the I/O thread to preserve per-stream order; unary requests
+		// are dispatched to the worker pool so the single io thread stays free to
+		// read more frames and handlers may block without stalling the loop.
+		conn->setOwnedMessageHandler([this, connID, activity](std::vector<uint8_t>&& data) {
+			if (!running_) {
+				return;
+			}
+
+			// Record liveness for the keepalive scanner: any inbound frame
+			// (including a client's PONG reply) keeps the connection alive.
+			activity->store(steadyNowNs(), std::memory_order_relaxed);
+
+			// Nothing may escape into the transport's event loop.
+			try {
+				onFrame(connID, std::move(data));
+			} catch (const std::exception& e) {
+				handleError(error::Error(std::string("Error handling frame: ") + e.what()));
+			} catch (...) {
+				handleError(error::Error("Error handling frame: unknown exception"));
+			}
+		});
+	}
+
+	// onFrame dispatches one inbound frame (on the I/O thread).
+	void onFrame(uint64_t connID, std::vector<uint8_t>&& data)
+	{
+		size_t frameBytes = data.size();
+		serialize::Reader reader(std::move(data));
+		std::array<uint8_t, 16> prefix;
+		if (serialize::deserialize(prefix, reader)) {
+			return;
+		}
+
+		if (prefix == STREAM_PREFIX) {
+			handleStreamFrame(connID, reader);
+			return;
+		}
+
+		if (prefix != REQUEST_PREFIX) {
+			handleError(error::Error("Unexpected prefix"));
+			return;
+		}
+
+		if (!admitUnary(frameBytes)) {
+			rejectOverloaded(connID, reader);
+			return;
+		}
+		try {
+			asio::post(threadPool_, [this, connID, frameBytes, reader = std::move(reader)]() mutable {
+				handleMessage(connID, reader, frameBytes);
+			});
+		} catch (...) {
+			releaseUnary(frameBytes);
+			throw;
+		}
+	}
+
+	// admitUnary reserves a pending-request slot (queued or running); false
+	// means overloaded.
+	bool admitUnary(size_t bytes)
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		if (pendingUnary_ > 0) {
+			if (config_.maxPendingRequests > 0 && pendingUnary_ >= config_.maxPendingRequests) {
+				return false;
+			}
+			if (config_.maxPendingRequestBytes > 0 && pendingUnaryBytes_ + bytes > config_.maxPendingRequestBytes) {
+				return false;
+			}
+		}
+		pendingUnary_++;
+		pendingUnaryBytes_ += bytes;
+		return true;
+	}
+
+	void releaseUnary(size_t bytes)
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		pendingUnary_--;
+		pendingUnaryBytes_ -= bytes;
+	}
+
+	// beginUnary marks a dequeued request as started, unless the server is
+	// shutting down (then the request must not reach its handler). Checked under
+	// mu_, which shutdown's wait also uses, so a request either starts before
+	// shutdown waits for it or never starts.
+	bool beginUnary()
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		if (!running_) {
+			return false;
+		}
+		runningUnary_++;
+		return true;
+	}
+
+	void endUnary()
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		runningUnary_--;
+		handlersDone_.notify_all();
+	}
+
+	// rejectOverloaded answers a request that was not admitted (I/O thread).
+	void rejectOverloaded(uint64_t connID, serialize::Reader& reader)
+	{
+		context::Context ctx;
+		uint64_t requestID = 0;
+		if (deserialize(ctx, reader) || serialize::deserialize(requestID, reader)) {
+			return;
+		}
+		auto conn = connectionFor(connID);
+		if (conn) {
+			conn->sendOwned(respondWithError(requestID, error::Error("server overloaded")));
+		}
+		handleError(error::Error("server overloaded: rejected unary request"));
+	}
+
+	std::shared_ptr<Connection> connectionFor(uint64_t connID)
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		auto it = connections_.find(connID);
+		if (it == connections_.end()) {
+			return nullptr;
+		}
+		return it->second.conn;
 	}
 
 	// Called when a connection closes
@@ -382,14 +624,8 @@ private:
 	{
 		failConnStreams(connID, error::Error("connection closed"));
 
-		eraseActivity(connID);
-
 		std::lock_guard<std::mutex> lock(mu_);
-
-		auto it = connections_.find(connID);
-		if (it != connections_.end()) {
-			connections_.erase(it);
-		}
+		connections_.erase(connID);
 	}
 
 	// Called when a connection fails
@@ -397,22 +633,13 @@ private:
 	{
 		failConnStreams(connID, error::Error("connection failed: " + err.message()));
 
-		eraseActivity(connID);
-
-		std::lock_guard<std::mutex> lock(mu_);
-
-		handleError(err);
-
-		auto it = connections_.find(connID);
-		if (it != connections_.end()) {
-			connections_.erase(it);
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			connections_.erase(connID);
 		}
-	}
 
-	void eraseActivity(uint64_t connID)
-	{
-		std::lock_guard<std::mutex> lock(activityMu_);
-		lastActivity_.erase(connID);
+		// User callback: never invoked with mu_ held.
+		handleError(err);
 	}
 
 	// keepaliveLoop periodically scans connections: it PINGs an idle connection
@@ -424,9 +651,13 @@ private:
 	void keepaliveLoop()
 	{
 		auto interval = config_.keepaliveInterval;
-		auto timeout = config_.keepaliveTimeout.count() > 0
+		// As in the Go server: a timeout not greater than the interval (or
+		// unset) is raised to twice the interval.
+		auto timeout = config_.keepaliveTimeout > interval
 			? config_.keepaliveTimeout
 			: interval * 2;
+		int64_t intervalNs = std::chrono::duration_cast<std::chrono::nanoseconds>(interval).count();
+		int64_t timeoutNs = std::chrono::duration_cast<std::chrono::nanoseconds>(timeout).count();
 
 		while (true) {
 			{
@@ -437,40 +668,24 @@ private:
 				}
 			}
 
-			auto now = std::chrono::steady_clock::now();
-
-			// Snapshot the connections, then read activity, then act — all
-			// without holding two locks at once, and send/close outside any lock
+			// Snapshot the connections, then act — send/close outside any lock
 			// (close() re-enters via the connection's close handler).
-			std::vector<std::pair<uint64_t, std::shared_ptr<Connection>>> conns;
+			std::vector<ConnState> conns;
 			{
 				std::lock_guard<std::mutex> lock(mu_);
 				for (auto& pair : connections_) {
-					conns.emplace_back(pair.first, pair.second);
+					conns.push_back(pair.second);
 				}
 			}
 
-			std::vector<std::shared_ptr<Connection>> toPing;
-			std::vector<std::shared_ptr<Connection>> toClose;
-			{
-				std::lock_guard<std::mutex> lock(activityMu_);
-				for (auto& pair : conns) {
-					auto it = lastActivity_.find(pair.first);
-					auto last = (it != lastActivity_.end()) ? it->second : now;
-					auto idle = now - last;
-					if (idle > timeout) {
-						toClose.push_back(pair.second);
-					} else if (idle >= interval) {
-						toPing.push_back(pair.second);
-					}
+			int64_t now = steadyNowNs();
+			for (auto& state : conns) {
+				int64_t idle = now - state.lastActivityNs->load(std::memory_order_relaxed);
+				if (idle > timeoutNs) {
+					state.conn->close();
+				} else if (idle >= intervalNs / 2) { // see Client::keepaliveLoop
+					state.conn->sendOwned(serializeStreamControl(STREAM_FRAME_PING));
 				}
-			}
-
-			for (auto& conn : toPing) {
-				conn->send(serializeStreamControl(STREAM_FRAME_PING));
-			}
-			for (auto& conn : toClose) {
-				conn->close();
 			}
 		}
 	}
@@ -520,16 +735,9 @@ private:
 
 		// Connection-level keepalive frames are not associated with a stream.
 		if (frameKind == STREAM_FRAME_PING) {
-			std::shared_ptr<Connection> conn;
-			{
-				std::lock_guard<std::mutex> lock(mu_);
-				auto it = connections_.find(connID);
-				if (it != connections_.end()) {
-					conn = it->second;
-				}
-			}
+			auto conn = connectionFor(connID);
 			if (conn) {
-				conn->send(serializeStreamControl(STREAM_FRAME_PONG));
+				conn->sendOwned(serializeStreamControl(STREAM_FRAME_PONG));
 			}
 			return;
 		}
@@ -551,43 +759,55 @@ private:
 				return;
 			}
 
-			std::shared_ptr<Connection> conn;
-			{
-				std::lock_guard<std::mutex> lock(mu_);
-				auto it = connections_.find(connID);
-				if (it == connections_.end()) {
-					return;
-				}
-				conn = it->second;
+			auto conn = connectionFor(connID);
+			if (!conn) {
+				return;
 			}
 
 			auto stream = std::make_shared<ServerStream>(conn, ctx, streamID, config_.streamRecvBufferSize);
 			std::string rejectReason;
-			bool spawn = false;
 			{
 				std::lock_guard<std::mutex> lock(mu_);
 				if (!running_) {
-					return; // shutting down; don't start new handlers
-				}
-				auto& connMap = connStreams_[connID];
-				if (connMap.count(streamID) != 0) {
-					rejectReason = "duplicate stream id";
-				} else if (config_.maxConcurrentStreams > 0 && connMap.size() >= config_.maxConcurrentStreams) {
-					rejectReason = "max concurrent streams exceeded";
+					rejectReason = "server shutting down";
 				} else {
-					connMap[streamID] = stream;
-					activeStreamHandlers_++;
-					spawn = true;
+					auto& connMap = connStreams_[connID];
+					if (connMap.count(streamID) != 0) {
+						rejectReason = "duplicate stream id";
+					} else if (config_.maxConcurrentStreams > 0 && connMap.size() >= config_.maxConcurrentStreams) {
+						rejectReason = "max concurrent streams exceeded";
+					} else {
+						connMap[streamID] = stream;
+						activeStreamHandlers_++;
+					}
 				}
 			}
 			if (!rejectReason.empty()) {
-				conn->send(serializeStreamClose(streamID, STREAM_STATUS_ERROR, rejectReason));
+				conn->sendOwned(serializeStreamClose(streamID, STREAM_STATUS_ERROR, rejectReason));
 				return;
 			}
-			if (spawn) {
+			try {
 				std::thread([this, connID, stream, serviceID, methodID]() {
 					runStreamHandler(connID, stream, serviceID, methodID);
 				}).detach();
+			} catch (const std::exception& e) {
+				// Thread creation failed (e.g. thread limit reached): roll back
+				// and reject the stream instead of terminating the process.
+				{
+					std::lock_guard<std::mutex> lock(mu_);
+					auto it = connStreams_.find(connID);
+					if (it != connStreams_.end()) {
+						it->second.erase(streamID);
+						if (it->second.empty()) {
+							connStreams_.erase(it);
+						}
+					}
+					activeStreamHandlers_--;
+					handlersDone_.notify_all();
+				}
+				stream->die(error::Error("unable to start stream handler"));
+				conn->sendOwned(serializeStreamClose(streamID, STREAM_STATUS_ERROR, "unable to start stream handler"));
+				handleError(error::Error(std::string("unable to start stream handler thread: ") + e.what()));
 			}
 			return;
 		}
@@ -611,16 +831,9 @@ private:
 			case STREAM_FRAME_MESSAGE:
 				if (stream->deliver(std::move(reader))) {
 					// Bounded buffer overflowed: notify the client and drop the stream.
-					std::shared_ptr<Connection> conn;
-					{
-						std::lock_guard<std::mutex> lock(mu_);
-						auto it = connections_.find(connID);
-						if (it != connections_.end()) {
-							conn = it->second;
-						}
-					}
+					auto conn = connectionFor(connID);
 					if (conn) {
-						conn->send(serializeStreamClose(streamID, STREAM_STATUS_ERROR, "stream receive buffer overflow"));
+						conn->sendOwned(serializeStreamClose(streamID, STREAM_STATUS_ERROR, "stream receive buffer overflow"));
 					}
 					removeStream(connID, streamID);
 				}
@@ -641,70 +854,77 @@ private:
 	// every exit path, decrements the active-handler count so shutdown can wait.
 	void runStreamHandler(uint64_t connID, std::shared_ptr<ServerStream> stream, uint64_t serviceID, uint64_t methodID)
 	{
-		runStreamHandlerImpl(connID, stream, serviceID, methodID);
+		{
+			HandlerScope scope(HandlerKind::Stream);
+			runStreamHandlerImpl(connID, stream, serviceID, methodID);
+		}
+		stream.reset();
 
 		std::lock_guard<std::mutex> lock(mu_);
-		if (--activeStreamHandlers_ == 0) {
-			streamHandlersDone_.notify_all();
-		}
+		--activeStreamHandlers_;
+		handlersDone_.notify_all();
 	}
 
 	// runStreamHandlerImpl authorizes and runs a stream handler to completion,
-	// then sends the terminal CLOSE frame.
+	// then sends the terminal CLOSE frame. Exceptions from middleware or the
+	// handler end the stream with an error instead of terminating the process.
 	void runStreamHandlerImpl(uint64_t connID, std::shared_ptr<ServerStream> stream, uint64_t serviceID, uint64_t methodID)
 	{
 		uint64_t streamID = stream->streamID();
 
-		std::shared_ptr<Connection> conn;
-		StreamHandler handler;
-		std::vector<middleware::Middleware> middlewareStack;
-		{
-			std::lock_guard<std::mutex> lock(mu_);
-			auto it = connections_.find(connID);
-			if (it != connections_.end()) {
-				conn = it->second;
-			}
-			auto sit = streamServices_.find(serviceID);
-			if (sit != streamServices_.end()) {
-				handler = sit->second;
-			}
-			middlewareStack = getMiddlewareStack(serviceID);
+		auto conn = connectionFor(connID);
+		auto registry = registrySnapshot();
+		const ServiceEntry* entry = nullptr;
+		auto it = registry->find(serviceID);
+		if (it != registry->end()) {
+			entry = &it->second;
 		}
 
 		auto finish = [&](uint8_t status, const std::string& msg) {
 			if (conn) {
-				conn->send(serializeStreamClose(streamID, status, msg));
+				conn->sendOwned(serializeStreamClose(streamID, status, msg));
 			}
 			removeStream(connID, streamID);
 		};
 
-		if (!handler) {
+		if (!entry || !entry->streamHandler) {
 			finish(STREAM_STATUS_ERROR, "service with id " + std::to_string(serviceID) + " does not support streaming");
 			return;
 		}
 
-		// Authorize once on OPEN by running the middleware chain with a sentinel
-		// request; message-oriented middleware (e.g. auth) gates the stream. The
-		// sentinel is an owned shared_ptr passed through as the chain's response,
-		// so no const-cast / aliasing is needed (the response is discarded).
-		context::Context ctxCopy = stream->context();
-		auto sentinel = std::make_shared<EmptyStreamMessage>();
-		auto mwResult = scg::middleware::applyHandlerChain(
-			ctxCopy, *sentinel, middlewareStack,
-			[sentinel](scg::context::Context&, const scg::type::Message&) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
-				return std::make_pair(sentinel, nullptr);
-			});
-		if (mwResult.second) {
-			finish(STREAM_STATUS_ERROR, mwResult.second.message());
-			return;
-		}
+		std::string failure;
+		try {
+			// Authorize once on OPEN by running the middleware chain with a sentinel
+			// request; message-oriented middleware (e.g. auth) gates the stream. The
+			// sentinel is an owned shared_ptr passed through as the chain's response,
+			// so no const-cast / aliasing is needed (the response is discarded).
+			context::Context ctxCopy = stream->context();
+			auto sentinel = std::make_shared<EmptyStreamMessage>();
+			auto mwResult = scg::middleware::applyHandlerChain(
+				ctxCopy, *sentinel, entry->middleware,
+				[sentinel](scg::context::Context&, const scg::type::Message&) -> std::pair<std::shared_ptr<scg::type::Message>, scg::error::Error> {
+					return std::make_pair(sentinel, nullptr);
+				});
+			if (mwResult.second) {
+				finish(STREAM_STATUS_ERROR, mwResult.second.message());
+				return;
+			}
 
-		auto err = handler(stream->context(), stream, methodID);
-		if (err) {
-			finish(STREAM_STATUS_ERROR, err.message());
-		} else {
-			finish(STREAM_STATUS_OK, "");
+			auto err = entry->streamHandler(stream->context(), stream, methodID);
+			if (err) {
+				finish(STREAM_STATUS_ERROR, err.message());
+			} else {
+				finish(STREAM_STATUS_OK, "");
+			}
+			return;
+		} catch (const std::exception& e) {
+			failure = std::string("stream handler threw: ") + e.what();
+		} catch (...) {
+			failure = "stream handler threw an unknown exception";
 		}
+		stream->die(error::Error(failure));
+		finish(STREAM_STATUS_ERROR, failure);
+		handleError(error::Error(failure));
 	}
 
 	StreamHandler getStreamService(uint64_t serviceID) const
@@ -716,65 +936,86 @@ private:
 		return nullptr;
 	}
 
-	// Handle a single message
-	void handleMessage(uint64_t connID, const std::vector<uint8_t>& data)
+	// Handle a single unary request (on a worker thread). The reader is
+	// positioned after the request prefix.
+	void handleMessage(uint64_t connID, serialize::Reader& reader, size_t frameBytes)
 	{
-		serialize::Reader reader(data);
+		struct Release {
+			Server* server;
+			size_t bytes;
+			~Release() { server->releaseUnary(bytes); }
+		} release{this, frameBytes};
 
-		try {
-			// Read prefix
-			std::array<uint8_t, 16> prefix;
-			serialize::deserialize(prefix, reader);
-
-			if (prefix != REQUEST_PREFIX) {
-				handleError(error::Error("Unexpected prefix"));
-				return;
-			}
-
-			// Read context using ADL
-			context::Context ctx;
-			deserialize(ctx, reader);
-
-			// Read request ID
-			uint64_t requestID = 0;
-			serialize::deserialize(requestID, reader);
-
-			// Read service ID
-			uint64_t serviceID = 0;
-			serialize::deserialize(serviceID, reader);
-
-			// Get service handler and middleware and connection
-			// Hold shared_ptr to keep connection alive even if removed from map
-			ServiceHandler handler;
-			std::vector<middleware::Middleware> middlewareStack;
-			std::shared_ptr<Connection> conn;
+		bool started = beginUnary();
+		struct Running {
+			Server* server;
+			bool active;
+			~Running()
 			{
-				std::lock_guard<std::mutex> lock(mu_);
-
-				auto it = connections_.find(connID);
-				if (it == connections_.end()) {
-					return;  // Connection no longer exists
+				if (active) {
+					server->endUnary();
 				}
-				conn = it->second;  // Copy shared_ptr to keep alive
-
-				handler = getService(serviceID);
-				middlewareStack = getMiddlewareStack(serviceID);
 			}
+		} running{this, started};
+		HandlerScope scope(started ? HandlerKind::Unary : HandlerKind::None);
 
-			if (!handler) {
-				auto response = respondWithError(requestID, error::Error("Service not found"));
-				conn->send(response);
-				return;
+		// Read context using ADL
+		context::Context ctx;
+		uint64_t requestID = 0;
+		uint64_t serviceID = 0;
+		if (deserialize(ctx, reader) ||
+			serialize::deserialize(requestID, reader) ||
+			serialize::deserialize(serviceID, reader)) {
+			handleError(error::Error("Malformed request header"));
+			return;
+		}
+
+		// Hold shared_ptr to keep connection alive even if removed from map
+		auto conn = connectionFor(connID);
+		if (!conn) {
+			return; // Connection no longer exists
+		}
+		if (!started) {
+			// Queued behind a shutdown: answer without running the handler.
+			conn->sendOwned(respondWithError(requestID, error::Error("server shutting down")));
+			return;
+		}
+		auto registry = registrySnapshot();
+
+		std::vector<uint8_t> response;
+		auto it = registry->find(serviceID);
+		if (it == registry->end() || !it->second.handler) {
+			response = respondWithError(requestID, error::Error("Service not found"));
+		} else {
+			try {
+				response = it->second.handler(ctx, it->second.middleware, requestID, reader);
+			} catch (const std::exception& e) {
+				// Answer the caller instead of leaving it waiting forever.
+				handleError(error::Error(std::string("Error handling message: ") + e.what()));
+				response = respondWithError(requestID, error::Error(std::string("internal server error: ") + e.what()));
+			} catch (...) {
+				handleError(error::Error("Error handling message: unknown exception"));
+				response = respondWithError(requestID, error::Error("internal server error"));
 			}
+		}
 
-			// Call handler
-			auto response = handler(ctx, middlewareStack, requestID, reader);
+		sendResponse(conn, requestID, std::move(response));
+	}
 
-			// Send response
-			conn->send(response);
-
-		} catch (const std::exception& e) {
-			handleError(error::Error(std::string("Error handling message: ") + e.what()));
+	// sendResponse delivers a unary response. If it cannot be sent (e.g. it
+	// exceeds the transport's send limit) the caller gets an error response
+	// instead; if even that fails the connection is closed so the caller's
+	// pending request fails rather than hanging.
+	void sendResponse(const std::shared_ptr<Connection>& conn, uint64_t requestID, std::vector<uint8_t>&& response)
+	{
+		auto err = conn->sendOwned(std::move(response));
+		if (!err) {
+			return;
+		}
+		handleError(error::Error("failed to send response: " + err.message()));
+		auto fallback = conn->sendOwned(respondWithError(requestID, error::Error("failed to send response: " + err.message())));
+		if (fallback) {
+			conn->close();
 		}
 	}
 
@@ -821,7 +1062,7 @@ private:
 
 		std::string errMsg = err ? err.message() : "Unknown error";
 
-		size_t bitSize =
+		uint32_t bitSize =
 			bit_size(RESPONSE_PREFIX) +
 			bit_size(requestID) +
 			bit_size(ERROR_RESPONSE) +
@@ -833,10 +1074,10 @@ private:
 		writer.write(ERROR_RESPONSE);
 		writer.write(errMsg);
 
-		return writer.bytes();
+		return std::move(writer).take();
 	}
 
-	// Error handling
+	// Error handling. Never call with mu_ held: it runs the user's callback.
 	void handleError(const error::Error& err)
 	{
 		if (err.message() == "connection closed") {
@@ -856,9 +1097,10 @@ private:
 	std::shared_ptr<ServerGroup> activeGroup_;
 	std::map<uint64_t, std::shared_ptr<ServerGroup>> groupByServiceID_;
 	std::vector<std::shared_ptr<ServerGroup>> ownedGroups_;
+	std::shared_ptr<const Registry> registry_; // rebuilt lazily after changes
 
 	std::atomic<bool> running_;
-	std::map<uint64_t, std::shared_ptr<Connection>> connections_;
+	std::map<uint64_t, ConnState> connections_;
 	std::atomic<uint64_t> nextConnectionID_;
 
 	// Streaming state. Handler threads are detached and tracked by a counter so
@@ -867,20 +1109,27 @@ private:
 	std::map<uint64_t, StreamHandler> streamServices_;
 	std::map<uint64_t, std::map<uint64_t, std::shared_ptr<ServerStream>>> connStreams_;
 	int activeStreamHandlers_ = 0;
-	std::condition_variable streamHandlersDone_;
+	// Unary requests admitted to the worker pool (queued or running), for the
+	// pending-request bounds, and those whose handler has started, which
+	// shutdown waits for.
+	size_t pendingUnary_ = 0;
+	size_t pendingUnaryBytes_ = 0;
+	size_t runningUnary_ = 0;
+	std::condition_variable handlersDone_;
 
-	asio::thread_pool threadPool_;
 	std::thread transportThread_;
 	mutable std::mutex mu_;
+	std::mutex shutdownMu_;
 
 	// Server-initiated keepalive: a scanner thread PINGs idle connections and
-	// closes silent (dead) ones. lastActivity_ is guarded by its own mutex so the
-	// hot inbound-frame path does not contend on mu_.
-	std::map<uint64_t, std::chrono::steady_clock::time_point> lastActivity_;
-	std::mutex activityMu_;
+	// closes silent (dead) ones.
 	std::thread keepaliveThread_;
 	std::mutex keepaliveMu_;
 	std::condition_variable keepaliveCv_;
+
+	// Declared last so it is destroyed first; ~Server joins it explicitly
+	// before any other member goes away.
+	asio::thread_pool threadPool_;
 };
 
 // Helper function to create an error response
@@ -890,7 +1139,7 @@ inline std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Er
 
 	std::string errMsg = err ? err.message() : "Unknown error";
 
-	size_t bitSize =
+	uint32_t bitSize =
 		bit_size(RESPONSE_PREFIX) +
 		bit_size(requestID) +
 		bit_size(ERROR_RESPONSE) +
@@ -902,7 +1151,7 @@ inline std::vector<uint8_t> respondWithError(uint64_t requestID, const error::Er
 	writer.write(ERROR_RESPONSE);
 	writer.write(errMsg);
 
-	return writer.bytes();
+	return std::move(writer).take();
 }
 
 // Helper function to create a message response
@@ -911,7 +1160,7 @@ std::vector<uint8_t> respondWithMessage(uint64_t requestID, const T& msg)
 {
 	using scg::serialize::bit_size; // ADL trickery
 
-	size_t bitSize =
+	uint32_t bitSize =
 		bit_size(RESPONSE_PREFIX) +
 		bit_size(requestID) +
 		bit_size(MESSAGE_RESPONSE) +
@@ -923,7 +1172,7 @@ std::vector<uint8_t> respondWithMessage(uint64_t requestID, const T& msg)
 	writer.write(MESSAGE_RESPONSE);
 	writer.write(msg);
 
-	return writer.bytes();
+	return std::move(writer).take();
 }
 
 } // namespace rpc

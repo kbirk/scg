@@ -20,8 +20,30 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g") # debug info
 set(CMAKE_ENABLE_EXPORTS ON) # enables -rdynamic to export symbols for stacktraces
 
+# Sanitizers: configure with e.g. -DSCG_SANITIZE=address,undefined or
+# -DSCG_SANITIZE=thread. On kernels with high ASLR entropy, run the binaries
+# under `setarch -R` (ASan/TSan otherwise fail intermittently at startup).
+set(SCG_SANITIZE "" CACHE STRING "Sanitizers to build the tests with (address, thread, undefined, or a comma list)")
+if(SCG_SANITIZE)
+	message(STATUS "SCG_SANITIZE = ${SCG_SANITIZE}")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=${SCG_SANITIZE} -fno-omit-frame-pointer")
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=${SCG_SANITIZE}")
+	if(SCG_SANITIZE MATCHES "undefined")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-sanitize-recover=undefined")
+	endif()
+	if(SCG_SANITIZE MATCHES "thread")
+		# asio uses std::atomic_thread_fence, which GCC warns TSan cannot model.
+		include(CheckCXXCompilerFlag)
+		check_cxx_compiler_flag(-Wno-tsan SCG_HAS_WNO_TSAN)
+		if(SCG_HAS_WNO_TSAN)
+			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tsan")
+		endif()
+	endif()
+endif()
+
 # Find OpenSSL
 find_package(OpenSSL REQUIRED)
+
 
 # Source include dirs
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../include")
@@ -42,6 +64,28 @@ add_executable(error_tests "error_tests.cpp")
 
 # Macro test
 add_executable(macro_test "macro_test.cpp")
+
+# Middleware chain tests
+add_executable(middleware_tests "middleware_tests.cpp")
+
+# Downstream compatibility (extension overloads, macros, golden encoding)
+add_executable(downstream_compat_tests "downstream_compat_tests.cpp")
+
+# Client connect bookkeeping and deadline arithmetic (no network)
+add_executable(client_unit_tests "client_unit_tests.cpp")
+
+# Every public header must compile on its own (built as part of `all`).
+set(SCG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+file(GLOB_RECURSE SCG_PUBLIC_HEADERS RELATIVE "${SCG_INCLUDE_DIR}" "${SCG_INCLUDE_DIR}/scg/*.h")
+set(SCG_HEADER_CHECK_SOURCES "")
+foreach(header ${SCG_PUBLIC_HEADERS})
+	string(REGEX REPLACE "[/.]" "_" check_name "${header}")
+	set(check_src "${CMAKE_CURRENT_BINARY_DIR}/header_check/${check_name}.cpp")
+	file(WRITE "${check_src}.in" "#include \"${header}\"\n")
+	configure_file("${check_src}.in" "${check_src}" COPYONLY)
+	list(APPEND SCG_HEADER_CHECK_SOURCES "${check_src}")
+endforeach()
+add_library(header_self_contained OBJECT ${SCG_HEADER_CHECK_SOURCES})
 
 # Generated Api / Fake seam tests (no networking)
 add_executable(api_fake_tests "api_fake_tests.cpp")

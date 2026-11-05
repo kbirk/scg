@@ -1,15 +1,75 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <array>
+#include <type_traits>
+#include <utility>
 
 #include "scg/error.h"
 
 namespace scg {
 namespace serialize {
+
+namespace detail {
+
+// decodeVarUint decodes one variable-length unsigned integer (num_bytes units
+// of a 1-bit continuation flag followed by 8 data bits, LSB-first) directly
+// from `data` starting at bit `pos`. It is the hot path for every integer,
+// enum and length prefix, so it works on a local cursor and touches the
+// reader's cursor once, instead of two bounds-checked readBits calls per unit.
+// On success it stores the value, advances `pos`, and returns true; on
+// truncated input it returns false and leaves `pos` unchanged. The wire format
+// is exactly what var_encode_uint writes.
+inline bool decodeVarUint(const uint8_t* data, size_t size, uint64_t& pos, uint64_t& val, uint32_t num_bytes)
+{
+	uint64_t p = pos;
+	uint64_t result = 0;
+	for (uint32_t i = 0; i < num_bytes; ++i) {
+		size_t bi = static_cast<size_t>(p >> 3);
+		if (bi >= size) {
+			return false;
+		}
+		unsigned off = static_cast<unsigned>(p & 7);
+		if (((data[bi] >> off) & 1u) == 0) {
+			++p;
+			break;
+		}
+		++p;
+
+		// 8 data bits at p (may span two bytes).
+		bi = static_cast<size_t>(p >> 3);
+		off = static_cast<unsigned>(p & 7);
+		if (bi >= size) {
+			return false;
+		}
+		unsigned b = static_cast<unsigned>(data[bi]) >> off;
+		if (off != 0) {
+			if (bi + 1 >= size) {
+				return false;
+			}
+			b |= static_cast<unsigned>(data[bi + 1]) << (8 - off);
+		}
+		p += 8;
+		result |= static_cast<uint64_t>(b & 0xFFu) << (8 * i);
+	}
+	val = result;
+	pos = p;
+	return true;
+}
+
+// has_read_var_uint detects readers that provide the fast readVarUint path
+// (scg's Reader and ReaderView); other reader types use the generic loop.
+template <typename T, typename = void>
+struct has_read_var_uint : std::false_type {};
+
+template <typename T>
+struct has_read_var_uint<T, std::void_t<decltype(std::declval<T&>().readVarUint(std::declval<uint64_t&>(), uint32_t{}))>> : std::true_type {};
+
+} // namespace detail
 
 // Type aliases for float types used in serialization
 using float32_t = float;
@@ -73,28 +133,33 @@ inline void var_encode_uint(WriterType& writer, uint64_t val, uint32_t num_bytes
 template <typename ReaderType>
 inline error::Error var_decode_uint(uint64_t& val, ReaderType& reader, uint32_t num_bytes)
 {
-	val = 0;
-	for (uint32_t i = 0; i < num_bytes; ++i) {
-		uint8_t flag = 0;
-		auto err = reader.readBits(flag, 1);
-		if (err) {
-			return err;
+	if constexpr (detail::has_read_var_uint<ReaderType>::value) {
+		return reader.readVarUint(val, num_bytes);
+	} else {
+		// Generic path for reader types without readVarUint.
+		val = 0;
+		for (uint32_t i = 0; i < num_bytes; ++i) {
+			uint8_t flag = 0;
+			auto err = reader.readBits(flag, 1);
+			if (err) {
+				return err;
+			}
+
+			if (!flag) {
+				break;
+			}
+
+			uint8_t byte = 0;
+
+			err = reader.readBits(byte, 8);
+			if (err) {
+				return err;
+			}
+
+			val |= static_cast<uint64_t>(byte) << (8 * i);
 		}
-
-		if (!flag) {
-			break;
-		}
-
-		uint8_t byte = 0;
-
-		err = reader.readBits(byte, 8);
-		if (err) {
-			return err;
-		}
-
-		val |= static_cast<uint64_t>(byte) << (8 * i);
+		return nullptr;
 	}
-	return nullptr;
 }
 
 
@@ -105,7 +170,8 @@ inline constexpr uint64_t zigzagEncode(int64_t val)
 
 inline constexpr int64_t zigzagDecode(uint64_t encoded )
 {
-	return static_cast<int64_t>((encoded >> 1) ^ (-(encoded & 1)));
+	// 0 - x instead of unary minus on an unsigned value (same result, no MSVC C4146).
+	return static_cast<int64_t>((encoded >> 1) ^ (uint64_t(0) - (encoded & 1)));
 }
 
 inline constexpr uint32_t var_int_bit_size(int64_t val, uint32_t num_bytes)

@@ -22,7 +22,7 @@ TransportFactory createWebSocketTLSClientTransportFactory() {
 		scg::ws::ClientTransportTLSConfig transportConfig;
 		transportConfig.host = "localhost";
 		transportConfig.port = 8001;  // Must match Go server port (pingpong_server_ws_tls)
-		// Self-signed cert, skip verification (verifyPeer defaults to false for TLS client)
+		// Self-signed cert: disable verification explicitly (verifyPeer defaults to true)
 		transportConfig.verifyPeer = false;
 		transportConfig.path = "/rpc";
 		return std::make_shared<scg::ws::ClientTransportWSTLS>(transportConfig);

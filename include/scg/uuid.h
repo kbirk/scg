@@ -2,15 +2,26 @@
 
 #include <cstring>
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <functional>
+#include <istream>
+#include <ostream>
+#include <stdexcept>
 #include <string>
-#include <sstream>
-#include <iomanip>
+#include <string_view>
 #include <random>
 
 #include "scg/serialize.h"
 
+#ifndef SCG_MINIMAL_INCLUDES
+// Kept for source compatibility with code that relies on these transitive
+// includes; define SCG_MINIMAL_INCLUDES to skip them (the JSON hooks below are
+// templates and do not need nlohmann here).
+#include <iomanip>
+#include <sstream>
 #include "nlohmann/json.hpp"
+#endif
 
 namespace scg {
 namespace type {
@@ -68,54 +79,63 @@ public:
 	}
 
 
+	// fromString parses the canonical 8-4-4-4-12 hex form. Any version and
+	// variant is accepted (matching Go's uuid.Parse); the null UUID is valid.
 	inline static std::pair<uuid, error::Error> fromString(const std::string& str)
 	{
 		if (!isValid(str)) {
 			return std::make_pair(uuid(), error::Error("Invalid UUID string"));
 		}
 
+		// isValid guarantees dashes only at 8/13/18/23, so hex pairs never
+		// straddle a dash.
 		uuid res;
-
-		std::string s = str;
-		s.erase(std::remove(s.begin(), s.end(), '-'), s.end());
-		for (int i = 0; i < 16; ++i) {
-			std::string byte = s.substr(i * 2, 2);
-			res.bytes_[i] = static_cast<uint8_t>(std::stoi(byte, nullptr, 16));
+		int byte = 0;
+		size_t i = 0;
+		while (i < str.size()) {
+			if (str[i] == '-') {
+				++i;
+				continue;
+			}
+			res.bytes_[byte++] = static_cast<uint8_t>((hexValue(str[i]) << 4) | hexValue(str[i + 1]));
+			i += 2;
 		}
 		return std::make_pair(res, nullptr);
 	}
 
-	inline static bool isValid(std::string str)
+	// isValid reports whether str is a well-formed 36-character UUID string
+	// (hex digits with dashes at positions 8, 13, 18 and 23). The version and
+	// variant nibbles are not restricted.
+	inline static bool isValid(const std::string& str)
 	{
 		if (str.length() != 36 || str[8] != '-' || str[13] != '-' || str[18] != '-' || str[23] != '-') {
 			return false;
 		}
 		for (size_t i = 0; i < str.length(); ++i) {
-			if (i != 8 && i != 13 && i != 18 && i != 23 && !std::isxdigit(str[i])) {
+			if (i == 8 || i == 13 || i == 18 || i == 23) {
+				continue;
+			}
+			// Cast to unsigned char: passing a negative char to isxdigit is UB.
+			if (!std::isxdigit(static_cast<unsigned char>(str[i]))) {
 				return false;
 			}
-		}
-		// check that the version is 4
-		if (str[14] != '4') {
-			return false;
-		}
-		// check that the variant is 1
-		if (str[19] != '8' && str[19] != '9' && str[19] != 'a' && str[19] != 'b' && str[19] != 'A' && str[19] != 'B') {
-			return false;
 		}
 		return true;
 	}
 
 	inline std::string toString() const
 	{
-		std::stringstream ss;
+		static const char* digits = "0123456789abcdef";
+		std::string out;
+		out.reserve(36);
 		for (int i = 0; i < 16; ++i) {
-			ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(bytes_[i]);
+			out.push_back(digits[bytes_[i] >> 4]);
+			out.push_back(digits[bytes_[i] & 0x0F]);
 			if (i == 3 || i == 5 || i == 7 || i == 9) {
-				ss << "-";
+				out.push_back('-');
 			}
 		}
-		return ss.str();
+		return out;
 	}
 
 	friend bool operator==(const uuid& lhs, const uuid& rhs) {
@@ -139,8 +159,15 @@ public:
 	inline friend std::istream& operator>>(std::istream& is, uuid& v)
 	{
 		std::string str;
-		is >> str;
-		v.fromString(str);
+		if (!(is >> str)) {
+			return is;
+		}
+		auto [parsed, err] = fromString(str);
+		if (err) {
+			is.setstate(std::ios::failbit);
+			return is;
+		}
+		v = parsed;
 		return is;
 	}
 
@@ -161,40 +188,37 @@ public:
 	template <typename ReaderType>
 	friend inline error::Error deserialize(uuid& value, ReaderType& reader)
 	{
-		auto err = reader.readBytes(value.bytes_, 16);
-		if (err) {
-			return err;
-		}
-
-		if (value.isNull()) {
-			return nullptr;
-		}
-		if ((value.bytes_[6] & 0xF0) != 0x40) {
-			return error::Error("Invalid UUID version: " + value.toString());
-		}
-		if ((value.bytes_[8] & 0xC0) != 0x80) {
-			return error::Error("Invalid UUID variant: " + value.toString());
-		}
-		return nullptr;
+		// Any 16 bytes are accepted (all versions/variants), matching Go.
+		return reader.readBytes(value.bytes_, 16);
 	}
 
 	friend std::hash<scg::type::uuid>;
 
 private:
 
+	static inline int hexValue(char c)
+	{
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		return c - 'A' + 10;
+	}
+
 	uint8_t bytes_[16];
 };
 
-// nlohmann json serialization
+// nlohmann json serialization. Templated on the json type so this header does
+// not need to include nlohmann/json.hpp; nlohmann finds these via ADL.
 
-inline void to_json(nlohmann::json& j, const scg::type::uuid& uuid)
+template <typename BasicJsonType>
+inline void to_json(BasicJsonType& j, const scg::type::uuid& uuid)
 {
 	j = uuid.toString();
 }
 
-inline void from_json(const nlohmann::json& j, scg::type::uuid& uuid)
+template <typename BasicJsonType>
+inline void from_json(const BasicJsonType& j, scg::type::uuid& uuid)
 {
-	auto [res, err] = scg::type::uuid::fromString(j.get<std::string>());
+	auto [res, err] = scg::type::uuid::fromString(j.template get<std::string>());
 	if (err != nullptr) {
 		throw std::runtime_error(err.message());
 	}

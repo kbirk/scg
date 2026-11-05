@@ -7,6 +7,7 @@
 #include "scg/serialize.h"
 #include "scg/error.h"
 #include "scg/writer.h"
+#include "scg/reader.h"
 
 namespace scg {
 namespace context {

@@ -11,6 +11,10 @@
 #include <string>
 #include <stdexcept>
 #include <fstream>
+#include <string_view>
+#ifdef __linux__
+#include <dirent.h>
+#endif
 
 #include <acutest.h>
 
@@ -34,6 +38,8 @@ struct TransportFactory {
 	std::function<std::shared_ptr<scg::rpc::ClientTransport>(int id)> createClientTransport;
 	// Creates a client transport with message size limits for testing MaxMessageSize
 	std::function<std::shared_ptr<scg::rpc::ClientTransport>(int id)> createLimitedClientTransport;
+	// Creates a server transport whose maxSendMessageSize is 1024 bytes (optional)
+	std::function<std::shared_ptr<scg::rpc::ServerTransport>(int id)> createLimitedServerTransport;
 	std::string name;
 };
 
@@ -2009,6 +2015,11 @@ inline void runServerKeepaliveDeadClientTest(TestContext& ctx) {
 	auto connRes = clientTransport->connect();
 	TEST_CHECK(connRes.second == nullptr);
 	auto conn = connRes.first;
+	if (!conn) {
+		// TEST_CHECK records the failure but does not abort; don't dereference.
+		server->shutdown();
+		return;
+	}
 	auto closed = std::make_shared<std::atomic<bool>>(false);
 	// setMessageHandler starts the read loop on an io thread, so the fail/close
 	// handlers it may invoke must be installed first (the same order the Client
@@ -2278,6 +2289,850 @@ inline void runStreamClientCancelTest(TestContext& ctx) {
 // Main Test Suite Runner (like Go's RunTestSuite)
 // ============================================================================
 
+
+// ============================================================================
+// Lifecycle / robustness regression tests (server shutdown, reconnect, error
+// propagation, stream lifetime, leaks). Each builds its own server so it can
+// control shutdown and destruction.
+// ============================================================================
+
+// CountingPingPong sleeps for the "sleep" metadata (ms) and counts handlers
+// that ran to completion; "throw" metadata makes it throw.
+class CountingPingPong : public pingpong::PingPongServer {
+public:
+	std::atomic<int> finished{0};
+
+	std::pair<pingpong::PongResponse, scg::error::Error> ping(
+		const scg::context::Context& ctx,
+		const pingpong::PingRequest& req
+	) override {
+		std::string value;
+		if (!ctx.get(value, "throw")) {
+			throw std::runtime_error("ping exploded");
+		}
+		if (!ctx.get(value, "sleep")) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(std::stoi(value)));
+		}
+		pingpong::PongResponse response;
+		response.pong.count = req.ping.count + 1;
+		response.pong.payload = req.ping.payload;
+		finished++;
+		return std::make_pair(response, nullptr);
+	}
+};
+
+// ThrowingChat throws from the bidi stream handler.
+class ThrowingChat : public ChatServerImpl {
+public:
+	scg::error::Error connect(std::shared_ptr<pingpong::Chat_ConnectStreamServer>) override {
+		throw std::runtime_error("chat exploded");
+	}
+};
+
+inline std::shared_ptr<scg::rpc::Server> startOwnServer(TestContext& ctx, std::function<void(scg::rpc::Server*)> setup, std::function<void(scg::rpc::ServerConfig&)> configure = nullptr) {
+	scg::rpc::ServerConfig cfg;
+	cfg.transport = ctx.factory().createServerTransport(ctx.id());
+	cfg.errorHandler = [](const scg::error::Error&) {};
+	if (configure) {
+		configure(cfg);
+	}
+	auto server = std::make_shared<scg::rpc::Server>(cfg);
+	setup(server.get());
+	auto err = server->start();
+	TEST_CHECK(!err);
+	if (err) {
+		printf("Failed to start server: %s\n", err.message().c_str());
+	}
+	return server;
+}
+
+inline std::shared_ptr<scg::rpc::Client> newClient(TestContext& ctx) {
+	scg::rpc::ClientConfig cfg;
+	cfg.transport = ctx.factory().createClientTransport(ctx.id());
+	auto client = std::make_shared<scg::rpc::Client>(cfg);
+	TEST_CHECK(connectWithRetries(client, ctx.maxRetries()));
+	return client;
+}
+
+inline double elapsedMs(std::chrono::steady_clock::time_point since) {
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - since).count();
+}
+
+// deadlineIn returns a context whose deadline is `ms` from now. Used as a
+// watchdog so a regression shows up as "Request timed out" instead of a hung
+// test run.
+inline scg::context::Context deadlineIn(int ms) {
+	scg::context::Context c;
+	c.setDeadline(std::chrono::system_clock::now() + std::chrono::milliseconds(ms));
+	return c;
+}
+
+inline int currentFdCount() {
+#ifdef __linux__
+	int n = 0;
+	DIR* d = opendir("/proc/self/fd");
+	if (!d) {
+		return -1;
+	}
+	while (readdir(d)) {
+		n++;
+	}
+	closedir(d);
+	return n - 3; // ".", ".." and the DIR's own fd
+#else
+	return -1;
+#endif
+}
+
+inline bool contains(const std::string& haystack, const std::string& needle) {
+	return haystack.find(needle) != std::string::npos;
+}
+
+// Server shutdown must close live connections (in-flight calls fail fast with
+// a connection error instead of hanging), wait for in-flight handlers, and leave
+// later calls failing fast too — before and after the Server is destroyed.
+inline void runServerShutdownInflightTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Server Shutdown In-Flight test...\n");
+
+	auto impl = std::make_shared<CountingPingPong>();
+	auto server = startOwnServer(ctx, [impl](scg::rpc::Server* s) { pingpong::registerPingPongServer(s, impl); });
+	auto client = newClient(ctx);
+	pingpong::PingPongClient pp(client);
+
+	scg::error::Error callErr;
+	double callMs = 0;
+	std::thread caller([&]() {
+		scg::context::Context c; // no deadline: a hang here would hang the test
+		c.put("sleep", "2000");
+		pingpong::PingRequest req;
+		auto start = std::chrono::steady_clock::now();
+		auto res = pp.ping(c, req);
+		callErr = res.second;
+		callMs = elapsedMs(start);
+	});
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	server->shutdown();
+	int finishedAtShutdown = impl->finished.load();
+	caller.join();
+
+	printf("in-flight call: err=\"%s\" after %.0fms; handlers finished at shutdown return=%d\n",
+		callErr.message().c_str(), callMs, finishedAtShutdown);
+	TEST_CHECK(callErr != nullptr);
+	TEST_CHECK(callMs < 1500); // failed when the connection closed, not after the handler
+	TEST_CHECK(finishedAtShutdown == 1); // shutdown waited for the in-flight handler
+
+	// A new call on the same client fails fast (watchdog deadline only).
+	{
+		auto c = deadlineIn(5000);
+		pingpong::PingRequest req;
+		auto res = pp.ping(c, req);
+		TEST_CHECK(res.second != nullptr);
+		TEST_CHECK(res.second.message() != "Request timed out");
+	}
+
+	server.reset();
+	{
+		auto c = deadlineIn(5000);
+		pingpong::PingRequest req;
+		auto res = pp.ping(c, req);
+		TEST_CHECK(res.second != nullptr);
+		TEST_CHECK(res.second.message() != "Request timed out");
+	}
+
+	printf("Server Shutdown In-Flight test passed\n");
+}
+
+// disconnect() followed by reuse of the same Client must reconnect.
+inline void runDisconnectReconnectTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Disconnect/Reconnect test...\n");
+
+	auto server = startOwnServer(ctx, [](scg::rpc::Server* s) {
+		pingpong::registerPingPongServer(s, std::make_shared<CountingPingPong>());
+	});
+	auto client = newClient(ctx);
+	pingpong::PingPongClient pp(client);
+
+	for (int i = 0; i < 3; i++) {
+		auto c = deadlineIn(5000);
+		pingpong::PingRequest req;
+		req.ping.count = i;
+		auto res = pp.ping(c, req);
+		TEST_CHECK(res.second == nullptr);
+		TEST_MSG("iteration %d (implicit reconnect): %s", i, res.second.message().c_str());
+
+		client->disconnect();
+	}
+
+	client->disconnect();
+	TEST_CHECK(client->connect() == nullptr);
+	{
+		auto c = deadlineIn(5000);
+		pingpong::PingRequest req;
+		auto res = pp.ping(c, req);
+		TEST_CHECK(res.second == nullptr);
+		TEST_MSG("after explicit connect: %s", res.second.message().c_str());
+	}
+
+	client->disconnect();
+	server->shutdown();
+	printf("Disconnect/Reconnect test passed\n");
+}
+
+// The failure reason reaches the caller (it used to be "Unknown error").
+inline void runDisconnectErrorTextTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Disconnect Error Text test...\n");
+
+	auto server = startOwnServer(ctx, [](scg::rpc::Server* s) {
+		pingpong::registerPingPongServer(s, std::make_shared<CountingPingPong>());
+	});
+	auto client = newClient(ctx);
+	pingpong::PingPongClient pp(client);
+
+	scg::error::Error callErr;
+	std::thread caller([&]() {
+		auto c = deadlineIn(10000);
+		c.put("sleep", "1000");
+		pingpong::PingRequest req;
+		callErr = pp.ping(c, req).second;
+	});
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	client->disconnect();
+	caller.join();
+
+	TEST_CHECK(callErr.message() == "Connection closed");
+	TEST_MSG("got \"%s\"", callErr.message().c_str());
+
+	server->shutdown();
+	printf("Disconnect Error Text test passed\n");
+}
+
+// A stream handle may outlive its Client (and transport): sends fail cleanly
+// and destroying it later is safe (was a use-after-free on TCP; run under
+// ASan to see it).
+inline void runStreamOutlivesClientTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Stream Outlives Client test...\n");
+
+	auto server = startOwnServer(ctx, registerStreamingServices);
+
+	std::shared_ptr<pingpong::Chat_ConnectStreamClient> stream;
+	{
+		auto client = newClient(ctx);
+		pingpong::ChatClient chat(client);
+		scg::context::Context c;
+		auto cr = chat.connect(c);
+		TEST_CHECK(cr.second == nullptr);
+		if (cr.second) {
+			server->shutdown();
+			return;
+		}
+		stream = cr.first;
+		auto welcome = stream->recv();
+		TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+	} // Client, ChatClient and the transport are destroyed here
+
+	pingpong::ChatMessage m;
+	m.text = "after";
+	TEST_CHECK(stream->send(m) != nullptr);
+	auto r = stream->recv();
+	TEST_CHECK(r.state == scg::rpc::StreamRecvState::Closed);
+	stream.reset(); // last reference to the connection
+
+	server->shutdown();
+	printf("Stream Outlives Client test passed\n");
+}
+
+// Disconnecting from a user thread while the server is pushing stream frames
+// at the client (meaningful under TSan: handlers were mutated off the I/O
+// thread). The server must stay healthy.
+inline void runDisconnectWhileStreamingTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Disconnect While Streaming test...\n");
+
+	auto server = startOwnServer(ctx, registerStreamingServices);
+
+	for (int i = 0; i < 8; i++) {
+		scg::rpc::ClientConfig cfg;
+		cfg.transport = ctx.factory().createClientTransport(ctx.id());
+		cfg.streamRecvBufferSize = 1 << 20;
+		auto client = std::make_shared<scg::rpc::Client>(cfg);
+		TEST_CHECK(connectWithRetries(client, ctx.maxRetries()));
+		pingpong::ChatClient chat(client);
+		scg::context::Context c;
+		pingpong::SubscribeRequest req;
+		req.count = 100000;
+		auto sr = chat.subscribe(c, req);
+		TEST_CHECK(sr.second == nullptr);
+		if (sr.second) {
+			continue;
+		}
+		sr.first->recv();
+		std::this_thread::sleep_for(std::chrono::milliseconds(2 + i));
+		client->disconnect();
+	}
+
+	auto client = newClient(ctx);
+	pingpong::PingPongClient pp(client);
+	auto c = deadlineIn(5000);
+	pingpong::PingRequest req;
+	TEST_CHECK(pp.ping(c, req).second == nullptr);
+
+	client->disconnect();
+	server->shutdown();
+	printf("Disconnect While Streaming test passed\n");
+}
+
+// Repeated connect/call/disconnect cycles must not leak file descriptors or
+// threads (the WS server leaked one socket per connection).
+inline void runConnectionLeakTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+#ifndef __linux__
+	printf("Skipping Connection Leak test (needs /proc)\n");
+	return;
+#endif
+	printf("Running Connection Leak test...\n");
+
+	auto server = startOwnServer(ctx, [](scg::rpc::Server* s) {
+		pingpong::registerPingPongServer(s, std::make_shared<CountingPingPong>());
+	});
+
+	auto cycle = [&]() {
+		auto client = newClient(ctx);
+		pingpong::PingPongClient pp(client);
+		auto c = deadlineIn(5000);
+		pingpong::PingRequest req;
+		TEST_CHECK(pp.ping(c, req).second == nullptr);
+		client->disconnect();
+	};
+
+	cycle();
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	int fdsBefore = currentFdCount();
+	int threadsBefore = currentThreadCount();
+
+	const int N = 30;
+	for (int i = 0; i < N; i++) {
+		cycle();
+	}
+	// Closed connections must release their sockets. websocketpp's TLS server
+	// keeps a gracefully closed socket until its TLS shutdown completes (up to
+	// its 5 s socket-shutdown timeout, because the client waits for the server
+	// to drop TCP first), so poll rather than sample once.
+	int fdsAfter = currentFdCount();
+	int threadsAfter = currentThreadCount();
+	for (int i = 0; i < 160 && (fdsAfter > fdsBefore + 3 || threadsAfter > threadsBefore + 3); i++) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		fdsAfter = currentFdCount();
+		threadsAfter = currentThreadCount();
+	}
+	printf("fds %d -> %d, threads %d -> %d after %d cycles\n", fdsBefore, fdsAfter, threadsBefore, threadsAfter, N);
+	TEST_CHECK(fdsAfter <= fdsBefore + 3);
+	TEST_CHECK(threadsAfter <= threadsBefore + 3);
+
+	server->shutdown();
+	server.reset();
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	int fdsFinal = currentFdCount();
+	printf("fds after server destroy: %d\n", fdsFinal);
+	TEST_CHECK(fdsFinal <= fdsBefore);
+	printf("Connection Leak test passed\n");
+}
+
+// A response the server cannot send (over its maxSendMessageSize) must turn
+// into an error for the caller, not silence.
+inline void runOversizedResponseTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer() || !ctx.factory().createLimitedServerTransport) {
+		printf("Skipping Oversized Response test\n");
+		return;
+	}
+	printf("Running Oversized Response test...\n");
+
+	std::vector<std::string> reported;
+	std::mutex reportedMu;
+	scg::rpc::ServerConfig cfg;
+	cfg.transport = ctx.factory().createLimitedServerTransport(ctx.id());
+	cfg.errorHandler = [&](const scg::error::Error& e) {
+		std::lock_guard<std::mutex> lock(reportedMu);
+		reported.push_back(e.message());
+	};
+	auto server = std::make_shared<scg::rpc::Server>(cfg);
+	pingpong::registerPingPongServer(server.get(), std::make_shared<CountingPingPong>());
+	TEST_CHECK(!server->start());
+
+	auto client = newClient(ctx);
+	pingpong::PingPongClient pp(client);
+
+	auto c = deadlineIn(5000);
+	pingpong::PingRequest req;
+	req.ping.payload.valString = std::string(4096, 'x'); // echoed: response > 1024
+	auto res = pp.ping(c, req);
+	printf("oversized response: err=\"%s\"\n", res.second.message().c_str());
+	TEST_CHECK(res.second != nullptr);
+	TEST_CHECK(res.second.message() != "Request timed out");
+	TEST_CHECK(contains(res.second.message(), "failed to send response"));
+
+	// Small responses still work on the same connection.
+	auto c2 = deadlineIn(5000);
+	pingpong::PingRequest small;
+	TEST_CHECK(pp.ping(c2, small).second == nullptr);
+
+	client->disconnect();
+	server->shutdown();
+	{
+		std::lock_guard<std::mutex> lock(reportedMu);
+		bool sawReport = false;
+		for (auto& r : reported) {
+			sawReport = sawReport || contains(r, "failed to send response");
+		}
+		TEST_CHECK(sawReport);
+	}
+	printf("Oversized Response test passed\n");
+}
+
+// Exceptions from handlers become errors for the caller; the process survives.
+inline void runThrowingHandlersTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Throwing Handlers test...\n");
+
+	auto server = startOwnServer(ctx, [](scg::rpc::Server* s) {
+		pingpong::registerPingPongServer(s, std::make_shared<CountingPingPong>());
+		pingpong::registerChatServer(s, std::make_shared<ThrowingChat>());
+	});
+	auto client = newClient(ctx);
+
+	// Unary: used to be caught and dropped, leaving the caller waiting forever.
+	pingpong::PingPongClient pp(client);
+	{
+		auto c = deadlineIn(5000);
+		c.put("throw", "1");
+		pingpong::PingRequest req;
+		auto res = pp.ping(c, req);
+		printf("throwing unary: err=\"%s\"\n", res.second.message().c_str());
+		TEST_CHECK(res.second != nullptr);
+		TEST_CHECK(contains(res.second.message(), "ping exploded"));
+	}
+
+	// Stream: used to std::terminate the server.
+	pingpong::ChatClient chat(client);
+	{
+		scg::context::Context c;
+		auto cr = chat.connect(c);
+		TEST_CHECK(cr.second == nullptr);
+		if (!cr.second) {
+			auto r = cr.first->recv();
+			TEST_CHECK(r.state == scg::rpc::StreamRecvState::Closed);
+			TEST_CHECK(contains(r.error.message(), "chat exploded"));
+			printf("throwing stream: err=\"%s\"\n", r.error.message().c_str());
+		}
+	}
+
+	// Still serving.
+	auto c = deadlineIn(5000);
+	pingpong::PingRequest req;
+	TEST_CHECK(pp.ping(c, req).second == nullptr);
+
+	client->disconnect();
+	server->shutdown();
+	printf("Throwing Handlers test passed\n");
+}
+
+// Dropping a stream handle without cancel() must tear down the server's
+// handler instead of leaving its thread blocked until the connection closes.
+inline void runAbandonedStreamTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Abandoned Stream test...\n");
+
+	auto server = startOwnServer(ctx, registerStreamingServices);
+	auto client = newClient(ctx);
+	pingpong::ChatClient chat(client);
+
+	{
+		scg::context::Context c;
+		auto cr = chat.connect(c);
+		if (!cr.second) {
+			cr.first->recv();
+		}
+	}
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	int baseline = currentThreadCount();
+
+	const int N = 20;
+	for (int i = 0; i < N; i++) {
+		scg::context::Context c;
+		auto cr = chat.connect(c);
+		TEST_CHECK(cr.second == nullptr);
+		if (!cr.second) {
+			auto welcome = cr.first->recv();
+			TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+		}
+		// handle dropped here, no cancel()/closeSend()
+	}
+
+	int final = baseline;
+	for (int i = 0; i < 40; i++) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		final = currentThreadCount();
+		if (final <= baseline + 2) {
+			break;
+		}
+	}
+	printf("threads: baseline=%d final=%d after %d abandoned streams\n", baseline, final, N);
+	TEST_CHECK(final <= baseline + 2);
+
+	client->disconnect();
+	server->shutdown();
+	printf("Abandoned Stream test passed\n");
+}
+
+// A keepalive timeout not greater than the interval is raised to twice the
+// interval (as in Go) instead of failing startup or killing idle connections
+// before a ping can be answered.
+inline void runKeepaliveTimeoutRaisedTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Keepalive Timeout Raised test...\n");
+
+	auto server = startOwnServer(ctx, registerStreamingServices, [](scg::rpc::ServerConfig& cfg) {
+		cfg.keepaliveInterval = std::chrono::milliseconds(100);
+		cfg.keepaliveTimeout = std::chrono::milliseconds(50); // raised to 200 ms
+	});
+
+	scg::rpc::ClientConfig ccfg;
+	ccfg.transport = ctx.factory().createClientTransport(ctx.id());
+	ccfg.keepaliveInterval = std::chrono::milliseconds(100);
+	ccfg.keepaliveTimeout = std::chrono::milliseconds(100); // raised to 200 ms
+	auto client = std::make_shared<scg::rpc::Client>(ccfg);
+	TEST_CHECK(connectWithRetries(client, ctx.maxRetries()));
+
+	pingpong::ChatClient chat(client);
+	scg::context::Context c;
+	auto cr = chat.connect(c);
+	TEST_CHECK(cr.second == nullptr);
+	if (!cr.second) {
+		auto welcome = cr.first->recv();
+		TEST_CHECK(welcome.state == scg::rpc::StreamRecvState::Message);
+
+		// Idle for several intervals; pings must keep both sides alive.
+		std::this_thread::sleep_for(std::chrono::milliseconds(700));
+
+		pingpong::ChatMessage m;
+		m.text = "still-here";
+		m.seq = 1;
+		TEST_CHECK(cr.first->send(m) == nullptr);
+		auto echo = cr.first->recv();
+		TEST_CHECK(echo.state == scg::rpc::StreamRecvState::Message);
+		TEST_CHECK(echo.message.text == "echo:still-here");
+	}
+
+	client->disconnect();
+	server->shutdown();
+	printf("Keepalive Timeout Raised test passed\n");
+}
+
+// ShutdownState lets handlers reach the server and records what they did.
+struct ShutdownState {
+	std::atomic<scg::rpc::Server*> server{nullptr};
+	std::atomic<int> arrived{0};
+	std::atomic<int> shutdownReturned{0};
+	std::atomic<int> normalHandled{0};
+
+	void rendezvous(int parties) {
+		arrived++;
+		auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+		while (arrived.load() < parties && std::chrono::steady_clock::now() < deadline) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+	}
+};
+
+// ShutdownPingPong calls server->shutdown() from inside the handler when the
+// request carries "shutdown" metadata ("parties" > 1: after a rendezvous).
+class ShutdownPingPong : public pingpong::PingPongServer {
+public:
+	explicit ShutdownPingPong(std::shared_ptr<ShutdownState> state) : state_(std::move(state)) {}
+
+	std::pair<pingpong::PongResponse, scg::error::Error> ping(const scg::context::Context& ctx, const pingpong::PingRequest&) override {
+		std::string value;
+		if (!ctx.get(value, "shutdown")) {
+			std::string parties;
+			if (!ctx.get(parties, "parties")) {
+				state_->rendezvous(std::stoi(parties));
+			} else {
+				std::this_thread::sleep_for(std::chrono::milliseconds(200)); // let another request queue up
+			}
+			state_->server.load()->shutdown();
+			state_->shutdownReturned++;
+		} else {
+			state_->normalHandled++;
+		}
+		return std::make_pair(pingpong::PongResponse{}, nullptr);
+	}
+
+private:
+	std::shared_ptr<ShutdownState> state_;
+};
+
+// ShutdownChat's bidi handler rendezvous with a unary handler, then both call
+// shutdown concurrently.
+class ShutdownChat : public ChatServerImpl {
+public:
+	explicit ShutdownChat(std::shared_ptr<ShutdownState> state) : state_(std::move(state)) {}
+
+	scg::error::Error connect(std::shared_ptr<pingpong::Chat_ConnectStreamServer>) override {
+		state_->rendezvous(2);
+		state_->server.load()->shutdown();
+		state_->shutdownReturned++;
+		return nullptr;
+	}
+
+private:
+	std::shared_ptr<ShutdownState> state_;
+};
+
+inline bool waitFor(std::function<bool()> cond, int timeoutMs) {
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+	while (!cond()) {
+		if (std::chrono::steady_clock::now() >= deadline) {
+			return false;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	return true;
+}
+
+// shutdown() from inside a unary handler, with one worker thread and another
+// request queued behind it: the queued request must not count as running (it
+// used to, so shutdown waited for a request that could never start). The
+// queued request is answered without running its handler.
+inline void runShutdownFromHandlerQueuedTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Shutdown From Handler (Queued) test...\n");
+
+	auto state = std::make_shared<ShutdownState>();
+	auto server = startOwnServer(ctx,
+		[state](scg::rpc::Server* s) {
+			state->server = s;
+			pingpong::registerPingPongServer(s, std::make_shared<ShutdownPingPong>(state));
+		},
+		[](scg::rpc::ServerConfig& cfg) { cfg.workerThreads = 1; });
+	auto client = newClient(ctx);
+	pingpong::PingPongClient pp(client);
+
+	scg::error::Error queuedErr;
+	std::thread first([&]() {
+		auto c = deadlineIn(5000);
+		c.put("shutdown", "1");
+		pingpong::PingRequest req;
+		pp.ping(c, req);
+	});
+	std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	std::thread second([&]() {
+		auto c = deadlineIn(5000);
+		pingpong::PingRequest req;
+		queuedErr = pp.ping(c, req).second;
+	});
+	first.join();
+	second.join();
+
+	bool returned = waitFor([&]() { return state->shutdownReturned.load() == 1; }, 5000);
+	TEST_CHECK(returned);
+	TEST_CHECK(queuedErr != nullptr);
+	TEST_CHECK(state->normalHandled == 0); // the queued request never reached its handler
+	printf("queued request: err=\"%s\"\n", queuedErr.message().c_str());
+
+	client->disconnect();
+	if (!returned) {
+		// Deadlocked: leak the server rather than hang in its destructor.
+		new std::shared_ptr<scg::rpc::Server>(server);
+		return;
+	}
+	server.reset();
+	printf("Shutdown From Handler (Queued) test passed\n");
+}
+
+// A unary handler and a stream handler call shutdown() at the same time (one
+// worker thread). The second caller must not block on the first while it is
+// itself counted as a running handler.
+inline void runConcurrentShutdownFromHandlersTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Concurrent Shutdown From Handlers test...\n");
+
+	auto state = std::make_shared<ShutdownState>();
+	auto server = startOwnServer(ctx,
+		[state](scg::rpc::Server* s) {
+			state->server = s;
+			pingpong::registerPingPongServer(s, std::make_shared<ShutdownPingPong>(state));
+			pingpong::registerChatServer(s, std::make_shared<ShutdownChat>(state));
+		},
+		[](scg::rpc::ServerConfig& cfg) { cfg.workerThreads = 1; });
+	auto client = newClient(ctx);
+
+	pingpong::ChatClient chat(client);
+	scg::context::Context sc;
+	auto cr = chat.connect(sc); // its handler waits for the unary handler
+	TEST_CHECK(cr.second == nullptr);
+
+	std::thread unary([&]() {
+		pingpong::PingPongClient pp(client);
+		auto c = deadlineIn(5000);
+		c.put("shutdown", "1");
+		c.put("parties", "2");
+		pingpong::PingRequest req;
+		pp.ping(c, req);
+	});
+	unary.join();
+
+	bool returned = waitFor([&]() { return state->shutdownReturned.load() == 2; }, 5000);
+	TEST_CHECK(returned);
+	TEST_MSG("shutdown calls returned: %d of 2", state->shutdownReturned.load());
+
+	client->disconnect();
+	if (!returned) {
+		new std::shared_ptr<scg::rpc::Server>(server);
+		return;
+	}
+	server.reset();
+	printf("Concurrent Shutdown From Handlers test passed\n");
+}
+
+// start() immediately followed by shutdown() must neither hang nor race the
+// transport's stop() against its event loop starting.
+inline void runStartStopStressTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Start/Stop Stress test...\n");
+	auto start = std::chrono::steady_clock::now();
+	for (int i = 0; i < 20; i++) {
+		auto server = startOwnServer(ctx, [](scg::rpc::Server* s) {
+			pingpong::registerPingPongServer(s, std::make_shared<CountingPingPong>());
+		});
+		server->shutdown();
+	}
+	TEST_CHECK(elapsedMs(start) < 20000);
+	printf("Start/Stop Stress test passed\n");
+}
+
+// The unary queue is bounded: excess requests get "server overloaded" right
+// away instead of queueing without limit; nothing hangs.
+inline void runPendingRequestLimitTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Pending Request Limit test...\n");
+
+	auto server = startOwnServer(ctx,
+		[](scg::rpc::Server* s) { pingpong::registerPingPongServer(s, std::make_shared<CountingPingPong>()); },
+		[](scg::rpc::ServerConfig& cfg) { cfg.maxPendingRequests = 2; });
+	auto client = newClient(ctx);
+	pingpong::PingPongClient pp(client);
+
+	std::atomic<int> ok{0};
+	std::atomic<int> overloaded{0};
+	std::atomic<int> other{0};
+	std::vector<std::thread> threads;
+	for (int i = 0; i < 8; i++) {
+		threads.emplace_back([&]() {
+			auto c = deadlineIn(5000);
+			c.put("sleep", "300");
+			pingpong::PingRequest req;
+			auto res = pp.ping(c, req);
+			if (!res.second) {
+				ok++;
+			} else if (contains(res.second.message(), "server overloaded")) {
+				overloaded++;
+			} else {
+				other++;
+			}
+		});
+	}
+	for (auto& t : threads) {
+		t.join();
+	}
+	printf("ok=%d overloaded=%d other=%d\n", ok.load(), overloaded.load(), other.load());
+	TEST_CHECK(ok >= 1);
+	TEST_CHECK(overloaded >= 1);
+	TEST_CHECK(other == 0);
+
+	client->disconnect();
+	server->shutdown();
+	printf("Pending Request Limit test passed\n");
+}
+
+// Disconnecting a client from another thread while a call is in flight must
+// fail the call promptly (no crash, no hang).
+inline void runClientDisconnectDuringCallTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Client Disconnect During Call test...\n");
+
+	auto server = startOwnServer(ctx, [](scg::rpc::Server* s) {
+		pingpong::registerPingPongServer(s, std::make_shared<CountingPingPong>());
+	});
+
+	for (int i = 0; i < 5; i++) {
+		auto client = newClient(ctx);
+		auto pp = std::make_shared<pingpong::PingPongClient>(client);
+		std::atomic<bool> done{false};
+		std::thread caller([pp, &done]() {
+			auto c = deadlineIn(5000);
+			c.put("sleep", "300");
+			pingpong::PingRequest req;
+			pp->ping(c, req);
+			done = true;
+		});
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		client->disconnect();
+		caller.join();
+		TEST_CHECK(done.load());
+	}
+
+	server->shutdown();
+	printf("Client Disconnect During Call test passed\n");
+}
+
+// group() restores the previous group even when its callback throws, so later
+// registrations do not silently land in the abandoned group (and the server
+// mutex is never unlocked twice).
+inline void runGroupExceptionSafetyTest(TestContext& ctx) {
+	if (ctx.isUsingExternalServer()) return;
+	printf("Running Group Exception Safety test...\n");
+
+	std::atomic<int> rootCalls{0};
+	std::atomic<int> groupCalls{0};
+	auto server = startOwnServer(ctx, [&](scg::rpc::Server* s) {
+		s->addMiddleware([&rootCalls](scg::context::Context& c, const scg::type::Message& r, scg::middleware::Handler next) {
+			rootCalls++;
+			return next(c, r);
+		});
+		bool threw = false;
+		try {
+			s->group([&groupCalls](scg::rpc::Server* g) {
+				g->addMiddleware([&groupCalls](scg::context::Context& c, const scg::type::Message& r, scg::middleware::Handler next) {
+					groupCalls++;
+					return next(c, r);
+				});
+				throw std::runtime_error("setup failed");
+			});
+		} catch (const std::runtime_error&) {
+			threw = true;
+		}
+		TEST_CHECK(threw);
+		// Must register in the root group again.
+		pingpong::registerPingPongServer(s, std::make_shared<CountingPingPong>());
+	});
+
+	auto client = newClient(ctx);
+	pingpong::PingPongClient pp(client);
+	auto c = deadlineIn(5000);
+	pingpong::PingRequest req;
+	TEST_CHECK(pp.ping(c, req).second == nullptr);
+	TEST_CHECK(rootCalls == 1);
+	TEST_CHECK(groupCalls == 0);
+
+	client->disconnect();
+	server->shutdown();
+	printf("Group Exception Safety test passed\n");
+}
+
 inline void runTestSuite(const TestSuiteConfig& config) {
 	int id = config.startingId;
 
@@ -2495,6 +3350,102 @@ inline void runTestSuite(const TestSuiteConfig& config) {
 				printf("\n=== Running Stream Client Cancel Test ===\n");
 				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
 				runStreamClientCancelTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Server Shutdown In-Flight Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runServerShutdownInflightTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Disconnect/Reconnect Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runDisconnectReconnectTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Disconnect Error Text Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runDisconnectErrorTextTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Stream Outlives Client Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStreamOutlivesClientTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Disconnect While Streaming Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runDisconnectWhileStreamingTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Connection Leak Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runConnectionLeakTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Oversized Response Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runOversizedResponseTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Throwing Handlers Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runThrowingHandlersTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Abandoned Stream Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runAbandonedStreamTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Keepalive Timeout Raised Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runKeepaliveTimeoutRaisedTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Pending Request Limit Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runPendingRequestLimitTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Client Disconnect During Call Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runClientDisconnectDuringCallTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Group Exception Safety Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runGroupExceptionSafetyTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Shutdown From Handler (Queued) Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runShutdownFromHandlerQueuedTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Concurrent Shutdown From Handlers Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runConcurrentShutdownFromHandlersTest(ctx);
+			}
+
+			{
+				printf("\n=== Running Start/Stop Stress Test ===\n");
+				TestContext ctx(config.factory, id++, config.maxRetries, config.useExternalServer);
+				runStartStopStressTest(ctx);
 			}
 		}
 	}

@@ -73,7 +73,7 @@ inline std::vector<uint8_t> serializeStreamOpen(const context::Context& ctx, uin
 	writer.write(ctx);
 	writer.write(serviceID);
 	writer.write(methodID);
-	return writer.bytes();
+	return std::move(writer).take();
 }
 
 template <typename T>
@@ -92,7 +92,7 @@ inline std::vector<uint8_t> serializeStreamMessage(uint64_t streamID, const T& m
 	writer.write(streamID);
 	writer.write(STREAM_FRAME_MESSAGE);
 	writer.write(msg);
-	return writer.bytes();
+	return std::move(writer).take();
 }
 
 // serializeStreamControl builds a connection-level keepalive frame (PING/PONG).
@@ -111,7 +111,7 @@ inline std::vector<uint8_t> serializeStreamControl(uint8_t frameKind)
 	writer.write(STREAM_PREFIX);
 	writer.write(streamID);
 	writer.write(frameKind);
-	return writer.bytes();
+	return std::move(writer).take();
 }
 
 inline std::vector<uint8_t> serializeStreamHalfClose(uint64_t streamID)
@@ -127,7 +127,7 @@ inline std::vector<uint8_t> serializeStreamHalfClose(uint64_t streamID)
 	writer.write(STREAM_PREFIX);
 	writer.write(streamID);
 	writer.write(STREAM_FRAME_HALF_CLOSE);
-	return writer.bytes();
+	return std::move(writer).take();
 }
 
 inline std::vector<uint8_t> serializeStreamClose(uint64_t streamID, uint8_t status, const std::string& message)
@@ -147,7 +147,7 @@ inline std::vector<uint8_t> serializeStreamClose(uint64_t streamID, uint8_t stat
 	writer.write(STREAM_FRAME_CLOSE);
 	writer.write(status);
 	writer.write(message);
-	return writer.bytes();
+	return std::move(writer).take();
 }
 
 // ----------------------------------------------------------------------------
@@ -261,7 +261,9 @@ private:
 
 class ClientStream {
 public:
-	using SendFn = std::function<error::Error(const std::vector<uint8_t>&)>;
+	// SendFn takes the frame by value so the stream can hand it over without a
+	// copy. Callables taking `const std::vector<uint8_t>&` still convert.
+	using SendFn = std::function<error::Error(std::vector<uint8_t>)>;
 
 	ClientStream(const context::Context& ctx, uint64_t streamID, SendFn sendFn, size_t bufferSize)
 		: ctx_(ctx)
@@ -270,6 +272,24 @@ public:
 		, queue_(streamRecvBufferSizeOrDefault(bufferSize))
 	{
 	}
+
+	// Dropping the last handle to a stream that is still live cancels it, so
+	// the server's handler is torn down instead of blocking until the
+	// connection closes.
+	~ClientStream()
+	{
+		if (cancelled_.load() || queue_.isDead() || !sendFn_) {
+			return;
+		}
+		try {
+			sendFn_(serializeStreamClose(streamID_, STREAM_STATUS_ERROR, "stream abandoned by client"));
+		} catch (...) {
+			// best effort; never throw from a destructor
+		}
+	}
+
+	ClientStream(const ClientStream&) = delete;
+	ClientStream& operator=(const ClientStream&) = delete;
 
 	const context::Context& context() const
 	{
@@ -383,7 +403,7 @@ public:
 		if (queue_.isDead()) {
 			return error::Error("stream closed");
 		}
-		return conn_->send(serializeStreamMessage(streamID_, msg));
+		return conn_->sendOwned(serializeStreamMessage(streamID_, msg));
 	}
 
 	StreamRecvState tryRecv(serialize::Reader& out, error::Error& err)

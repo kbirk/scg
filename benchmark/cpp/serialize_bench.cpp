@@ -91,6 +91,33 @@ void BenchmarkDeserializeString(Benchmark& b, const std::string& val) {
 	}
 }
 
+// Byte vectors (list<byte>): bulk-encoded, wire-identical to per-element.
+void BenchmarkSerializeBytes(Benchmark& b, size_t n) {
+	std::vector<uint8_t> val(n, 0xAB);
+	Writer writer(bits_to_bytes(bit_size(val)));
+
+	b.resetTimer();
+	for (int i = 0; i < b.N; ++i) {
+		writer.clear();
+		serialize(writer, val);
+	}
+}
+
+void BenchmarkDeserializeBytes(Benchmark& b, size_t n) {
+	std::vector<uint8_t> val(n, 0xAB);
+	Writer writer(bits_to_bytes(bit_size(val)));
+	serialize(writer, val);
+	std::vector<uint8_t> data = writer.bytes();
+
+	b.resetTimer();
+	for (int i = 0; i < b.N; ++i) {
+		ReaderView reader(data);
+		std::vector<uint8_t> out;
+		deserialize(out, reader);
+		BENCHMARK_DONT_OPTIMIZE(out);
+	}
+}
+
 void BenchmarkSerializeFloat32(Benchmark& b) {
 	float32_t val = 123.456f;
 	Writer writer(bits_to_bytes(bit_size(val)));
@@ -291,6 +318,13 @@ int main(int argc, char** argv) {
 	RunBenchmark("BenchmarkDeserializeString/Short", [](Benchmark& b){ BenchmarkDeserializeString(b, "hello"); });
 	RunBenchmark("BenchmarkDeserializeString/Medium", [](Benchmark& b){ BenchmarkDeserializeString(b, "Hello, World! This is a medium length string for benchmarking."); });
 	RunBenchmark("BenchmarkDeserializeString/Long", [](Benchmark& b){ BenchmarkDeserializeString(b, std::string(1024, '\0')); });
+
+	RunBenchmark("BenchmarkSerializeBytes/64B", [](Benchmark& b){ BenchmarkSerializeBytes(b, 64); });
+	RunBenchmark("BenchmarkSerializeBytes/1KB", [](Benchmark& b){ BenchmarkSerializeBytes(b, 1024); }, 1000000);
+	RunBenchmark("BenchmarkSerializeBytes/64KB", [](Benchmark& b){ BenchmarkSerializeBytes(b, 64 * 1024); }, 20000);
+	RunBenchmark("BenchmarkDeserializeBytes/64B", [](Benchmark& b){ BenchmarkDeserializeBytes(b, 64); });
+	RunBenchmark("BenchmarkDeserializeBytes/1KB", [](Benchmark& b){ BenchmarkDeserializeBytes(b, 1024); }, 1000000);
+	RunBenchmark("BenchmarkDeserializeBytes/64KB", [](Benchmark& b){ BenchmarkDeserializeBytes(b, 64 * 1024); }, 20000);
 
 	RunBenchmark("BenchmarkSerializeFloat32", BenchmarkSerializeFloat32);
 	RunBenchmark("BenchmarkDeserializeFloat32", BenchmarkDeserializeFloat32);

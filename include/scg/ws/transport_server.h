@@ -1,218 +1,76 @@
 #pragma once
 
+#ifndef ASIO_STANDALONE
 #define ASIO_STANDALONE
+#endif
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
 
+#include "scg/ws/detail.h"
 #include "scg/transport.h"
 #include "scg/error.h"
 #include "scg/logger.h"
 #include <memory>
 #include <string>
-#include <vector>
-#include <deque>
-#include <mutex>
-#include <atomic>
 
 namespace scg {
 namespace ws {
 
 struct ServerTransportConfig {
-	int port;
+	int port = 0;
 	uint32_t maxSendMessageSize = 0;
 	uint32_t maxRecvMessageSize = scg::rpc::DEFAULT_MAX_RECV_MESSAGE_SIZE; // 0 disables the cap
+	size_t maxWriteQueueBytes = DEFAULT_MAX_WRITE_QUEUE_BYTES; // 0 disables the cap
 };
 
 typedef websocketpp::server<websocketpp::config::asio> server;
 
-class ConnectionWSServer : public scg::rpc::Connection, public std::enable_shared_from_this<ConnectionWSServer> {
-public:
-	ConnectionWSServer(server* s, websocketpp::connection_hdl hdl, uint32_t maxSendMessageSize = 0)
-		: server_(s)
-		, hdl_(hdl)
-		, closed_(false)
-		, maxSendMessageSize_(maxSendMessageSize)
-	{
-	}
-
-	error::Error send(const std::vector<uint8_t>& data) override
-	{
-		if (closed_) {
-			return error::Error("Connection closed");
-		}
-
-		if (maxSendMessageSize_ > 0 && data.size() > maxSendMessageSize_) {
-			return error::Error("Message size exceeds send limit");
-		}
-
-		// websocketpp's endpoint::send is thread-safe (it locks and queues the
-		// frame, dispatching the write on the connection's strand), so call it
-		// directly instead of posting another task with a copy of the buffer.
-		websocketpp::lib::error_code ec;
-		server_->send(hdl_, data.data(), data.size(), websocketpp::frame::opcode::binary, ec);
-		if (ec) {
-			SCG_LOG_ERROR("WebSocket send error: " + ec.message());
-			return error::Error(ec.message());
-		}
-		return nullptr;
-	}
-
-	void setMessageHandler(std::function<void(const std::vector<uint8_t>&)> handler) override
-	{
-		messageHandler_ = handler;
-
-		websocketpp::lib::error_code ec;
-		server::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
-		if (ec) {
-			return;
-		}
-
-		auto self = shared_from_this();
-		con->set_message_handler([self](websocketpp::connection_hdl, server::message_ptr msg) {
-			if (self->messageHandler_) {
-				auto& payload = msg->get_payload();
-				std::vector<uint8_t> data(payload.begin(), payload.end());
-				self->messageHandler_(data);
-			}
-		});
-	}
-
-	void setFailHandler(std::function<void(const error::Error&)> handler) override
-	{
-		failHandler_ = handler;
-		websocketpp::lib::error_code ec;
-		server::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
-		if (ec) {
-			return;
-		}
-
-		auto self = shared_from_this();
-		con->set_fail_handler([self, con](websocketpp::connection_hdl) {
-			if (self->failHandler_) {
-				self->failHandler_(error::Error(con->get_ec().message()));
-			}
-		});
-	}
-
-	void setCloseHandler(std::function<void()> handler) override
-	{
-		closeHandler_ = handler;
-		websocketpp::lib::error_code ec;
-		server::connection_ptr con = server_->get_con_from_hdl(hdl_, ec);
-		if (ec) {
-			return;
-		}
-
-		auto self = shared_from_this();
-		con->set_close_handler([self](websocketpp::connection_hdl) {
-			self->closed_ = true;
-			if (self->closeHandler_) {
-				self->closeHandler_();
-			}
-		});
-	}
-
-	error::Error close() override
-	{
-		// Atomically set closed_ to true if it was false
-		bool expected = false;
-		if (closed_.compare_exchange_strong(expected, true)) {
-			SCG_LOG_INFO("WebSocket connection closing");
-			websocketpp::lib::error_code ec;
-			server_->close(hdl_, websocketpp::close::status::normal, "", ec);
-			if (ec) {
-				return error::Error(ec.message());
-			}
-		}
-		return nullptr;
-	}
-
-private:
-	server* server_;
-	websocketpp::connection_hdl hdl_;
-	std::function<void(const std::vector<uint8_t>&)> messageHandler_;
-	std::function<void(const error::Error&)> failHandler_;
-	std::function<void()> closeHandler_;
-	std::atomic<bool> closed_;
-	uint32_t maxSendMessageSize_;
-};
-
+// ConnectionWSServer is the server-side WebSocket connection.
+using ConnectionWSServer = detail::WSConnection<server>;
 
 class ServerTransportWS : public scg::rpc::ServerTransport
 {
 public:
 	ServerTransportWS(const ServerTransportConfig& config)
 		: config_(config)
-
+		, endpoint_(config.maxRecvMessageSize, config.maxSendMessageSize, config.maxWriteQueueBytes)
 	{
-		server_.clear_access_channels(websocketpp::log::alevel::all);
-		server_.clear_error_channels(websocketpp::log::elevel::all);
-		server_.init_asio();
-
-		if (config_.maxRecvMessageSize > 0) {
-			server_.set_max_message_size(config_.maxRecvMessageSize);
-		}
-
-		server_.set_open_handler([this](websocketpp::connection_hdl hdl) {
-			SCG_LOG_INFO("WebSocket server accepted new connection");
-			auto conn = std::make_shared<ConnectionWSServer>(&server_, hdl, config_.maxSendMessageSize);
-			if (onConnectionHandler_) {
-				onConnectionHandler_(conn);
-			}
-		});
-	}
-
-	~ServerTransportWS()
-	{
-		stop();
 	}
 
 	void setOnConnection(std::function<void(std::shared_ptr<scg::rpc::Connection>)> handler) override
 	{
-		onConnectionHandler_ = handler;
+		endpoint_.setOnConnection(handler);
 	}
 
 	error::Error startListening() override
 	{
-		try {
-			SCG_LOG_INFO("WebSocket server listening on port " + std::to_string(config_.port));
-			server_.set_reuse_addr(true);
-			server_.listen(config_.port);
-			server_.start_accept();
-			return nullptr;
-		} catch (const std::exception& e) {
-			SCG_LOG_ERROR("WebSocket server failed to start: " + std::string(e.what()));
-			return error::Error(e.what());
+		SCG_LOG_INFO("WebSocket server listening on port " + std::to_string(config_.port));
+		auto err = endpoint_.listen(config_.port);
+		if (err) {
+			SCG_LOG_ERROR("WebSocket server failed to start: " + err.message());
 		}
+		return err;
 	}
 
 	void runEventLoop() override
 	{
-		// websocketpp is run on a single io thread. Unlike raw asio (where a
-		// per-connection strand makes multi-threaded io safe), running
-		// websocketpp's endpoint on multiple threads surfaced real faults (lost
-		// responses and crashes) under load, so the WS server stays single-io-
-		// threaded. Unary handlers still run inline (no thread-pool hop); stream
-		// handlers run on their own threads.
-		server_.run();
+		// websocketpp runs on a single io thread; every websocketpp call is made
+		// on it (other threads post). Unary handlers run on the server's worker
+		// pool and stream handlers on their own threads.
+		endpoint_.run();
 	}
 
+	// stop stops accepting, closes every connection (close frame, then the
+	// socket after a short grace period) and stops the loop.
 	void stop() override
 	{
-		// server_.stop() is io_service::stop() (thread-safe); it halts the io loop
-		// and the accept. We deliberately do not call is_listening()/stop_listening()
-		// here: those touch websocketpp's unsynchronized internal state and would
-		// race the running accept loop on the other io threads. The listener is
-		// released when the io loop stops and the endpoint is destroyed; the accept
-		// socket uses SO_REUSEADDR.
 		SCG_LOG_INFO("Stopping WebSocket server");
-		server_.stop();
+		endpoint_.stop();
 	}
 
 private:
 	ServerTransportConfig config_;
-	server server_;
-	std::function<void(std::shared_ptr<scg::rpc::Connection>)> onConnectionHandler_;
+	detail::ServerEndpoint<server> endpoint_;
 };
 
 } // namespace ws

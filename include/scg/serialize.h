@@ -9,12 +9,76 @@
 #include <vector>
 #include <cassert>
 #include <type_traits>
+#include <utility>
+#include <cstdint>
 
 #include "scg/pack.h"
 #include "scg/error.h"
 
 namespace scg {
 namespace serialize {
+
+// ----------------------------------------------------------------------------
+// Container forward declarations. Unqualified calls inside a container template
+// resolve against the declarations visible where the template is defined (plus
+// ADL, which only searches namespace std for std containers). Declaring every
+// container overload up front lets any nesting resolve, e.g.
+// std::vector<std::map<std::string, int32_t>>.
+// ----------------------------------------------------------------------------
+
+inline uint32_t bit_size(const std::vector<uint8_t>& value);
+template <typename WriterType>
+inline void serialize(WriterType& writer, const std::vector<uint8_t>& value);
+template <typename ReaderType>
+inline error::Error deserialize(std::vector<uint8_t>& value, ReaderType& reader);
+
+inline uint32_t bit_size(const std::vector<int8_t>& value);
+template <typename WriterType>
+inline void serialize(WriterType& writer, const std::vector<int8_t>& value);
+template <typename ReaderType>
+inline error::Error deserialize(std::vector<int8_t>& value, ReaderType& reader);
+
+template <typename T>
+inline uint32_t bit_size(const std::vector<T>& value);
+template <typename WriterType, typename T>
+inline void serialize(WriterType& writer, const std::vector<T>& value);
+template <typename ReaderType, typename T>
+inline error::Error deserialize(std::vector<T>& value, ReaderType& reader);
+
+template <typename K, typename V>
+inline uint32_t bit_size(const std::map<K,V>& value);
+template <typename K, typename V, typename WriterType>
+inline void serialize(WriterType& writer, const std::map<K,V>& value);
+template <typename K, typename V, typename ReaderType>
+inline error::Error deserialize(std::map<K,V>& value, ReaderType& reader);
+
+template <typename K, typename V>
+inline uint32_t bit_size(const std::unordered_map<K,V>& value);
+template <typename K, typename V, typename WriterType>
+inline void serialize(WriterType& writer, const std::unordered_map<K,V>& value);
+template <typename K, typename V, typename ReaderType>
+inline error::Error deserialize(std::unordered_map<K,V>& value, ReaderType& reader);
+
+template <typename T>
+inline uint32_t bit_size(const std::set<T>& value);
+template <typename WriterType, typename T>
+inline void serialize(WriterType& writer, const std::set<T>& value);
+template <typename ReaderType, typename T>
+inline error::Error deserialize(std::set<T>& value, ReaderType& reader);
+
+template <typename T>
+inline uint32_t bit_size(const std::unordered_set<T>& value);
+template <typename WriterType, typename T>
+inline void serialize(WriterType& writer, const std::unordered_set<T>& value);
+template <typename ReaderType, typename T>
+inline error::Error deserialize(std::unordered_set<T>& value, ReaderType& reader);
+
+template <typename T, size_t N>
+inline uint32_t bit_size(const std::array<T, N>& value);
+template <typename WriterType, typename T, size_t N>
+inline void serialize(WriterType& writer, const std::array<T, N>& value);
+template <typename ReaderType, typename T, size_t N>
+inline error::Error deserialize(std::array<T, N>& value, ReaderType& reader);
 
 inline constexpr uint32_t bit_size(bool)
 {
@@ -75,7 +139,7 @@ inline error::Error deserialize(uint16_t& value, ReaderType& reader)
 	if (err) {
 		return err;
 	}
-	value = val;
+	value = static_cast<uint16_t>(val);
 	return nullptr;
 }
 
@@ -98,7 +162,7 @@ inline error::Error deserialize(uint32_t& value, ReaderType& reader)
 	if (err) {
 		return err;
 	}
-	value = val;
+	value = static_cast<uint32_t>(val);
 	return nullptr;
 }
 
@@ -166,7 +230,7 @@ inline error::Error deserialize(int16_t& value, ReaderType& reader)
 	if (err) {
 		return err;
 	}
-	value = val;
+	value = static_cast<int16_t>(val);
 	return nullptr;
 }
 
@@ -189,7 +253,7 @@ inline error::Error deserialize(int32_t& value, ReaderType& reader)
 	if (err) {
 		return err;
 	}
-	value = val;
+	value = static_cast<int32_t>(val);
 	return nullptr;
 }
 
@@ -260,10 +324,20 @@ inline error::Error deserialize(float64_t& value, ReaderType& reader)
 	return nullptr;
 }
 
+// ----------------------------------------------------------------------------
+// Decode hardening for length-prefixed containers.
+// ----------------------------------------------------------------------------
+
+// MAX_RESERVE_BYTES caps the memory a single container decode will reserve up
+// front from a wire-declared count. reserve() is only an optimization: a
+// container whose elements really are present still grows to its true size.
+constexpr size_t MAX_RESERVE_BYTES = 4u << 20; // 4 MiB
+
 // bounded_reserve_count caps a wire-declared element count to the bytes actually
 // remaining in the reader, so a hostile count cannot drive a huge
 // reserve()/resize() before the elements are read. The container still grows to
-// its true size as elements are appended.
+// its true size as elements are appended. Prefer bounded_reserve_count_for<T>,
+// which also bounds the reservation in bytes.
 template <typename ReaderType>
 inline uint32_t bounded_reserve_count(uint32_t count, const ReaderType& reader)
 {
@@ -271,9 +345,21 @@ inline uint32_t bounded_reserve_count(uint32_t count, const ReaderType& reader)
 	return count < rem ? count : rem;
 }
 
+// bounded_reserve_count_for caps the reservation at
+// min(count, remainingBytes, MAX_RESERVE_BYTES / sizeof(T)) elements, so large
+// element types cannot amplify a small frame into a huge allocation.
+template <typename T, typename ReaderType>
+inline uint32_t bounded_reserve_count_for(uint32_t count, const ReaderType& reader)
+{
+	uint32_t n = bounded_reserve_count(count, reader);
+	constexpr size_t elemSize = sizeof(T) > 0 ? sizeof(T) : 1;
+	constexpr size_t maxElems = MAX_RESERVE_BYTES / elemSize > 0 ? MAX_RESERVE_BYTES / elemSize : 1;
+	return n < maxElems ? n : static_cast<uint32_t>(maxElems);
+}
+
 inline uint32_t bit_size(const std::string& value)
 {
-	return bit_size(uint32_t(value.size())) + (value.size() * 8);
+	return bit_size(uint32_t(value.size())) + uint32_t(value.size()) * 8;
 }
 
 
@@ -379,6 +465,76 @@ inline error::Error deserialize(T& value, ReaderType& reader)
 	return nullptr;
 }
 
+// ----------------------------------------------------------------------------
+// Byte vectors (list<uint8> / list<int8> / list<byte>). Bulk-encoded: the wire
+// format is identical to the per-element encoding (uint32 count, then one byte
+// per element) and to the string encoding.
+// ----------------------------------------------------------------------------
+
+inline uint32_t bit_size(const std::vector<uint8_t>& value)
+{
+	return bit_size(uint32_t(value.size())) + uint32_t(value.size()) * 8;
+}
+
+template <typename WriterType>
+inline void serialize(WriterType& writer, const std::vector<uint8_t>& value)
+{
+	serialize(writer, uint32_t(value.size()));
+	writer.writeBytes(value.data(), uint32_t(value.size()));
+}
+
+template <typename ReaderType>
+inline error::Error deserialize(std::vector<uint8_t>& value, ReaderType& reader)
+{
+	uint32_t len = 0;
+	auto err = deserialize(len, reader);
+	if (err) {
+		return err;
+	}
+	if (len > reader.remainingBytes()) {
+		return error::Error("declared byte array length exceeds remaining bytes");
+	}
+	value.resize(len);
+	if (len > 0) {
+		return reader.readBytes(value.data(), len);
+	}
+	return nullptr;
+}
+
+inline uint32_t bit_size(const std::vector<int8_t>& value)
+{
+	return bit_size(uint32_t(value.size())) + uint32_t(value.size()) * 8;
+}
+
+template <typename WriterType>
+inline void serialize(WriterType& writer, const std::vector<int8_t>& value)
+{
+	serialize(writer, uint32_t(value.size()));
+	writer.writeBytes(reinterpret_cast<const uint8_t*>(value.data()), uint32_t(value.size()));
+}
+
+template <typename ReaderType>
+inline error::Error deserialize(std::vector<int8_t>& value, ReaderType& reader)
+{
+	uint32_t len = 0;
+	auto err = deserialize(len, reader);
+	if (err) {
+		return err;
+	}
+	if (len > reader.remainingBytes()) {
+		return error::Error("declared byte array length exceeds remaining bytes");
+	}
+	value.resize(len);
+	if (len > 0) {
+		return reader.readBytes(reinterpret_cast<uint8_t*>(value.data()), len);
+	}
+	return nullptr;
+}
+
+// ----------------------------------------------------------------------------
+// Generic containers.
+// ----------------------------------------------------------------------------
+
 template <typename T>
 inline uint32_t bit_size(const std::vector<T>& value)
 {
@@ -406,11 +562,11 @@ inline error::Error deserialize(std::vector<T>& value, ReaderType& reader)
 	if (err) {
 		return err;
 	}
-	// Bound the initial allocation against the bytes present so a hostile count
-	// cannot force a huge resize before the elements are read; the vector still
-	// grows to its true size as elements are appended.
+	// Bound the initial allocation against the bytes present (and a byte budget)
+	// so a hostile count cannot force a huge reserve before the elements are
+	// read; the vector still grows to its true size as elements are appended.
 	value.clear();
-	value.reserve(bounded_reserve_count(size, reader));
+	value.reserve(bounded_reserve_count_for<T>(size, reader));
 	for (auto i = uint32_t(0); i < size; i++) {
 		T item{};
 		err = deserialize(item, reader);
@@ -450,7 +606,8 @@ inline error::Error deserialize(std::map<K,V>& value, ReaderType& reader)
 	if (err) {
 		return err;
 	}
-
+	// Decoding replaces the contents (matching std::vector), it never merges.
+	value.clear();
 	for (auto i = uint32_t(0); i < size; i++) {
 		K key{};
 		V val{};
@@ -462,7 +619,7 @@ inline error::Error deserialize(std::map<K,V>& value, ReaderType& reader)
 		if (err) {
 			return err;
 		}
-		value[key] = val;
+		value[std::move(key)] = std::move(val);
 	}
 	return nullptr;
 }
@@ -495,9 +652,11 @@ inline error::Error deserialize(std::unordered_map<K,V>& value, ReaderType& read
 	if (err) {
 		return err;
 	}
-	// Bound the reserve against the bytes present so a hostile count cannot force
-	// a huge bucket allocation before the entries are read.
-	value.reserve(bounded_reserve_count(size, reader));
+	value.clear();
+	// Bound the reserve against the bytes present (and a byte budget) so a
+	// hostile count cannot force a huge bucket allocation before the entries
+	// are read.
+	value.reserve(bounded_reserve_count_for<typename std::unordered_map<K,V>::value_type>(size, reader));
 
 	for (auto i = uint32_t(0); i < size; i++) {
 		K key{};
@@ -510,7 +669,7 @@ inline error::Error deserialize(std::unordered_map<K,V>& value, ReaderType& read
 		if (err) {
 			return err;
 		}
-		value[key] = val;
+		value[std::move(key)] = std::move(val);
 	}
 	return nullptr;
 }
@@ -542,13 +701,14 @@ inline error::Error deserialize(std::set<T>& value, ReaderType& reader)
 	if (err) {
 		return err;
 	}
+	value.clear();
 	for (auto i = uint32_t(0); i < size; i++) {
 		T t{};
 		err = deserialize(t, reader);
 		if (err) {
 			return err;
 		}
-		value.insert(t);
+		value.insert(std::move(t));
 	}
 	return nullptr;
 }
@@ -580,15 +740,16 @@ inline error::Error deserialize(std::unordered_set<T>& value, ReaderType& reader
 	if (err) {
 		return err;
 	}
+	value.clear();
 	// Bound the reserve against the bytes present (see vector/unordered_map).
-	value.reserve(bounded_reserve_count(size, reader));
+	value.reserve(bounded_reserve_count_for<T>(size, reader));
 	for (auto i = uint32_t(0); i < size; i++) {
 		T t{};
 		err = deserialize(t, reader);
 		if (err) {
 			return err;
 		}
-		value.insert(t);
+		value.insert(std::move(t));
 	}
 	return nullptr;
 }
@@ -621,7 +782,7 @@ inline error::Error deserialize(std::array<T, N>& value, ReaderType& reader)
 		if (err) {
 			return err;
 		}
-		value[i] = t;
+		value[i] = std::move(t);
 	}
 	return nullptr;
 }
