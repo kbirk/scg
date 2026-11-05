@@ -105,6 +105,14 @@ public:
 		return bytes_;
 	}
 
+	// sizeBytes returns the number of bytes holding written bits: the
+	// meaningful prefix of bytes(). The buffer can be pre-sized larger than the
+	// payload, so bytes().size() may overstate it.
+	inline size_t sizeBytes() const
+	{
+		return static_cast<size_t>((numBitsWritten_ + 7) >> 3);
+	}
+
 	// take moves the serialized buffer out of the writer without copying, e.g.
 	// `return std::move(writer).take();`. The writer is left empty.
 	inline std::vector<uint8_t> take() &&
@@ -242,6 +250,14 @@ public:
 	inline const std::vector<uint8_t>& bytes() const
 	{
 		return bytes_;
+	}
+
+	// sizeBytes returns the number of bytes holding written bits: the
+	// meaningful prefix of bytes(). The buffer can be pre-sized larger than the
+	// payload, so bytes().size() may overstate it.
+	inline size_t sizeBytes() const
+	{
+		return static_cast<size_t>((numBitsWritten_ + 7) >> 3);
 	}
 
 private:

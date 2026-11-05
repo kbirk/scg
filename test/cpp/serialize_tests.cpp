@@ -945,6 +945,29 @@ void test_byte_vector_wire_identical()
 // Pre-1970 timestamps use the canonical (Go) form: floor seconds and
 // nanoseconds in [0, 1e9). The legacy truncated form still decodes, and
 // out-of-range values are rejected instead of overflowing.
+void test_writer_size_bytes()
+{
+	// sizeBytes is the written prefix of a pre-sized buffer (persisted assets
+	// store only that prefix)
+	scg::serialize::Writer writer(1024);
+	TEST_CHECK(writer.sizeBytes() == 0);
+	writer.writeBits(uint8_t(1), 1);
+	TEST_CHECK(writer.sizeBytes() == 1);
+	for (int i = 0; i < 3; ++i) {
+		writer.writeBits(uint8_t(0xAB), 8);
+	}
+	TEST_CHECK(writer.sizeBytes() == 4);
+	TEST_CHECK(writer.bytes().size() == 1024);
+
+	std::vector<uint8_t> buffer(64, 0);
+	scg::serialize::WriterView view(buffer);
+	TEST_CHECK(view.sizeBytes() == 0);
+	view.writeBits(uint8_t(0x3), 2);
+	view.writeBits(uint8_t(0xFF), 8);
+	TEST_CHECK(view.sizeBytes() == 2);
+	TEST_CHECK(view.bytes().size() == 64);
+}
+
 void test_timestamp_canonical_and_bounds()
 {
 	using scg::serialize::Writer;
@@ -1175,6 +1198,7 @@ TEST_LIST = {
 	TEST(test_deserialize_hostile_counts),
 	TEST(test_deserialize_replaces_container_contents),
 	TEST(test_byte_vector_wire_identical),
+	TEST(test_writer_size_bytes),
 	TEST(test_timestamp_canonical_and_bounds),
 	TEST(test_timestamp_decodes_legacy_bytes),
 	TEST(test_writer_growth_is_geometric),

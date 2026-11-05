@@ -731,6 +731,7 @@ Generated decoders reject a container whose declared length cannot fit in the re
 -   **Serialization:**
     -   UUIDs of any version are accepted.
     -   Deserializing into a `std::map`, `std::unordered_map`, `std::set` or `std::unordered_set` replaces its contents, as it already did for `std::vector`.
+    -   `Writer::sizeBytes()` and `WriterView::sizeBytes()` return the number of bytes written so far. `bytes()` returns the whole buffer, which can be pre-sized larger than that.
     -   Timestamps before 1970 are written in the same canonical form Go uses; the older form still decodes.
     -   Timestamps outside the representable range (roughly 1678 to 2262) decode to the nearest end instead of failing the message. Go's zero `time.Time` decodes to the earliest timestamp, which encodes back as Go's zero time, so an unset Go time survives a round trip through C++.
 -   **Generated clients:** the raw-pointer constructor `XClient(scg::rpc::Client*)`, which takes ownership, is deprecated. Construct from a `std::shared_ptr<scg::rpc::Client>`, or use `XClient(scg::rpc::Client&)` for a non-owning reference.
