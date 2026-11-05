@@ -31,6 +31,8 @@ go install github.com/kbirk/scg/cmd/scg-cpp@latest
 -   TCP: [asio](https://think-async.com/Asio/AsioStandalone)
 -   SSL: [openssl](https://github.com/openssl/openssl)
 
+The headers require C++17 and build with GCC and MSVC 2022 (C++17 or C++20, `/permissive-`), with or without `NOMINMAX` / `WIN32_LEAN_AND_MEAN`. scg's own headers and the code it generates produce no MSVC warnings at `/W4`. websocketpp still triggers a few inside the standard library when the WebSocket transport is used.
+
 ## Syntax:
 
 Familiar protobuf-inspired syntax with practical simplifications and enhancements.
@@ -83,7 +85,35 @@ scg-cpp --input="./src/dir"  --output="./output/dir"
 
 ## JSON Serialization
 
-JSON serialization for C++ uses [nlohmann/json](https://github.com/nlohmann/json).
+Go and C++ produce and accept the same JSON values, so a message serialized in one language can be parsed in the other. The format follows Go's `encoding/json` defaults:
+
+| `.scg` type                                                  | JSON                                                                                                     |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| message                                                      | object keyed by the `.scg` field names; every field is written                                           |
+| `bool`, integers (all widths), floats, enums                 | `true`/`false` and exact JSON numbers (NaN and ±Inf cannot be encoded)                                   |
+| `string`                                                     | string                                                                                                   |
+| `uuid`                                                       | lowercase canonical string, e.g. `"123e4567-e89b-12d3-a456-426614174000"`                                |
+| `timestamp`                                                  | RFC 3339 with nanoseconds, e.g. `"2024-05-01T12:30:00.5Z"`; any UTC offset is accepted when parsing      |
+| typedef                                                      | encoded as its underlying type (a numeric typedef is a number)                                           |
+| `list<byte>`, `list<uint8>` (and lists of byte/uint8 typedefs) | standard base64 string                                                                                   |
+| other `list<T>`                                              | array                                                                                                    |
+| `map<K, V>`                                                  | object; integer and enum keys are written in base 10, uuid keys as canonical strings                     |
+
+When parsing, both languages behave like Go's `encoding/json`:
+-   A missing key leaves the field unchanged, and unknown keys are ignored, so JSON from an older or newer schema still loads.
+-   A JSON `null` list or map decodes as empty (Go writes nil slices and maps as `null`), and a `null` list element decodes as that type's zero value.
+-   `-0` keeps its sign in float fields, as in Go (C++: when the text is parsed by the generated `fromJSON` or `scg::json::parse`, not by `nlohmann::json::parse`).
+-   Invalid UTF-8 is replaced with U+FFFD, byte for byte as Go does.
+
+Known differences:
+-   The two languages write equal values, not identical text. C++ spells some numbers differently (`16777216.0` and `1e+20` where Go writes `16777216` and `100000000000000000000`), sorts object keys instead of using field order, and does not escape `<`, `>` and `&`. Compare decoded messages, never JSON text.
+-   Maps with float keys can't be exchanged, because Go's `encoding/json` cannot encode them.
+-   C++ matches keys exactly; Go also falls back to case-insensitive matching.
+-   C++ timestamps cover roughly the years 1678 to 2262. Instants outside that range are clamped to the nearest end, the same as binary decoding, and Go's zero `time.Time` maps to the earliest C++ timestamp and back.
+-   A float32 value written with more precision than float32 holds (by a non-Go producer) can round differently by one unit in the last place. Values written by Go or C++ always round-trip exactly.
+-   Parsing into a message that already holds data replaces its lists and maps in C++ (as binary decoding does). Go merges into an existing map and reuses existing list elements.
+
+JSON serialization for C++ uses [nlohmann/json](https://github.com/nlohmann/json). The generated code converts fields through `scg/json.h`. The plain nlohmann conversions for `scg::type::uuid`, `scg::type::timestamp` and `SCG_TYPEDEF` types are unchanged, so your own nlohmann-based JSON that uses those types is not affected.
 
 ```cpp
 #include "pingpong.h"
@@ -91,12 +121,12 @@ JSON serialization for C++ uses [nlohmann/json](https://github.com/nlohmann/json
 pingpong::PingRequest src;
 src.ping.count = 42;
 
-auto bs = req.toJSON();
+auto bs = src.toJSON();
 
 pingpong::PingRequest dst;
 
-auto err = dst.fromJSON(bs);
-assert(!err && "deserialization failed");
+// throws nlohmann::json::exception on malformed or mistyped JSON
+dst.fromJSON(bs);
 ```
 
 JSON serialization for golang uses `encoding/json`.
@@ -164,7 +194,7 @@ The transport layer is defined by three main interfaces:
 ```go
 // Connection represents a bidirectional communication channel
 type Connection interface {
-	Send(data []byte) error
+	Send(data []byte, serviceID uint64) error
 	Receive() ([]byte, error)
 	Close() error
 }
@@ -180,7 +210,16 @@ type ServerTransport interface {
 type ClientTransport interface {
 	Connect() (Connection, error)
 }
+
+// ContextClientTransport is optional. When a transport implements it, the
+// call's context deadline also bounds the dial and any TLS/websocket handshake.
+type ContextClientTransport interface {
+	ClientTransport
+	ConnectContext(ctx context.Context) (Connection, error)
+}
 ```
+
+Transports should return (or wrap) `rpc.ErrConnectionClosed` when the peer closes cleanly, so the client and server can tell a normal close from an error.
 
 ### Go Server
 
@@ -640,6 +679,64 @@ inline scg::error::Error deserialize(glm::vec2& value, ReaderType& reader)
 }
 ```
 
+## Compatibility and Runtime Behaviour
+
+### Wire compatibility
+
+-   Service and method IDs are hashed from package-qualified names (`pkg.Service` and `pkg.Service/Method`), so services with the same name in different packages no longer collide. **Code generated by earlier versions of scg cannot call, or be called by, code generated by this version.** Regenerate every peer, Go and C++, and deploy them together.
+-   Generated C++ JSON now uses the shared Go-compatible format described in [JSON Serialization](#json-serialization). Keys are the `.scg` field names (snake_case). Timestamps are RFC 3339 strings, numeric typedefs are numbers, byte lists are base64, and non-string-keyed maps are objects. Don't parse JSON written by older C++ code with the new code: its camelCase keys are unknown keys now, so they are ignored and those fields silently keep their current values.
+-   Generated Go `uuid` typedefs now encode in JSON as canonical strings, like `uuid.UUID` itself (they were arrays of 16 numbers) and can be used as map keys. The old array form is still accepted when parsing, but Go code generated by earlier versions cannot parse the new string form.
+-   The binary encoding of messages is otherwise unchanged, including data persisted with the C++ `Writer`/`Reader`.
+
+### Schema rules
+
+The generator rejects, with an error that gives the file and line:
+
+-   `list<T>` where `T` encodes to zero bits (a message with no fields, or only zero-bit fields). A hostile length prefix on such a list would otherwise cost unbounded decode time.
+-   Identifiers that collide with a language keyword, a generated method, or another identifier after case conversion (e.g. `foo_bar` and `fooBar`).
+-   Duplicate enum string values, integer constants (and float constants written as integers) with leading zeros, `NaN`/`Inf` floats, and unquoted or non-canonical UUID constants.
+
+Generated output is deterministic. `./run-codegen-checks.sh` verifies this, compiles every generated header, and runs `go vet`.
+
+### Decoding limits
+
+Generated decoders reject a container whose declared length cannot fit in the remaining bytes, and cap preallocation, so a small frame cannot force a large allocation. The per-frame receive cap (`MaxRecvMessageSize`, default 32 MiB) still bounds total input. Messages that decode to many small elements can still expand by roughly the in-memory size of each element relative to its wire size. Lower the receive cap if that matters for your deployment.
+
+### Go runtime
+
+-   **TCP:** each frame is sent with a single write, and `TCP_NODELAY` is always left enabled (Go's default). The `NoDelay` config field is kept for compatibility; setting it to `false` no longer turns Nagle's algorithm on.
+-   **The server always replies.** A request for an unknown service, a request arriving during shutdown, or a response the server cannot send (for example, one over `MaxSendMessageSize`) produces an error response instead of leaving the caller waiting.
+-   **`Server.Shutdown(ctx)`** stops accepting connections, rejects new requests and streams with `rpc.ErrServerShuttingDown`, waits for in-flight unary calls to finish, then closes every connection (cancelling open streams) and waits for their handlers to exit. If `ctx` expires first, it force-closes the remaining connections (without waiting on stuck peers) and returns `ctx.Err()`. Transports can support this by implementing the optional `rpc.ForceCloser` interface. A server cannot be restarted after `Shutdown`.
+-   **A failed write closes the connection.** If a send fails partway (for example on a `WriteTimeout`), the connection is torn down rather than reused with a truncated frame, and in-flight calls on it fail.
+-   **Sentinel errors:** `rpc.ErrConnectionClosed`, `rpc.ErrTransportClosed`, `rpc.ErrServerShuttingDown`, `rpc.ErrServerBusy` and `rpc.ErrMessageTooLarge`, checked with `errors.Is` or `rpc.IsConnectionClosed(err)`. `Client.Close()` does not invoke `ErrHandler`.
+-   **The client never holds its lock across network I/O.** Concurrent calls share a single dial, and each caller's context deadline bounds how long it waits. A connection dropped mid-call fails that call promptly.
+-   **Unary handler contexts** are cancelled when the client's connection drops.
+-   **Optional configuration:**
+    -   `ServerConfig.MaxConcurrentRequests`: running unary requests per connection (0 = unlimited). Requests beyond the limit wait in a first-in-first-out queue of the same size. If that queue is also full, the caller immediately gets `rpc.ErrServerBusy`. The connection keeps reading throughout, so keepalives and streams are unaffected.
+    -   `WriteTimeout` on the TCP, TLS and WebSocket transports. 0 means no timeout.
+    -   `HandshakeTimeout` on the TLS transports. The default is 10 s, applied to server and client handshakes.
+-   **WebSocket:** `Listen` returns bind and certificate errors directly. The client handshake times out after `websocket.DefaultHandshakeTimeout` (45 s), and the server applies a 30 s read-header timeout.
+-   **Keepalive:** a `KeepaliveTimeout` that is not greater than `KeepaliveInterval` is raised to twice the interval.
+-   **Metadata:** `rpc.AppendMetadataToContext` merges into a copy of the existing metadata instead of replacing it, and never mutates the parent context's metadata.
+
+### C++ runtime
+
+-   **TLS:** `tcp::ClientTransportTLSConfig::verifyPeer` defaults to `true`, and the TLS clients verify the server hostname. Set `verifyPeer = false` explicitly for self-signed development certificates.
+-   **Timeouts and limits:**
+    -   `connectTimeout`: client transports bound connect (including the TLS handshake) by the call's deadline, or by this value (default 10 s).
+    -   `handshakeTimeout`: TLS servers drop connections that don't complete the handshake within this time (default 10 s).
+    -   `maxWriteQueueBytes`: each connection's outbound queue is capped (default 64 MiB; 0 disables the cap).
+-   **Server shutdown** closes accepted connections and waits for in-flight unary and stream handlers. The server always replies, as described for Go. Exceptions thrown by stream handlers or middleware close the stream with an error instead of terminating the process.
+-   **Client:** errors carry their real cause (for example "Connection closed" or "keepalive timeout") instead of "Unknown error". `disconnect()` followed by a new call reconnects. Dropping the last handle to a live `ClientStream` cancels it on the server.
+-   **Serialization:**
+    -   UUIDs of any version are accepted.
+    -   Deserializing into a `std::map`, `std::unordered_map`, `std::set` or `std::unordered_set` replaces its contents, as it already did for `std::vector`.
+    -   Timestamps before 1970 are written in the same canonical form Go uses; the older form still decodes.
+    -   Timestamps outside the representable range (roughly 1678 to 2262) decode to the nearest end instead of failing the message. Go's zero `time.Time` decodes to the earliest timestamp, which encodes back as Go's zero time, so an unset Go time survives a round trip through C++.
+-   **Generated clients:** the raw-pointer constructor `XClient(scg::rpc::Client*)`, which takes ownership, is deprecated. Construct from a `std::shared_ptr<scg::rpc::Client>`, or use `XClient(scg::rpc::Client&)` for a non-owning reference.
+-   **Generated enum string constants** are scoped per enum as `<ENUM>_<VALUE>_STRING` (e.g. `JOB_ACOLYTE_STRING`). The unscoped names remain as deprecated aliases where they are unambiguous. `<ENUM>_ENUM_TO_STRING` maps are unchanged.
+-   **Includes:** define `SCG_MINIMAL_INCLUDES` before including scg headers to skip the broad legacy includes (such as all of `<asio.hpp>`) and reduce compile time. Your code must then include what it uses itself.
+
 ## Testing:
 
 Generate test files:
@@ -654,6 +751,8 @@ Generate SSL keys for test server:
 ./gen-ssl-keys.sh
 ```
 
+The C++ TLS tests that check hostname verification generate their own throwaway `localhost` certificate when they run. No keys are committed to the repository.
+
 Download and vendor the third party header files:
 
 ```sh
@@ -663,10 +762,15 @@ cd ./third_party && ./install-deps.sh &&  cd ..
 Run the tests:
 
 ```sh
+./run-codegen-checks.sh
 ./run-serialize-tests.sh
 ./run-tcp-tests.sh
 ./run-websocket-tests.sh
 ```
+
+The `*ExternalServer` Go tests run only when their external C++ server is reachable, or when `SCG_EXTERNAL_SERVER=1` is set. The run scripts start those servers themselves.
+
+The C++ tests can be built under sanitizers with, for example, `cmake -DSCG_SANITIZE=address,undefined` or `cmake -DSCG_SANITIZE=thread`.
 
 ## TODO:
 
