@@ -112,7 +112,7 @@ fi
 echo -e "${GREEN}C++ WebSocket server started (pid: $pid)${NC}"
 
 # Run Go client tests with external server option
-if run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestWebSocketExternalServer ../../../test/go/service_websocket_test.go ../../../test/go/service_test_suite.go ../../../test/go/test_utils.go; then
+if run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestWebSocketExternalServer ../../../test/go/service_websocket_test.go ../../../test/go/service_test_suite.go ../../../test/go/regression_suite.go ../../../test/go/test_utils.go; then
 	echo -e "${GREEN}Go Client + C++ Server tests passed${NC}"
 else
 	echo -e "${RED}Go Client + C++ Server tests failed${NC}"
@@ -144,7 +144,7 @@ fi
 echo -e "${GREEN}C++ WebSocket TLS server started (pid: $pid)${NC}"
 
 # Run Go client TLS tests with external server option
-if run_with_timeout "Go Client + C++ Server TLS tests" go test -v -count=1 -run TestWebSocketTLSExternalServer ../../../test/go/service_websocket_test.go ../../../test/go/service_test_suite.go ../../../test/go/test_utils.go; then
+if run_with_timeout "Go Client + C++ Server TLS tests" go test -v -count=1 -run TestWebSocketTLSExternalServer ../../../test/go/service_websocket_test.go ../../../test/go/service_test_suite.go ../../../test/go/regression_suite.go ../../../test/go/test_utils.go; then
 	echo -e "${GREEN}Go Client + C++ Server TLS tests passed${NC}"
 else
 	echo -e "${RED}Go Client + C++ Server TLS tests failed${NC}"

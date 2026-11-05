@@ -70,6 +70,9 @@ func (f *TCPTransportFactory) Name() string {
 	return "TCP"
 }
 
+// Port implements portFactory, letting tests wait for the server to listen.
+func (f *TCPTransportFactory) Port(id int) int { return f.basePort + id }
+
 // TestTCP runs the full test suite for TCP transport
 func TestTCP(t *testing.T) {
 	RunTestSuite(t, TestSuiteConfig{
@@ -95,6 +98,7 @@ func TestTCPTLS(t *testing.T) {
 
 // TestTCPExternalServer runs client-only tests against an external TCP server (for cross-language testing)
 func TestTCPExternalServer(t *testing.T) {
+	requireExternalServer(t, 9001)
 	RunTestSuite(t, TestSuiteConfig{
 		Factory:           NewTCPTransportFactory(9001), // Must match C++ server port
 		StartingPort:      0,
@@ -104,6 +108,7 @@ func TestTCPExternalServer(t *testing.T) {
 
 // TestTCPTLSExternalServer runs client-only tests against an external TCP TLS server (for cross-language testing)
 func TestTCPTLSExternalServer(t *testing.T) {
+	requireExternalServer(t, 9002)
 	RunTestSuite(t, TestSuiteConfig{
 		Factory:           NewTCPTLSTransportFactory(9002, "../server.crt", "../server.key"), // Must match C++ server port
 		StartingPort:      0,

@@ -1,0 +1,144 @@
+package wire;
+
+# Cross-language wire compatibility schema: internal/wirecheck encodes values
+# in Go, decodes / re-encodes them in C++ (and vice versa) and compares bytes.
+
+enum Color {
+	Red = 0;
+	Green = 1;
+	Blue = 2;
+}
+
+typedef Label = string;
+typedef Count = uint32;
+typedef Ident = uuid;
+
+message Empty {}
+
+message Inner {
+	bool flag = 0;
+	list<bool> bits = 1;
+	string note = 2;
+}
+
+message Scalars {
+	bool b0 = 0;
+	byte by = 1;
+	uint8 u8 = 2;
+	uint16 u16 = 3;
+	uint32 u32 = 4;
+	uint64 u64 = 5;
+	int8 i8 = 6;
+	int16 i16 = 7;
+	int32 i32 = 8;
+	int64 i64 = 9;
+	float32 f32 = 10;
+	float64 f64 = 11;
+	string s = 12;
+	Color color = 13;
+	Label label = 14;
+	Count count = 15;
+	Ident ident = 16;
+	uuid id = 17;
+	timestamp ts = 18;
+	bool b1 = 19;
+	Empty empty = 20;
+}
+
+message Containers {
+	list<Inner> inners = 0;
+	list<list<byte>> byte_lists = 1;
+	list<uint8> bytes = 2;
+	list<string> empty_list = 3;
+	map<Color, Count> by_color = 4;
+	map<string, map<int32, list<Color>>> nested = 5;
+	list<map<string, int32>> list_of_maps = 6;
+	map<uuid, list<float64>> by_id = 7;
+	map<string, Empty> empties = 8;
+	list<timestamp> stamps = 9;
+}
+
+message Uuids {
+	list<uuid> ids = 0;
+	Ident typed = 1;
+}
+
+message Times {
+	list<timestamp> stamps = 0;
+}
+
+# JSON compatibility (internal/wirecheck json-* modes): every typedef kind,
+# every scalar, and containers / map key kinds.
+
+typedef TU8 = uint8;
+typedef TU16 = uint16;
+typedef TU64 = uint64;
+typedef TI8 = int8;
+typedef TI16 = int16;
+typedef TI32 = int32;
+typedef TI64 = int64;
+typedef TF32 = float32;
+typedef TF64 = float64;
+
+message JsonScalars {
+	bool b = 0;
+	byte by = 1;
+	uint8 u8 = 2;
+	uint16 u16 = 3;
+	uint32 u32 = 4;
+	uint64 u64 = 5;
+	int8 i8 = 6;
+	int16 i16 = 7;
+	int32 i32 = 8;
+	int64 i64 = 9;
+	float32 f32 = 10;
+	float64 f64 = 11;
+	string s = 12;
+	uuid id = 13;
+	timestamp ts = 14;
+	Color color = 15;
+}
+
+message JsonTypedefs {
+	TU8 tu8 = 0;
+	TU16 tu16 = 1;
+	Count count = 2;
+	TU64 tu64 = 3;
+	TI8 ti8 = 4;
+	TI16 ti16 = 5;
+	TI32 ti32 = 6;
+	TI64 ti64 = 7;
+	TF32 tf32 = 8;
+	TF64 tf64 = 9;
+	Label label = 10;
+	Ident ident = 11;
+}
+
+message JsonContainers {
+	list<byte> bytes = 0;
+	list<uint8> u8s = 1;
+	list<TU8> tu8s = 2;
+	list<int8> i8s = 3;
+	list<list<byte>> byte_lists = 4;
+	list<Inner> inners = 5;
+	list<timestamp> stamps = 6;
+	list<uuid> ids = 7;
+	list<Ident> idents = 8;
+	list<Color> colors = 9;
+	list<float32> f32s = 10;
+	list<string> strings = 11;
+	map<string, list<Inner>> by_string = 12;
+	map<int32, map<string, int64>> by_int = 13;
+	map<Color, Label> by_color = 14;
+	map<uuid, list<timestamp>> by_uuid = 15;
+	map<Label, Count> by_label = 16;
+	map<Count, string> by_count = 17;
+	map<Ident, Inner> by_ident = 18;
+	map<TI8, TU8> by_ti8 = 19;
+	map<uint64, bool> by_u64 = 20;
+	map<int64, JsonTypedefs> by_i64 = 21;
+	map<uint8, list<byte>> by_u8 = 22;
+	Inner inner = 23;
+	Empty empty = 24;
+	JsonScalars scalars = 25;
+}

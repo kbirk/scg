@@ -64,6 +64,9 @@ func (f *WebSocketTransportFactory) Name() string {
 	return "WebSocket"
 }
 
+// Port implements portFactory, letting tests wait for the server to listen.
+func (f *WebSocketTransportFactory) Port(id int) int { return f.basePort + id }
+
 // TestWebSocket runs the full test suite for WebSocket transport
 func TestWebSocket(t *testing.T) {
 	RunTestSuite(t, TestSuiteConfig{
@@ -90,6 +93,7 @@ func TestWebSocketTLS(t *testing.T) {
 
 // TestWebSocketExternalServer runs client-only tests against an external WebSocket server (for cross-language testing)
 func TestWebSocketExternalServer(t *testing.T) {
+	requireExternalServer(t, 8000)
 	RunTestSuite(t, TestSuiteConfig{
 		Factory:           NewWebSocketTransportFactory(8000), // Must match C++ server port
 		StartingPort:      0,
@@ -99,6 +103,7 @@ func TestWebSocketExternalServer(t *testing.T) {
 
 // TestWebSocketTLSExternalServer runs client-only tests against an external WebSocket TLS server (for cross-language testing)
 func TestWebSocketTLSExternalServer(t *testing.T) {
+	requireExternalServer(t, 8000)
 	RunTestSuite(t, TestSuiteConfig{
 		Factory:           NewWebSocketTLSTransportFactory(8000, "../server.crt", "../server.key"), // Must match C++ server port
 		StartingPort:      0,

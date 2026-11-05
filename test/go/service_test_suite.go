@@ -242,6 +242,28 @@ func RunTestSuite(t *testing.T, config TestSuiteConfig) {
 	t.Run("SequentialRequests", func(t *testing.T) {
 		runSequentialRequestsTest(t, config.Factory, port, config.UseExternalServer)
 	})
+
+	// Regression tests for server/client lifecycle fixes (need server control).
+	if !config.UseExternalServer {
+		t.Run("UnknownService", func(t *testing.T) {
+			runUnknownServiceTest(t, config.Factory, port)
+		})
+		t.Run("ClientCloseNoErrHandler", func(t *testing.T) {
+			runClientCloseNoErrHandlerTest(t, config.Factory, port)
+		})
+		t.Run("ShutdownClosesConnections", func(t *testing.T) {
+			runShutdownClosesConnectionsTest(t, config.Factory, port)
+		})
+		t.Run("ShutdownDrainsInFlight", func(t *testing.T) {
+			runShutdownDrainsInFlightTest(t, config.Factory, port)
+		})
+		t.Run("MiddlewareAddedLater", func(t *testing.T) {
+			runMiddlewareAddedLaterTest(t, config.Factory, port)
+		})
+		t.Run("UnaryContextCancelledOnDisconnect", func(t *testing.T) {
+			runUnaryContextCancelledOnDisconnectTest(t, config.Factory, port)
+		})
+	}
 }
 
 // runPingPongTest tests basic ping-pong functionality
@@ -260,7 +282,7 @@ func runPingPongTest(t *testing.T, factory TransportFactory, id int, useExternal
 			server.ListenAndServe()
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		waitForServer(t, factory, id)
 	}
 
 	client := rpc.NewClient(rpc.ClientConfig{
@@ -322,7 +344,7 @@ func runPingPongConcurrentTest(t *testing.T, factory TransportFactory, id int, u
 			server.ListenAndServe()
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		waitForServer(t, factory, id)
 	}
 
 	client := rpc.NewClient(rpc.ClientConfig{
@@ -389,7 +411,7 @@ func runPingPongAuthFailTest(t *testing.T, factory TransportFactory, id int) {
 		server.ListenAndServe()
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
@@ -432,7 +454,7 @@ func runPingPongAuthSuccessTest(t *testing.T, factory TransportFactory, id int) 
 		server.ListenAndServe()
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
@@ -490,7 +512,7 @@ func runMiddlewareTest(t *testing.T, factory TransportFactory, id int) {
 		server.ListenAndServe()
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 	defer server.Shutdown(context.Background())
 
 	client := rpc.NewClient(rpc.ClientConfig{
@@ -531,7 +553,7 @@ func runConcurrencyTest(t *testing.T, factory TransportFactory, id int, useExter
 			server.ListenAndServe()
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		waitForServer(t, factory, id)
 		defer server.Shutdown(context.Background())
 	}
 
@@ -625,7 +647,7 @@ func runPingPongFailTest(t *testing.T, factory TransportFactory, id int) {
 		server.ListenAndServe()
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
@@ -669,7 +691,7 @@ func runServerGroupsMiddlewareTest(t *testing.T, factory TransportFactory, id in
 		server.ListenAndServe()
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
@@ -720,7 +742,7 @@ func runServerNestedGroupsMiddlewareTest(t *testing.T, factory TransportFactory,
 		server.ListenAndServe()
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
@@ -910,7 +932,7 @@ func runGracefulShutdownTest(t *testing.T, factory TransportFactory, id int) {
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
 	go server.ListenAndServe()
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 
 	client := rpc.NewClient(rpc.ClientConfig{
 		Transport: factory.CreateClientTransport(id),
@@ -978,7 +1000,7 @@ func runLargePayloadTest(t *testing.T, factory TransportFactory, id int, testCas
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
 	go server.ListenAndServe()
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 	defer server.Shutdown(context.Background())
 
 	client := rpc.NewClient(rpc.ClientConfig{
@@ -1025,7 +1047,7 @@ func runMultipleClientsTest(t *testing.T, factory TransportFactory, id int) {
 	pingpong.RegisterPingPongServer(server, counterServer)
 
 	go server.ListenAndServe()
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 	defer server.Shutdown(context.Background())
 
 	const numClients = 10
@@ -1080,7 +1102,7 @@ func runRapidConnectionChurnTest(t *testing.T, factory TransportFactory, id int)
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
 	go server.ListenAndServe()
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 	defer server.Shutdown(context.Background())
 
 	const numIterations = 50
@@ -1117,7 +1139,7 @@ func runEmptyPayloadTest(t *testing.T, factory TransportFactory, id int, useExte
 		pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
 		go server.ListenAndServe()
-		time.Sleep(100 * time.Millisecond)
+		waitForServer(t, factory, id)
 		defer server.Shutdown(context.Background())
 	}
 
@@ -1163,7 +1185,7 @@ func runSequentialRequestsTest(t *testing.T, factory TransportFactory, id int, u
 		pingpong.RegisterPingPongServer(server, &pingpongServer{})
 
 		go server.ListenAndServe()
-		time.Sleep(100 * time.Millisecond)
+		waitForServer(t, factory, id)
 		defer server.Shutdown(context.Background())
 	}
 
@@ -1211,7 +1233,7 @@ func runMaxMessageSizeTest(t *testing.T, factory TransportFactory, id int) {
 		server.ListenAndServe()
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 	defer server.Shutdown(context.Background())
 
 	client := rpc.NewClient(rpc.ClientConfig{
@@ -1594,7 +1616,7 @@ func runStreamServerKeepaliveHealthyTest(t *testing.T, factory TransportFactory,
 	pingpong.RegisterChatServer(server, &chat.ChatServer{})
 	go func() { server.ListenAndServe() }()
 	defer server.Shutdown(context.Background())
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 
 	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})
 	defer client.Close()
@@ -2085,7 +2107,7 @@ func runStreamMaxConcurrentTest(t *testing.T, factory TransportFactory, id int) 
 	pingpong.RegisterPingPongServer(server, &pingpongServer{})
 	pingpong.RegisterChatServer(server, &chat.ChatServer{})
 	go func() { server.ListenAndServe() }()
-	time.Sleep(100 * time.Millisecond)
+	waitForServer(t, factory, id)
 	defer server.Shutdown(context.Background())
 
 	client := rpc.NewClient(rpc.ClientConfig{Transport: factory.CreateClientTransport(id)})

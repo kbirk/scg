@@ -117,7 +117,7 @@ if ! kill -0 $pid 2>/dev/null; then
 fi
 
 # Run Go client tests with external server option
-run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestTCPExternalServer ../../../test/go/service_tcp_test.go ../../../test/go/service_test_suite.go ../../../test/go/test_utils.go
+run_with_timeout "Go Client + C++ Server tests" go test -v -count=1 -run TestTCPExternalServer ../../../test/go/service_tcp_test.go ../../../test/go/service_test_suite.go ../../../test/go/regression_suite.go ../../../test/go/test_utils.go
 status=$?
 
 # Stop server
@@ -153,7 +153,7 @@ if ! kill -0 $pid 2>/dev/null; then
 fi
 
 # Run Go client tests with external server option
-run_with_timeout "Go Client + C++ TLS Server tests" go test -v -count=1 -run TestTCPTLSExternalServer ../../../test/go/service_tcp_test.go ../../../test/go/service_test_suite.go ../../../test/go/test_utils.go
+run_with_timeout "Go Client + C++ TLS Server tests" go test -v -count=1 -run TestTCPTLSExternalServer ../../../test/go/service_tcp_test.go ../../../test/go/service_test_suite.go ../../../test/go/regression_suite.go ../../../test/go/test_utils.go
 status=$?
 
 # Stop server
